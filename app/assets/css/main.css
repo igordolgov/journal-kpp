@@ -1,0 +1,30 @@
+/* app/assets/css/main.css */
+/* Основной файл стилей.
+ * Импорт Tailwind 4, настройка тем DaisyUI и глобальные утилиты.
+ */
+
+/* 1. Импорт Tailwind CSS v4 */
+@import "tailwindcss";
+
+/* 2. Подключение DaisyUI v5 */
+@plugin "daisyui" {
+  themes: 'light', 'dark', 'cupcake', 'business';
+}
+
+/* 3. Глобальные стили элементов */
+button, .badge, input {
+  border-radius: 6px;
+}
+
+/* 4. Утилиты плотности таблиц */
+.density-compact th, .density-compact td {
+  padding: 0.25rem 0.5rem;
+}
+
+.density-normal th, .density-normal td {
+  padding: 0.5rem 0.75rem;
+}
+
+.density-comfortable th, .density-comfortable td {
+  padding: 0.75rem 1rem;
+}

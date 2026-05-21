@@ -1,0 +1,24 @@
+
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "workspaces": {
+    ".": {
+      "entry": [
+        "app/pages/**/*.vue",
+        "app/layouts/**/*.vue",
+        "app/components/**/*.vue",
+        "server/**/*.ts"
+      ],
+      "project": [
+        "app/**/*.{js,ts,vue}"
+      ],
+      "ignore": [
+      ],
+      "ignoreDependencies": [
+        "@tailwindcss/forms",
+        "@tailwindcss/typography",
+        "h3"
+      ]
+    }
+  }
+}
