@@ -72,10 +72,29 @@ yarn preview
 bun run preview
 ```
 
-Check out the [deployment documentation](https://nuxt.com/docs/getting-started/deployment) for more information.
+---------------------------------------------------------------------------------
+
+Рабочий процесс в обеих системах:
+
+Поработали в Windows:
+
+git add .
+git commit -m "Описание изменений"
+git push
+
+Поработали в MX Linux:
+
+git add .
+git commit -m "Описание изменений"
+git push
+
+Чтобы получить изменения в другой системе:
+
+git pull
+
+---------------------------------------------------------------------------------
 
 
-```
 journal-kpp
 ├─ .eslintrc.js
 ├─ app
