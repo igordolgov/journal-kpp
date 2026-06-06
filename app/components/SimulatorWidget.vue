@@ -185,7 +185,7 @@ import {
   PERSON_HEIGHT,
   CAR_WIDTH,
   CAR_HEIGHT
-} from '~/utils/simulatorConstants'  // <-- ДОБАВЛЕН ИМПОРТ РАЗМЕРОВ
+} from '~/utils/simulatorConstants'
 
 const audio = useAudioEngine()
 
@@ -232,19 +232,14 @@ const { allPeople, usedPeopleIds } = integration
 
 const { getElementStyle, getGateStyle, ...core } = useSimulatorCore(simElements)
 
-// ===== ИСПРАВЛЕННЫЙ simOpts =====
 const simOpts = computed(() => ({
   ...props.simSettings,
   maxGroupSize: userMaxGroupSize.value ?? 4,
   maxNonFamily: userMaxNonFamily.value ?? 1,
-
-  // Вот это решает проблему размеров:
   personWidth: PERSON_WIDTH,
   personHeight: PERSON_HEIGHT,
   carWidth: CAR_WIDTH,
   carHeight: CAR_HEIGHT,
-
-  // Для спавна машин:
   carSpawnIntervalMin: userCarIntervalMin.value ?? props.simSettings?.carSpawnIntervalMin ?? 5,
   carSpawnIntervalMax: userCarIntervalMax.value ?? props.simSettings?.carSpawnIntervalMax ?? 15,
 }))
@@ -253,7 +248,7 @@ const spawn = useSimulatorSpawn(
   simElements, aiAgents, sceneSize,
   core.fixedXPerson, core.fixedYPerson, core.fixedXCar, core.fixedYCar,
   integration,
-  simOpts   // <-- теперь полный
+  simOpts
 )
 
 const audioCtrl = useSimulatorAudio(
@@ -446,20 +441,10 @@ const handleKeyDown = (e: KeyboardEvent) => {
   }
 }
 
+// ✅ Хуки на одном уровне – синхронно в setup
 let resizeObserver: ResizeObserver | null = null
 
 onMounted(async () => {
-  onUnmounted(() => {
-    window.removeEventListener('keydown', handleKeyDown)
-    if (resizeObserver) resizeObserver.disconnect()
-    if (animationFrameId) cancelAnimationFrame(animationFrameId)
-    cleanupScaling()
-    physics.clearAllTimers()
-    resetAllAudioTimers()
-    for (const agent of aiAgents.value) cleanupAgentSounds(agent.id)
-    if ((window as any).__cleanupScale) (window as any).__cleanupScale()
-  })
-
   window.addEventListener('keydown', handleKeyDown)
 
   await integration.loadAllData()
@@ -508,6 +493,18 @@ onMounted(async () => {
     lastTime = performance.now()
     animationFrameId = requestAnimationFrame(gameLoop)
   }
+})
+
+// ✅ onUnmounted на верхнем уровне setup
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeyDown)
+  if (resizeObserver) resizeObserver.disconnect()
+  if (animationFrameId) cancelAnimationFrame(animationFrameId)
+  cleanupScaling()
+  physics.clearAllTimers()
+  resetAllAudioTimers()
+  for (const agent of aiAgents.value) cleanupAgentSounds(agent.id)
+  if ((window as any).__cleanupScale) (window as any).__cleanupScale()
 })
 </script>
 
@@ -575,7 +572,6 @@ onMounted(async () => {
   filter: brightness(1.1);
 }
 
-/* АНИМАЦИЯ НАЖАТИЯ ТОЛЬКО ДЛЯ ВНУТРЕННЕЙ КНОПКИ */
 .control-content.pressed {
   transform: scale(0.92);
   filter: brightness(0.85);

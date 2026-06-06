@@ -1,3 +1,4 @@
+// composables/simulator/useSimulatorCore.ts
 import { ref, type Ref, onScopeDispose } from 'vue'
 import gsap from 'gsap'
 import { useAudioEngine } from '~/composables/useAudioEngine'
@@ -10,9 +11,10 @@ import { LAYER_CONFIG } from '~/constants/library'
 import { generateSlidingGateSVG, generateWicketSVG } from '~/constants/library'
 import type { SceneElement } from '~/types/simulator'
 
-const audio = useAudioEngine()
-
 export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
+  // ✅ audio теперь внутри setup-контекста, а не на уровне модуля
+  const audio = useAudioEngine()
+
   const fixedXPerson = ref(0)
   const fixedYPerson = ref(0)
   const fixedXCar = ref(0)
@@ -162,18 +164,15 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
 
     const isWicket = el.settings?.gateType === 'wicket' || (el.width && el.width <= 60)
 
-    // ----- ЗВУКИ ПРИ СТАРТЕ -----
     if (isWicket) {
       if (targetOpen) {
         audio.playFromPool('wicket-sound', 'wicket-lock', 0.6)
       }
     } else {
-      // Принудительно сбрасываем пул мотора, чтобы избежать конфликтов
       audio.resetPool('gate-active')
       audio.playFromPool('gate-active', 'gate-motor', 0.6)
     }
 
-    // ----- ПАРАМЕТРЫ АНИМАЦИИ -----
     let duration = (targetOpen ? (el.settings.openDuration ?? 2) : (el.settings.closeDuration ?? 2))
 
     const vars: gsap.TweenVars = {
@@ -183,7 +182,6 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
         el.settings.isAnimating = false
         gateTweens.delete(gateId)
 
-        // ----- ЗВУКИ ПО ЗАВЕРШЕНИЮ -----
         if (isWicket) {
           if (!targetOpen) {
             audio.playFromPool('wicket-sound', 'wicket-slam', 0.8)
@@ -263,7 +261,6 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
       tween.pause()
       el.settings.isAnimating = false
       el.settings.isStopped = true
-      // Если это откатные ворота, останавливаем звук мотора
       if (!isWicket) {
         audio.stopPool('gate-active')
       }
@@ -274,7 +271,6 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
   const openGateWithSound = (gate: SceneElement): boolean => {
     console.log('[openGateWithSound]', gate.id)
     if (!gate.settings) gate.settings = {}
-    // Скрип калитки при открытии (только для калитки)
     const isWicket = gate.settings.gateType === 'wicket' || (gate.width && gate.width <= 60)
     if (isWicket) {
       audio.playFromPool('wicket-sound', 'wicket-creak', 0.6)

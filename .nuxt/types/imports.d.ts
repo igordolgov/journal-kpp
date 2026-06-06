@@ -137,6 +137,8 @@ declare global {
   const updateAppConfig: typeof import('../../node_modules/nuxt/dist/app/config').updateAppConfig
   const useAnnouncer: typeof import('../../node_modules/nuxt/dist/app/composables/announcer').useAnnouncer
   const useAppConfig: typeof import('../../node_modules/nuxt/dist/app/config').useAppConfig
+  const useApplePwaIcon: typeof import('../../node_modules/@vite-pwa/nuxt/dist/runtime/composables/index').useApplePwaIcon
+  const useAppleSplashScreenPwaIcon: typeof import('../../node_modules/@vite-pwa/nuxt/dist/runtime/composables/index').useAppleSplashScreenPwaIcon
   const useAsyncData: typeof import('../../node_modules/nuxt/dist/app/composables/asyncData').useAsyncData
   const useAttrs: typeof import('vue').useAttrs
   const useAudioEngine: typeof import('../../app/composables/useAudioEngine').useAudioEngine
@@ -152,6 +154,7 @@ declare global {
   const useError: typeof import('../../node_modules/nuxt/dist/app/composables/error').useError
   const useFamily: typeof import('../../app/composables/useFamily').useFamily
   const useFamilyActions: typeof import('../../app/composables/useFamilyActions').useFamilyActions
+  const useFaviconPwaIcon: typeof import('../../node_modules/@vite-pwa/nuxt/dist/runtime/composables/index').useFaviconPwaIcon
   const useFetch: typeof import('../../node_modules/nuxt/dist/app/composables/fetch').useFetch
   const useGSAP: typeof import('../../node_modules/v-gsap-nuxt/dist/runtime/plugin').useGSAP
   const useHead: typeof import('../../node_modules/nuxt/dist/app/composables/head').useHead
@@ -165,10 +168,12 @@ declare global {
   const useLazyFetch: typeof import('../../node_modules/nuxt/dist/app/composables/fetch').useLazyFetch
   const useLink: typeof import('vue-router').useLink
   const useLoadingIndicator: typeof import('../../node_modules/nuxt/dist/app/composables/loading-indicator').useLoadingIndicator
+  const useMaskablePwaIcon: typeof import('../../node_modules/@vite-pwa/nuxt/dist/runtime/composables/index').useMaskablePwaIcon
   const useModel: typeof import('vue').useModel
   const useNuxtApp: typeof import('../../node_modules/nuxt/dist/app/nuxt').useNuxtApp
   const useNuxtData: typeof import('../../node_modules/nuxt/dist/app/composables/asyncData').useNuxtData
   const useNuxtDevTools: typeof import('../../node_modules/@nuxt/devtools/dist/runtime/use-nuxt-devtools').useNuxtDevTools
+  const usePWA: typeof import('../../node_modules/@vite-pwa/nuxt/dist/runtime/composables/index').usePWA
   const usePatronymic: typeof import('../../app/composables/usePatronymic').usePatronymic
   const usePersonGenerator: typeof import('../../app/composables/usePersonGenerator').usePersonGenerator
   const usePhysics: typeof import('../../app/composables/usePhysics').usePhysics
@@ -247,6 +252,8 @@ declare global {
   const useTextUtils: typeof import('../../app/composables/useTextUtils').useTextUtils
   const useTheme: typeof import('../../app/composables/useTheme').useTheme
   const useTransitionState: typeof import('vue').useTransitionState
+  const useTransparentPwaIcon: typeof import('../../node_modules/@vite-pwa/nuxt/dist/runtime/composables/index').useTransparentPwaIcon
+  const useVirtualList: typeof import('../../app/composables/useVirtualList').useVirtualList
   const watch: typeof import('vue').watch
   const watchEffect: typeof import('vue').watchEffect
   const watchPostEffect: typeof import('vue').watchPostEffect
@@ -419,6 +426,8 @@ declare module 'vue' {
     readonly updateAppConfig: UnwrapRef<typeof import('../../node_modules/nuxt/dist/app/config')['updateAppConfig']>
     readonly useAnnouncer: UnwrapRef<typeof import('../../node_modules/nuxt/dist/app/composables/announcer')['useAnnouncer']>
     readonly useAppConfig: UnwrapRef<typeof import('../../node_modules/nuxt/dist/app/config')['useAppConfig']>
+    readonly useApplePwaIcon: UnwrapRef<typeof import('../../node_modules/@vite-pwa/nuxt/dist/runtime/composables/index')['useApplePwaIcon']>
+    readonly useAppleSplashScreenPwaIcon: UnwrapRef<typeof import('../../node_modules/@vite-pwa/nuxt/dist/runtime/composables/index')['useAppleSplashScreenPwaIcon']>
     readonly useAsyncData: UnwrapRef<typeof import('../../node_modules/nuxt/dist/app/composables/asyncData')['useAsyncData']>
     readonly useAttrs: UnwrapRef<typeof import('vue')['useAttrs']>
     readonly useAudioEngine: UnwrapRef<typeof import('../../app/composables/useAudioEngine')['useAudioEngine']>
@@ -434,6 +443,7 @@ declare module 'vue' {
     readonly useError: UnwrapRef<typeof import('../../node_modules/nuxt/dist/app/composables/error')['useError']>
     readonly useFamily: UnwrapRef<typeof import('../../app/composables/useFamily')['useFamily']>
     readonly useFamilyActions: UnwrapRef<typeof import('../../app/composables/useFamilyActions')['useFamilyActions']>
+    readonly useFaviconPwaIcon: UnwrapRef<typeof import('../../node_modules/@vite-pwa/nuxt/dist/runtime/composables/index')['useFaviconPwaIcon']>
     readonly useFetch: UnwrapRef<typeof import('../../node_modules/nuxt/dist/app/composables/fetch')['useFetch']>
     readonly useGSAP: UnwrapRef<typeof import('../../node_modules/v-gsap-nuxt/dist/runtime/plugin')['useGSAP']>
     readonly useHead: UnwrapRef<typeof import('../../node_modules/nuxt/dist/app/composables/head')['useHead']>
@@ -447,10 +457,12 @@ declare module 'vue' {
     readonly useLazyFetch: UnwrapRef<typeof import('../../node_modules/nuxt/dist/app/composables/fetch')['useLazyFetch']>
     readonly useLink: UnwrapRef<typeof import('vue-router')['useLink']>
     readonly useLoadingIndicator: UnwrapRef<typeof import('../../node_modules/nuxt/dist/app/composables/loading-indicator')['useLoadingIndicator']>
+    readonly useMaskablePwaIcon: UnwrapRef<typeof import('../../node_modules/@vite-pwa/nuxt/dist/runtime/composables/index')['useMaskablePwaIcon']>
     readonly useModel: UnwrapRef<typeof import('vue')['useModel']>
     readonly useNuxtApp: UnwrapRef<typeof import('../../node_modules/nuxt/dist/app/nuxt')['useNuxtApp']>
     readonly useNuxtData: UnwrapRef<typeof import('../../node_modules/nuxt/dist/app/composables/asyncData')['useNuxtData']>
     readonly useNuxtDevTools: UnwrapRef<typeof import('../../node_modules/@nuxt/devtools/dist/runtime/use-nuxt-devtools')['useNuxtDevTools']>
+    readonly usePWA: UnwrapRef<typeof import('../../node_modules/@vite-pwa/nuxt/dist/runtime/composables/index')['usePWA']>
     readonly usePatronymic: UnwrapRef<typeof import('../../app/composables/usePatronymic')['usePatronymic']>
     readonly usePersonGenerator: UnwrapRef<typeof import('../../app/composables/usePersonGenerator')['usePersonGenerator']>
     readonly usePhysics: UnwrapRef<typeof import('../../app/composables/usePhysics')['usePhysics']>
@@ -529,6 +541,8 @@ declare module 'vue' {
     readonly useTextUtils: UnwrapRef<typeof import('../../app/composables/useTextUtils')['useTextUtils']>
     readonly useTheme: UnwrapRef<typeof import('../../app/composables/useTheme')['useTheme']>
     readonly useTransitionState: UnwrapRef<typeof import('vue')['useTransitionState']>
+    readonly useTransparentPwaIcon: UnwrapRef<typeof import('../../node_modules/@vite-pwa/nuxt/dist/runtime/composables/index')['useTransparentPwaIcon']>
+    readonly useVirtualList: UnwrapRef<typeof import('../../app/composables/useVirtualList')['useVirtualList']>
     readonly watch: UnwrapRef<typeof import('vue')['watch']>
     readonly watchEffect: UnwrapRef<typeof import('vue')['watchEffect']>
     readonly watchPostEffect: UnwrapRef<typeof import('vue')['watchPostEffect']>

@@ -38,6 +38,13 @@ interface _GlobalComponents {
   EditorNodeEditorPanel: typeof import("../../app/components/editor/NodeEditorPanel.vue")['default']
   EditorScenarioEditor: typeof import("../../app/components/editor/ScenarioEditor.vue")['default']
   EditorTrafficRoad: typeof import("../../app/components/editor/TrafficRoad.vue")['default']
+  SettingsButtons: typeof import("../../app/components/settings/SettingsButtons.vue")['default']
+  SettingsColumns: typeof import("../../app/components/settings/SettingsColumns.vue")['default']
+  SettingsGenerator: typeof import("../../app/components/settings/SettingsGenerator.vue")['default']
+  SettingsLabels: typeof import("../../app/components/settings/SettingsLabels.vue")['default']
+  SettingsPlaces: typeof import("../../app/components/settings/SettingsPlaces.vue")['default']
+  SettingsSimulator: typeof import("../../app/components/settings/SettingsSimulator.vue")['default']
+  SettingsUi: typeof import("../../app/components/settings/SettingsUi.vue")['default']
   SimulatorPersonAvatar: typeof import("../../app/components/simulator/PersonAvatar.vue")['default']
   SimulatorPersonDesigner: typeof import("../../app/components/simulator/PersonDesigner.vue")['default']
   SimulatorSimulationDebug: typeof import("../../app/components/simulator/SimulationDebug.vue")['default']
@@ -60,6 +67,14 @@ interface _GlobalComponents {
   NuxtAnnouncer: typeof import("../../node_modules/nuxt/dist/app/components/nuxt-announcer")['default']
   NuxtImg: typeof import("../../node_modules/nuxt/dist/app/components/nuxt-stubs")['NuxtImg']
   NuxtPicture: typeof import("../../node_modules/nuxt/dist/app/components/nuxt-stubs")['NuxtPicture']
+  VitePwaManifest: typeof import("../../node_modules/@vite-pwa/nuxt/dist/runtime/components/VitePwaManifest")['default']
+  NuxtPwaManifest: typeof import("../../node_modules/@vite-pwa/nuxt/dist/runtime/components/VitePwaManifest")['default']
+  NuxtPwaAssets: typeof import("../../node_modules/@vite-pwa/nuxt/dist/runtime/components/NuxtPwaAssets")['default']
+  PwaAppleImage: typeof import("../../node_modules/@vite-pwa/nuxt/dist/runtime/components/nuxt4/PwaAppleImage")['default']
+  PwaAppleSplashScreenImage: typeof import("../../node_modules/@vite-pwa/nuxt/dist/runtime/components/nuxt4/PwaAppleSplashScreenImage")['default']
+  PwaFaviconImage: typeof import("../../node_modules/@vite-pwa/nuxt/dist/runtime/components/nuxt4/PwaFaviconImage")['default']
+  PwaMaskableImage: typeof import("../../node_modules/@vite-pwa/nuxt/dist/runtime/components/nuxt4/PwaMaskableImage")['default']
+  PwaTransparentImage: typeof import("../../node_modules/@vite-pwa/nuxt/dist/runtime/components/nuxt4/PwaTransparentImage")['default']
   GSAPTransition: typeof import("../../node_modules/v-gsap-nuxt/dist/runtime/components/GSAPTransition.vue")['default']
   NuxtPage: typeof import("../../node_modules/nuxt/dist/pages/runtime/page")['default']
   NoScript: typeof import("../../node_modules/nuxt/dist/head/runtime/components")['NoScript']
@@ -96,6 +111,13 @@ interface _GlobalComponents {
   LazyEditorNodeEditorPanel: LazyComponent<typeof import("../../app/components/editor/NodeEditorPanel.vue")['default']>
   LazyEditorScenarioEditor: LazyComponent<typeof import("../../app/components/editor/ScenarioEditor.vue")['default']>
   LazyEditorTrafficRoad: LazyComponent<typeof import("../../app/components/editor/TrafficRoad.vue")['default']>
+  LazySettingsButtons: LazyComponent<typeof import("../../app/components/settings/SettingsButtons.vue")['default']>
+  LazySettingsColumns: LazyComponent<typeof import("../../app/components/settings/SettingsColumns.vue")['default']>
+  LazySettingsGenerator: LazyComponent<typeof import("../../app/components/settings/SettingsGenerator.vue")['default']>
+  LazySettingsLabels: LazyComponent<typeof import("../../app/components/settings/SettingsLabels.vue")['default']>
+  LazySettingsPlaces: LazyComponent<typeof import("../../app/components/settings/SettingsPlaces.vue")['default']>
+  LazySettingsSimulator: LazyComponent<typeof import("../../app/components/settings/SettingsSimulator.vue")['default']>
+  LazySettingsUi: LazyComponent<typeof import("../../app/components/settings/SettingsUi.vue")['default']>
   LazySimulatorPersonAvatar: LazyComponent<typeof import("../../app/components/simulator/PersonAvatar.vue")['default']>
   LazySimulatorPersonDesigner: LazyComponent<typeof import("../../app/components/simulator/PersonDesigner.vue")['default']>
   LazySimulatorSimulationDebug: LazyComponent<typeof import("../../app/components/simulator/SimulationDebug.vue")['default']>
@@ -118,6 +140,14 @@ interface _GlobalComponents {
   LazyNuxtAnnouncer: LazyComponent<typeof import("../../node_modules/nuxt/dist/app/components/nuxt-announcer")['default']>
   LazyNuxtImg: LazyComponent<typeof import("../../node_modules/nuxt/dist/app/components/nuxt-stubs")['NuxtImg']>
   LazyNuxtPicture: LazyComponent<typeof import("../../node_modules/nuxt/dist/app/components/nuxt-stubs")['NuxtPicture']>
+  LazyVitePwaManifest: LazyComponent<typeof import("../../node_modules/@vite-pwa/nuxt/dist/runtime/components/VitePwaManifest")['default']>
+  LazyNuxtPwaManifest: LazyComponent<typeof import("../../node_modules/@vite-pwa/nuxt/dist/runtime/components/VitePwaManifest")['default']>
+  LazyNuxtPwaAssets: LazyComponent<typeof import("../../node_modules/@vite-pwa/nuxt/dist/runtime/components/NuxtPwaAssets")['default']>
+  LazyPwaAppleImage: LazyComponent<typeof import("../../node_modules/@vite-pwa/nuxt/dist/runtime/components/nuxt4/PwaAppleImage")['default']>
+  LazyPwaAppleSplashScreenImage: LazyComponent<typeof import("../../node_modules/@vite-pwa/nuxt/dist/runtime/components/nuxt4/PwaAppleSplashScreenImage")['default']>
+  LazyPwaFaviconImage: LazyComponent<typeof import("../../node_modules/@vite-pwa/nuxt/dist/runtime/components/nuxt4/PwaFaviconImage")['default']>
+  LazyPwaMaskableImage: LazyComponent<typeof import("../../node_modules/@vite-pwa/nuxt/dist/runtime/components/nuxt4/PwaMaskableImage")['default']>
+  LazyPwaTransparentImage: LazyComponent<typeof import("../../node_modules/@vite-pwa/nuxt/dist/runtime/components/nuxt4/PwaTransparentImage")['default']>
   LazyGSAPTransition: LazyComponent<typeof import("../../node_modules/v-gsap-nuxt/dist/runtime/components/GSAPTransition.vue")['default']>
   LazyNuxtPage: LazyComponent<typeof import("../../node_modules/nuxt/dist/pages/runtime/page")['default']>
   LazyNoScript: LazyComponent<typeof import("../../node_modules/nuxt/dist/head/runtime/components")['NoScript']>

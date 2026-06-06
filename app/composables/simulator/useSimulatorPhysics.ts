@@ -1,12 +1,9 @@
 // composables/simulator/useSimulatorPhysics.ts
-import { type Ref } from 'vue'
+import { type Ref, onScopeDispose } from 'vue'
 import { useAudioEngine } from '~/composables/useAudioEngine'
 import type { SceneElement, AiAgent } from '~/types/simulator'
 import { DESPAWN_MARGIN } from '~/utils/simulatorConstants'
 import { dot, cross, normalizeAngle } from '~/utils/simulatorMath'
-
-const audio = useAudioEngine()
-const gateCloseTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 export function useSimulatorPhysics(
   simElements: Ref<SceneElement[]>,
@@ -18,6 +15,17 @@ export function useSimulatorPhysics(
   simOpts: any = {},
   onAgentDone?: (agent: AiAgent) => void
 ) {
+  // ✅ audio теперь внутри setup-контекста
+  const audio = useAudioEngine()
+  
+  // ✅ gateCloseTimers теперь внутри функции, а не на уровне модуля
+  const gateCloseTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  
+  // ✅ автоматическая очистка при размонтировании
+  onScopeDispose(() => {
+    clearAllTimers()
+  })
+
   const updateAiMovement = (dt: number, cfg: { carGateId: string; personGateId: string }) => {
     const ACCEL = simOpts.ACCEL ?? 100
     const DECEL = simOpts.DECEL ?? 100
@@ -32,7 +40,6 @@ export function useSimulatorPhysics(
     // Удаление завершённых агентов + вызов логирования
     aiAgents.value = aiAgents.value.filter(agent => {
       if (agent.state === 'done') {
-        // Логируем событие в журнал
         if (onAgentDone) {
           onAgentDone(agent)
         }
@@ -68,7 +75,6 @@ export function useSimulatorPhysics(
       const isWicket = gate?.settings?.gateType === 'wicket' || (gate?.width && gate.width <= 60)
       const closeDelay = isWicket ? wicketCloseDelay : gateCloseDelay
 
-      // Динамическая привязка точек остановки для одиночек
       if (agent.state === 'to_gate' && gate && !agent.groupId) {
         const prefix = agent.direction === 'enter' 
           ? (agent.type === 'person' ? 'stopEnterPerson' : 'stopEnterCar')
@@ -123,7 +129,6 @@ export function useSimulatorPhysics(
         continue
       }
 
-      // Движение к цели
       const cx = el.x + el.width / 2
       const cy = el.y + el.height / 2
       const tx = agent.target.x + agent.target.width / 2
@@ -154,7 +159,6 @@ export function useSimulatorPhysics(
             agent.target = { ...agent.afterTarget, width: 0, height: 0 }
             tryActivateNextInGroup(agent)
 
-            // Решение о закрытии калитки
             let shouldClose = true
             if (agent.groupId) {
               const leader = aiAgents.value.find(a => a.groupId === agent.groupId && a.isLeader)
@@ -211,7 +215,6 @@ export function useSimulatorPhysics(
         continue
       }
 
-      // Логика следования за лидером (пробки)
       let distanceToLeader = Infinity
       let leaderSpeed = Infinity
       const myLen = Math.max(el.width, el.height)

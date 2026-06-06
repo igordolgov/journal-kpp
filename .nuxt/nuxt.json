@@ -1,9 +1,9 @@
 {
-  "_hash": "Kvxo2Z4CFzJT1bwvc_Qr49drBxovHquyHo4FjdXx-Ps",
+  "_hash": "7RR9vi7pU-oKL4rImATEFpN6ixOMHhggmByBO6LsFFo",
   "project": {
-    "rootDir": "/home/Igor-TUF-16/Документы/journal-kpp"
+    "rootDir": "C:/Users/igord/Documents/Sites/journal-kpp"
   },
   "versions": {
-    "nuxt": "4.4.6"
+    "nuxt": "4.4.7"
   }
 }

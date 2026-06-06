@@ -1,122 +1,125 @@
 // app/composables/useJournal.ts
+// Исправления:
+// 1. O(n²) → O(1): peopleMap вместо find() внутри map/forEach
+// 2. Оптимистичные обновления: addEntry/deleteEntry не делают полный reload
+// 3. useJournalPage больше не нужен свой peopleList — использует этот
+
 import { useState, computed, ref } from '#imports'
 import { useDatabase } from './useDatabase'
 
 export const useJournal = () => {
   const { getAllItems, addItem, updateItem, deleteItem: dbDeleteItem } = useDatabase()
-  
+
   const peopleList = useState<any[]>('journal-people', () => [])
   const journalList = useState<any[]>('journal-raw', () => [])
 
-  /**
-   * ИСПРАВЛЕНО: Статистика считается по активным записям журнала.
-   */
+  // O(1) карта людей вместо find() в каждом computed
+  const peopleMap = computed<Map<string, any>>(() => {
+    const map = new Map<string, any>()
+    for (const p of peopleList.value) {
+      map.set(String(p.id), p)
+    }
+    return map
+  })
+
   const stats = computed(() => {
     let residentsOut = 0
     let outsidersIn = 0
 
-    // Проходим по всем записям журнала
-    journalList.value.forEach((entry: any) => {
-      // Находим человека, связанного с записью
-      const person = peopleList.value.find((p: any) => String(p.id) === String(entry.person_id))
-      if (!person) return
+    for (const entry of journalList.value) {
+      const person = peopleMap.value.get(String(entry.person_id))
+      if (!person) continue
 
-      // Определяем, является ли человек жителем или гостем по его базовому месту положению
-      // Житель: location != 'вне территории' (или по вашей логике)
-      const isResident = person.location && 
-                        person.location.trim().toLowerCase() !== 'вне территории' && 
-                        person.location !== 'outside'
+      const isResident =
+        person.location &&
+        person.location.trim().toLowerCase() !== 'вне территории' &&
+        person.location !== 'outside'
 
-      // Случай 1: Человек сейчас СНАРУЖИ (есть timestamp_out, нет timestamp_in)
       if (entry.timestamp_out && !entry.timestamp_in) {
-        if (isResident) {
-          // Житель ушел (отсутствует)
-          residentsOut++
-        }
-        // Гость, который вышел, нас не интересует для статистики "В гостях"
+        if (isResident) residentsOut++
+      } else if (entry.timestamp_in && !entry.timestamp_out) {
+        if (!isResident) outsidersIn++
       }
-      // Случай 2: Человек сейчас ВНУТРИ (есть timestamp_in, нет timestamp_out)
-      // Это типичная запись для Гостя, который вошел
-      else if (entry.timestamp_in && !entry.timestamp_out) {
-        if (!isResident) {
-          // Гость вошел (в гостях)
-          outsidersIn++
-        }
-        // Житель, который внутри (вернулся), не считается "отсутствующим"
-      }
-    })
+    }
 
     return { residentsOut, outsidersIn }
   })
 
   const processedJournal = computed(() => {
-    return journalList.value.map((entry: any) => {
-      const person = peopleList.value.find((p: any) => String(p.id) === String(entry.person_id))
-      
-      let fio = entry.person_fio || person?.fio || 'Неизвестно'
-      const isChild = person?.category === 'Ребенок'
-      if (isChild && !fio.startsWith('+')) {
-        fio = `+ ${fio}`
-      }
+    return journalList.value
+      .map((entry: any) => {
+        const person = peopleMap.value.get(String(entry.person_id))
 
-      return {
-        ...entry,
-        person_fio: fio,
-        person_category: person?.category || '-',
-        sortTime: new Date(entry.timestamp_out || entry.timestamp_in || entry.created_at || 0).getTime()
-      }
-    }).sort((a: any, b: any) => b.sortTime - a.sortTime)
+        let fio = entry.person_fio || person?.fio || 'Неизвестно'
+        const isChild = person?.category === 'Ребенок'
+        if (isChild && !fio.startsWith('+')) {
+          fio = `+ ${fio}`
+        }
+
+        return {
+          ...entry,
+          person_fio: fio,
+          person_category: person?.category || '-',
+          sortTime: new Date(
+            entry.timestamp_out || entry.timestamp_in || entry.created_at || 0
+          ).getTime(),
+        }
+      })
+      .sort((a: any, b: any) => b.sortTime - a.sortTime)
   })
 
   const loadData = async () => {
     try {
       const [people, journalRaw] = await Promise.all([
         getAllItems('people'),
-        getAllItems('journal')
+        getAllItems('journal'),
       ])
-      
+
       peopleList.value = people || []
 
       const brokenIds: number[] = []
       const cleanJournal = (journalRaw || []).filter((entry: any) => {
         const isValid = entry.person_id !== undefined && entry.person_id !== null
-        if (!isValid) {
-          brokenIds.push(entry.id)
-        }
+        if (!isValid) brokenIds.push(entry.id)
         return isValid
       })
 
       if (brokenIds.length > 0) {
         console.warn(`[useJournal] 🧹 Удаление ${brokenIds.length} битых записей.`)
-        Promise.all(brokenIds.map(id => dbDeleteItem('journal', id))).catch(e => console.error(e))
+        Promise.all(brokenIds.map(id => dbDeleteItem('journal', id))).catch(console.error)
       }
 
       journalList.value = cleanJournal
-      
-      console.log(`[useJournal] 📥 Загрузка: Люди=${people?.length || 0}, Записи=${cleanJournal.length}`)
-      
     } catch (e) {
       console.error('[useJournal] 💥 Ошибка загрузки', e)
     }
   }
 
+  // Оптимистичное добавление: вставляем в локальный массив сразу
   const addEntry = async (entry: any) => {
     if (!entry.person_id) {
       console.error('[useJournal] Попытка сохранить запись без person_id', entry)
       return
     }
-    await addItem('journal', entry)
-    await loadData()
+    const id = await addItem('journal', entry)
+    journalList.value = [...journalList.value, { ...entry, id }]
   }
 
   const updateEntryFull = async (entry: any) => {
     await updateItem('journal', entry)
-    await loadData()
+    const idx = journalList.value.findIndex((e: any) => e.id === entry.id)
+    if (idx !== -1) {
+      journalList.value = [
+        ...journalList.value.slice(0, idx),
+        { ...journalList.value[idx], ...entry },
+        ...journalList.value.slice(idx + 1),
+      ]
+    }
   }
 
   const deleteEntry = async (id: number) => {
     await dbDeleteItem('journal', id)
-    await loadData()
+    journalList.value = journalList.value.filter((e: any) => e.id !== id)
   }
 
   const formatTime = (ts: number | string | Date) => {
@@ -125,55 +128,49 @@ export const useJournal = () => {
       const date = new Date(ts)
       if (isNaN(date.getTime())) return '—'
       return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
-    } catch { return '—' }
+    } catch {
+      return '—'
+    }
   }
-  
+
   const sortField = ref('date')
   const sortOrder = ref(-1)
   const displayMode = ref('timeline')
 
-  /**
-   * Поиск попутчиков.
-   */
   const getCompanions = (personId: string | number) => {
-    const targetEntry = journalList.value.find((e: any) => 
-      String(e.person_id) === String(personId) && e.timestamp_out && !e.timestamp_in
+    const targetEntry = journalList.value.find(
+      (e: any) =>
+        String(e.person_id) === String(personId) &&
+        e.timestamp_out &&
+        !e.timestamp_in
     )
 
-    if (!targetEntry || !targetEntry.timestamp_out) {
-      return []
-    }
+    if (!targetEntry?.timestamp_out) return []
 
     const targetTime = new Date(targetEntry.timestamp_out).getTime()
     const TIME_WINDOW = 15 * 60 * 1000
 
-    const companions: any[] = []
-
-    journalList.value.forEach((entry: any) => {
-      if (!entry.timestamp_out || entry.timestamp_in) return
-      if (String(entry.person_id) === String(personId)) return
-
-      const entryTime = new Date(entry.timestamp_out).getTime()
-      const diff = Math.abs(targetTime - entryTime)
-
-      if (diff < TIME_WINDOW) {
-        const person = peopleList.value.find((p: any) => String(p.id) === String(entry.person_id))
-        
-        companions.push({
+    return journalList.value
+      .filter((entry: any) => {
+        if (!entry.timestamp_out || entry.timestamp_in) return false
+        if (String(entry.person_id) === String(personId)) return false
+        return Math.abs(new Date(entry.timestamp_out).getTime() - targetTime) < TIME_WINDOW
+      })
+      .map((entry: any) => {
+        const person = peopleMap.value.get(String(entry.person_id))
+        return {
           id: entry.id,
           person_id: entry.person_id,
           fio: person?.fio || 'Неизвестный',
-          timestamp_out: entry.timestamp_out
-        })
-      }
-    })
-
-    return companions
+          timestamp_out: entry.timestamp_out,
+        }
+      })
   }
 
   return {
     peopleList,
     journalList,
+    peopleMap,       // <-- экспортируем карту для useJournalPage
     processedJournal,
     stats,
     loadData,
@@ -184,6 +181,6 @@ export const useJournal = () => {
     sortField,
     sortOrder,
     displayMode,
-    getCompanions
+    getCompanions,
   }
 }

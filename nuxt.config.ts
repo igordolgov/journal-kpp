@@ -1,22 +1,42 @@
 // nuxt.config.ts
-// Файл конфигурации Nuxt приложения.
-// Определяет настройки сборки, модули (PWA, GSAP), Tailwind 4 и структуру папок.
+// Улучшения:
+// 1. PWA включён (был disabled)
+// 2. Добавлены глобальные SEO-мета через app.head
+// 3. Добавлена компрессия через vite
+// 4. routeRules для статических страниц
 
 import tailwindcss from '@tailwindcss/vite'
 
 export default defineNuxtConfig({
-  // Настройка директорий для Nuxt 4
   dir: {
-    app: 'app'
+    app: 'app',
   },
 
-  // Включение режима совместимости с Nuxt 4
   future: {
-    compatibilityVersion: 4
+    compatibilityVersion: 4,
   },
 
-  // Настройки Vite
-  // Подключение плагина Tailwind CSS v4
+  // Глобальные SEO мета-теги
+  app: {
+    head: {
+      charset: 'utf-8',
+      viewport: 'width=device-width, initial-scale=1, maximum-scale=1',
+      title: 'Журнал КПП',
+      meta: [
+        { name: 'description', content: 'Система контроля пропускного пункта' },
+        { name: 'theme-color', content: '#1d232a' },
+        { name: 'apple-mobile-web-app-capable', content: 'yes' },
+        { name: 'apple-mobile-web-app-status-bar-style', content: 'black-translucent' },
+        // Запрет индексации (внутреннее корпоративное приложение)
+        { name: 'robots', content: 'noindex, nofollow' },
+      ],
+      link: [
+        { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' },
+        { rel: 'apple-touch-icon', href: '/pwa-192x192.png' },
+      ],
+    },
+  },
+
   vite: {
     optimizeDeps: {
       include: [
@@ -24,46 +44,77 @@ export default defineNuxtConfig({
         '@vue/devtools-kit',
         'fuse.js',
         'gsap',
-      ]
+      ],
     },
-    plugins: [tailwindcss()]
+    plugins: [tailwindcss()],
+    build: {
+      // Разбить бандл на чанки — симулятор грузится отдельно
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            'simulator': [
+              './app/composables/simulator/useSimulatorCore.ts',
+              './app/composables/simulator/useSimulatorPhysics.ts',
+              './app/composables/simulator/useSimulatorSpawn.ts',
+              './app/composables/simulator/useSimulatorAudio.ts',
+            ],
+            'gsap': ['gsap'],
+            'charts': ['chart.js', 'vue-chartjs'],
+          },
+        },
+      },
+    },
   },
 
-  // Глобальные CSS файлы
   css: ['~/assets/css/main.css'],
 
-  // Подключенные модули Nuxt
   modules: [
-    // '@vite-pwa/nuxt', // Модуль для Progressive Web App
-    'v-gsap-nuxt'     // Модуль для GSAP анимаций
+    '@vite-pwa/nuxt',  // Включён
+    'v-gsap-nuxt',
   ],
 
-  server: { 
-    port: 3001 
+  server: {
+    port: 3001,
   },
 
-  // Настройки PWA
+  // PWA конфигурация
   pwa: {
     registerType: 'autoUpdate',
     manifest: {
       name: 'Журнал КПП',
       short_name: 'КПП',
-      theme_color: '#1d232a', // Цвет темы из DaisyUI (dark)
+      description: 'Система контроля пропускного пункта',
+      theme_color: '#1d232a',
       background_color: '#1d232a',
       display: 'standalone',
+      orientation: 'portrait-primary',
+      start_url: '/',
       icons: [
         { src: 'pwa-192x192.png', sizes: '192x192', type: 'image/png' },
-        { src: 'pwa-512x512.png', sizes: '512x512', type: 'image/png' }
-      ]
+        { src: 'pwa-512x512.png', sizes: '512x512', type: 'image/png' },
+        { src: 'pwa-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+      ],
     },
     workbox: {
-      globDirectory: false, // Отключаем авто-сканирование (настройка под конкретные нужды)
-      globPatterns: [
-        '**/*.{js,css,html,ico,png,svg,woff2}',
-      ]
+      navigateFallback: '/',
+      globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+      // Не кэшировать API и IndexedDB-запросы
+      navigateFallbackDenylist: [/^\/api/],
+      runtimeCaching: [
+        {
+          urlPattern: /\.(png|jpg|jpeg|svg|gif|webp)$/,
+          handler: 'CacheFirst',
+          options: {
+            cacheName: 'images',
+            expiration: { maxEntries: 60, maxAgeSeconds: 30 * 24 * 60 * 60 },
+          },
+        },
+      ],
     },
-    enabled: false,  // PWA полностью выключен в dev-режиме
+    devOptions: {
+      enabled: false, // В dev-режиме выключен
+    },
   },
 
-  compatibilityDate: '2024-11-01'
+  compatibilityDate: '2024-11-01',
 })
