@@ -1,4 +1,5 @@
-<!-- app\pages\scenario-editor.vue -->
+<!-- app/pages/scenario-editor.vue -->
+<!-- Назначение: отдельная страница редактора сценариев (легаси-вариант). -->
 <template lang='pug'>
 .scenario-editor.h-screen.w-screen.flex.flex-col.bg-gray-900.text-white.overflow-hidden
   EditorHeader(
@@ -30,15 +31,22 @@
       )
 
     .h-64.border-t.border-gray-700.bg-black(v-if="showSimulatorPanel")
-      SimulatorWidget(:key="simulatorKey" :config="sceneConfig" @close="showSimulatorPanel = false")
-
+      //- [ИСПРАВЛЕНО] isRunning — обязательный prop SimulatorWidget
+      SimulatorWidget(
+        :key="simulatorKey"
+        :config="sceneConfig"
+        :is-running="true"
+        @close="showSimulatorPanel = false"
+      )
 </template>
 
 <script setup lang="ts">
+// app/pages/scenario-editor.vue — script
+// Отдельная страница редактора сценариев (легаси-вариант).
+// [ИСПРАВЛЕНО v2] Добавлен panels: [] — panels стало обязательным полем
+// SceneConfig (types/scene.ts v2), литерал без него не проходит проверку.
 import { ref, reactive, computed, onMounted } from 'vue'
-// Убрали nanoid для надежности
 import { useSceneBuilder } from '../composables/useSceneBuilder'
-import { useScenarioRunner } from '../composables/useScenarioRunner'
 import type { SceneConfig, Script } from '../types/scene'
 import EditorHeader from '../components/editor/EditorHeader.vue'
 import SimulatorWidget from '../components/SimulatorWidget.vue'
@@ -57,12 +65,12 @@ const sceneConfig = reactive<SceneConfig>({
     { id: 'gate_exit', name: 'Выезд', type: 'gate', x: 500, y: 100 }
   ],
   scripts: [], variables: [],
+  panels: [], // [ДОБАВЛЕНО] обязательное поле SceneConfig
   trafficConfig: { lanes: [], carPool: [] },
   lifeConfig: { outsideSpawn: {x:0, y:0}, outsideDespawn: {x:0, y:0}, insidePoint: {x:0, y:0}, assetMapping: {car: '', person: ''} }
 })
 
 const { saveScene, loadScene } = useSceneBuilder()
-const { runScript } = useScenarioRunner()
 const selectedScriptId = ref<string | null>(null)
 const showSimulatorPanel = ref(false)
 const simulatorKey = ref(0)
@@ -70,44 +78,31 @@ const simulatorKey = ref(0)
 const currentScript = computed(() => sceneConfig.scripts.find(s => s.id === selectedScriptId.value))
 
 const addScript = () => {
-  const s: Script = { 
-    id: genId(), 
-    name: `Сценарий ${sceneConfig.scripts.length + 1}`, 
-    trigger: 'scene_start', 
-    tracks: [{ id: `t_${Date.now()}`, name: 'Поток 1', sequence: [] }] 
+  const s: Script = {
+    id: genId(),
+    name: `Сценарий ${sceneConfig.scripts.length + 1}`,
+    trigger: 'scene_start',
+    tracks: [{ id: `t_${Date.now()}`, name: 'Поток 1', sequence: [] }]
   }
   sceneConfig.scripts.push(s)
   selectedScriptId.value = s.id
 }
 const selectScript = (id: string) => { selectedScriptId.value = id }
 const deleteScript = (id: string) => { sceneConfig.scripts = sceneConfig.scripts.filter(s => s.id !== id) }
-const handleUpdateScript = (p: { id: string, key: string, val: any }) => { 
+const handleUpdateScript = (p: { id: string, key: string, val: any }) => {
   const s = sceneConfig.scripts.find(x => x.id === p.id)
-  if (s) (s as any)[p.key] = p.val 
+  if (s) (s as any)[p.key] = p.val
 }
 const handleSave = async () => { await saveScene(sceneConfig) }
 
-const handleRunEmbedded = async () => { 
-  if (currentScript.value) runScript(currentScript.value, sceneConfig.elements)
-  simulatorKey.value++; showSimulatorPanel.value = true 
+// Симулятор исполняет сценарии сцены самостоятельно при isRunning
+const handleRunEmbedded = () => {
+  simulatorKey.value++
+  showSimulatorPanel.value = true
 }
 
-const debugRun = () => {
-  if(!currentScript.value) return alert('Выберите сценарий!')
-  runScript(currentScript.value, sceneConfig.elements)
-}
-
-const debugAddTestBlocks = () => {
-  if(!currentScript.value || !currentScript.value.tracks[0]) return
-  currentScript.value.tracks[0].sequence = [
-    { id: genId(), kind: 'action', type: 'move', label: 'Ехать' },
-    { id: genId(), kind: 'actor', type: 'car_1', label: 'Машина 1' },
-    { id: genId(), kind: 'target', type: 'gate_exit', label: 'Выезд' }
-  ]
-}
-
-onMounted(async () => { 
+onMounted(async () => {
   const l = await loadScene('preview_temp')
-  if(l) Object.assign(sceneConfig, l)
+  if (l) Object.assign(sceneConfig, l)
 })
 </script>

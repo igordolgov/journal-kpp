@@ -3,7 +3,7 @@
 // Интеграция с useSimulatorIntegration, фильтрация по активным агентам,
 // контроль прав детей, отслеживание статуса автомобилей, динамические параметры групп.
 
-import { type Ref, computed } from 'vue'
+import { type Ref, computed, nextTick } from 'vue'
 import { useAudioEngine } from '~/composables/useAudioEngine'
 import { useSimulatorIntegration } from '~/composables/useSimulatorIntegration'
 import {
@@ -26,7 +26,6 @@ export function useSimulatorSpawn(
   integration: ReturnType<typeof useSimulatorIntegration>,
   simOpts: Ref<any>   // реактивный объект с полями maxGroupSize, maxNonFamily и др.
 ) {
-  // Инициализация аудио движка внутри функции (безопасно для SSR)
   const audio = useAudioEngine()
 
   const {
@@ -44,21 +43,27 @@ export function useSimulatorSpawn(
   } = integration
 
   // ----- Таймеры спавна -----
-  // [НАСТРОЙКА] Начальные задержки перед первым спавном (в секундах)
   let spawnTimerPersonEnter = 0
-  let nextSpawnTimePersonEnter = 3    // Задержка для входящих пешеходов
+  let nextSpawnTimePersonEnter = 8    // увеличен интервал
   let spawnTimerPersonExit = 0
-  let nextSpawnPersonExit = 4         // Задержка для выходящих пешеходов
+  let nextSpawnPersonExit = 10
   let spawnTimerCarEnter = 0
-  let nextSpawnTimeCarEnter = 5       // Задержка для въезжающих авто
+  let nextSpawnTimeCarEnter = 15
   let spawnTimerCarExit = 0
-  let nextSpawnCarExit = 6            // Задержка для выезжающих авто
+  let nextSpawnCarExit = 18
+
+  let isFirstUpdate = true
 
   const resetSpawnTimers = () => {
-    spawnTimerPersonEnter = 0; nextSpawnTimePersonEnter = 3
-    spawnTimerPersonExit = 0; nextSpawnPersonExit = 4
-    spawnTimerCarEnter = 0; nextSpawnTimeCarEnter = 5
-    spawnTimerCarExit = 0; nextSpawnCarExit = 6
+    spawnTimerPersonEnter = 0
+    nextSpawnTimePersonEnter = 8
+    spawnTimerPersonExit = 0
+    nextSpawnPersonExit = 10
+    spawnTimerCarEnter = 0
+    nextSpawnTimeCarEnter = 15
+    spawnTimerCarExit = 0
+    nextSpawnCarExit = 18
+    isFirstUpdate = true
   }
 
   const updateSpawnTimers = (dt: number) => {
@@ -71,12 +76,15 @@ export function useSimulatorSpawn(
   const shouldSpawn = (timer: number, nextTime: number): boolean => timer >= nextTime
   const getNextInterval = (min: number, max: number): number => min + Math.random() * (max - min)
 
-  // --- Множество ID персонажей, уже находящихся на сцене (активные агенты) ---
-  // Используется, чтобы не заспавнить одного и того же человека дважды.
+  // ----- Активные агенты (исключая завершённых) -----
+  const activeAgents = computed(() => {
+    return aiAgents.value.filter(agent => agent.state !== 'done')
+  })
+
   const activePersonIdsSet = computed(() => {
     const ids = new Set<number>()
-    for (const agent of aiAgents.value) {
-      if (agent.state !== 'done' && agent.element.personId) {
+    for (const agent of activeAgents.value) {
+      if (agent.element.personId) {
         ids.add(agent.element.personId)
       }
     }
@@ -98,6 +106,37 @@ export function useSimulatorSpawn(
     zIndex: number = 190
   ): { element: SceneElement; agent: AiAgent } => {
     const view = direction === 'exit' ? 'back' : 'front'
+
+    const safePerson = {
+      ...person,
+      skinTone: person.skinTone || '#FDE8D0',
+      hairColor: person.hairColor || (person.gender === 'female' ? '#5A3825' : '#3D2314'),
+      topColor: person.topColor || '#3b82f6',
+      bottomColor: person.bottomColor || '#1e3a8a',
+      hairStyleId: person.hairStyleId || (person.gender === 'female' ? 'long' : 'short'),
+      faceWidth: person.faceWidth || 1.0,
+      glasses: person.glasses || 'none',
+      clothingStyle: person.clothingStyle || 'standard',
+      facialHair: person.facialHair || 'none',
+      headwear: person.headwear || 'none',
+      headwearColor: person.headwearColor || '#333333',
+    }
+
+    let generatedSvg = ''
+    try {
+      generatedSvg = generateRealPersonSvg(safePerson, view, true)
+    } catch (e) {
+      console.error(`[SVG ERROR] Для ${person.fio}:`, e)
+    }
+
+    if (!generatedSvg || generatedSvg.length < 50) {
+      console.warn(`[SPAWN] Пустой SVG для ${person.fio}. Использован маркер.`)
+      generatedSvg = `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
+        <rect width="${width}" height="${height}" rx="4" fill="#ff00ff" stroke="#000" stroke-width="2"/>
+        <text x="5" y="15" fill="#fff" font-size="12" font-weight="bold">${person.fio ? person.fio.charAt(0) : '?'}</text>
+      </svg>`
+    }
+
     const element: SceneElement = {
       id: `${direction}_person_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
       x, y, width, height, rotation: 0, velocity: 0,
@@ -105,10 +144,11 @@ export function useSimulatorSpawn(
       personId: person.id, direction, zIndex,
       travelMode: 'walk',
       groupId, isLeader, groupIndex,
-      asset: { type: 'person', content: person, svg: generateRealPersonSvg(person, view, true) }
+      asset: { type: 'person', content: safePerson, svg: generatedSvg }
     }
     const agent: AiAgent = {
-      id: element.id,
+      // [ИСПРАВЛЕНО] SceneElement.id: string | number -> AiAgent.id: string
+      id: String(element.id),
       element,
       state: 'to_gate',
       target: { x: entryPoint.x, y: entryPoint.y, width: 0, height: 0 },
@@ -133,7 +173,6 @@ export function useSimulatorSpawn(
     gate: SceneElement | undefined,
     gateId: string
   ): boolean => {
-    console.log(`[SPAWN] createGroup: лидер ${leaderPerson.fio}, ${members.length} спутников`)
     const width = simOpts.value.personWidth
     const height = simOpts.value.personHeight
     const speed = cfg.personSpeed
@@ -142,8 +181,6 @@ export function useSimulatorSpawn(
     const fixedY = fixedYPerson.value
     const prefix = 'Person'
 
-    // Хелпер для получения абсолютных координат точек (спавн, стоп, деспавн)
-    // Приоритет: настройки ворот (оффсеты) -> дефолтные значения (fixedX/Y)
     const getAbs = (key: string, axis: 'X' | 'Y', size: number): number | undefined => {
       const off = gate?.settings?.[`${key}${axis}`]
       if (off !== undefined && off !== null && !isNaN(off)) {
@@ -182,9 +219,8 @@ export function useSimulatorSpawn(
     const allPersons = [leaderPerson, ...members]
     const groupAgents: AiAgent[] = []
 
-    // [НАСТРОЙКА] Расстояние между участниками группы
-    const HORIZONTAL_STEP = 35  // Шаг по горизонтали (вход)
-    const VERTICAL_STEP = 45    // Шаг по вертикали (выход)
+    const HORIZONTAL_STEP = 35
+    const VERTICAL_STEP = 45
 
     for (let idx = 0; idx < allPersons.length; idx++) {
       const person = allPersons[idx]
@@ -192,20 +228,16 @@ export function useSimulatorSpawn(
       let hOffset = 0
       let vOffset = 0
 
-      // Расчет смещения для не-лидеров
       if (!isLeader) {
         if (direction === 'enter') {
-          // Гуськом при входе
           hOffset = idx * HORIZONTAL_STEP
-          vOffset = (idx % 2 === 0 ? -12 : 12) // Небольшой разброс по вертикали
+          vOffset = (idx % 2 === 0 ? -12 : 12)
         } else {
-          // Гуськом при выходе
           vOffset = idx * VERTICAL_STEP
-          hOffset = (idx % 2 === 0 ? -10 : 10) // Небольшой разброс по горизонтали
+          hOffset = (idx % 2 === 0 ? -10 : 10)
         }
       }
 
-      // Z-Index: кто ближе к камере (ниже по Y), тот рисуется позже
       let zIndex = 190
       if (direction === 'enter') zIndex = 200 - idx
       else zIndex = 190 + idx
@@ -217,26 +249,30 @@ export function useSimulatorSpawn(
       const afterX = afterTargetX + hOffset
       const afterY = afterTargetY + vOffset
 
-      const { element, agent } = createPersonAgent(
-        person, posX, posY,
-        { x: stopX, y: stopY },
-        { x: exitPointX, y: exitPointY },
-        { x: afterX, y: afterY },
-        speed, direction, width, height,
-        gateId,
-        groupId, isLeader, idx, zIndex
-      )
-      simElements.value.push(element)
-      aiAgents.value.push(agent)
-      groupAgents.push(agent)
+      try {
+        const { element, agent } = createPersonAgent(
+          person, posX, posY,
+          { x: stopX, y: stopY },
+          { x: exitPointX, y: exitPointY },
+          { x: afterX, y: afterY },
+          speed, direction, width, height,
+          gateId,
+          groupId, isLeader, idx, zIndex
+        )
+        nextTick(() => {
+          simElements.value.push(element)
+          aiAgents.value.push(agent)
+        })
+        groupAgents.push(agent)
+      } catch (error) {
+        console.error(`[SPAWN CRASH] Ошибка отрисовки: ${person.fio}. Человек пропущен.`, error)
+      }
     }
 
-    // Лидер хранит ссылку на всех участников для управления группой
     const leaderAgent = groupAgents.find(a => a.isLeader)
     if (leaderAgent) {
       leaderAgent.groupMembers = groupAgents
       if (members.length > 0) {
-        // Строка имен для метки лидера
         const membersNames = members.map(p => formatDisplayName(p.fio)).join(', ')
         leaderAgent.element.groupLabel = membersNames
       } else {
@@ -245,7 +281,11 @@ export function useSimulatorSpawn(
     }
 
     usedPeopleIds.value.add(leaderPerson.id)
-    for (const m of members) usedPeopleIds.value.add(m.id)
+    for (const agent of groupAgents) {
+      if (agent.element.personId) {
+        usedPeopleIds.value.add(agent.element.personId)
+      }
+    }
 
     return true
   }
@@ -309,8 +349,10 @@ export function useSimulatorSpawn(
       gateId,
       undefined, false, 0, 190
     )
-    simElements.value.push(element)
-    aiAgents.value.push(agent)
+    nextTick(() => {
+      simElements.value.push(element)
+      aiAgents.value.push(agent)
+    })
     usedPeopleIds.value.add(person.id)
     return true
   }
@@ -327,7 +369,6 @@ export function useSimulatorSpawn(
   ): boolean => {
     const car = getAvailableVehicleForPerson(driverPerson.id, direction)
     if (!car) {
-      // Если у человека нет машины, переключаемся на пешеходный режим
       return spawnEntity(direction, driverPerson, 'walk', cfg, extraExcludeIds)
     }
     const color = getVehicleColor(car)
@@ -389,7 +430,8 @@ export function useSimulatorSpawn(
     for (const occ of occupants) occupantsInfo.push(createPersonInfo(occ))
 
     const carAgent: AiAgent = {
-      id: carElement.id,
+      // [ИСПРАВЛЕНО] SceneElement.id: string | number -> AiAgent.id: string
+      id: String(carElement.id),
       element: carElement,
       state: 'to_gate',
       target: { x: entryPointX, y: entryPointY, width: 0, height: 0 },
@@ -406,7 +448,6 @@ export function useSimulatorSpawn(
     carElement.occupants = occupantsInfo
     aiAgents.value.push(carAgent)
 
-    // Создаем звуковые пулы для новой машины
     audio.createPool(`car-${carAgent.id}`, 'engine', 1)
     audio.createPool(`car-${carAgent.id}`, 'brake', 1)
     audio.createPool(`car-${carAgent.id}`, 'horn', 1)
@@ -429,20 +470,15 @@ export function useSimulatorSpawn(
     const gate = simElements.value.find(g => String(g.id) === gateId)
 
     if (travelMode === 'walk') {
-      // [НАСТРОЙКА] Вероятность появления группы: 30%
       const isGroup = Math.random() < 0.3
       if (!isGroup) return createSinglePerson(direction, person, cfg, gate, gateId)
 
-      // [НАСТРОЙКА] Максимальный размер группы (по умолчанию 4)
       const MAX_GROUP_SIZE = simOpts.value.maxGroupSize ?? 4
-      // [НАСТРОЙКА] Макс. кол-во "чужих" людей в группе (не родственников)
       const MAX_NON_FAMILY = simOpts.value.maxNonFamily ?? 1
 
-      // [НАСТРОЙКА] Размер группы: от 2 до 4 человек (rand(3) + 2)
       let groupSize = Math.floor(Math.random() * 3) + 2
       if (groupSize > MAX_GROUP_SIZE) groupSize = MAX_GROUP_SIZE
 
-      // [НАСТРОЙКА] Вероятность, что это семья: 70%
       const familyMembers = Math.random() < 0.7
         ? getFamilyGroup(person, direction, groupSize, activePersonIdsSet.value, extraExcludeIds)
         : []
@@ -450,7 +486,6 @@ export function useSimulatorSpawn(
       let members = [...familyMembers]
       let need = groupSize - 1 - members.length
 
-      // Добираем случайных людей, если семья неполная
       if (need > 0) {
         const currentNonFamily = 0
         const allowedToAdd = Math.min(need, MAX_NON_FAMILY - currentNonFamily)
@@ -462,23 +497,18 @@ export function useSimulatorSpawn(
         }
       }
 
-      // Убираем дубликаты и проверяем совместимость
       members = members.filter((m, i, arr) => arr.findIndex(t => t.id === m.id) === i)
       members = members.filter(m => integration.canBeWith(person, m))
 
-      // Если никто не набрался, спавним одиночку
       if (members.length === 0) {
         return createSinglePerson(direction, person, cfg, gate, gateId)
       }
 
       return createGroup(direction, person, members, cfg, gate, gateId)
     } else {
-      // --- Автомобиль ---
-      // [НАСТРОЙКА] Вероятность наличия пассажиров: 50%
       const hasPassengers = Math.random() < 0.5
       let passengers: any[] = []
       if (hasPassengers) {
-        // [НАСТРОЙКА] Количество пассажиров: от 1 до 4
         const count = Math.floor(Math.random() * 4) + 1
         passengers = getRandomOccupants(person, direction, count, activePersonIdsSet.value, extraExcludeIds)
           .filter(occ => integration.canBeWith(person, occ))
@@ -510,18 +540,32 @@ export function useSimulatorSpawn(
     dt: number,
     cfg: TrafficConfig,
     hasPeople: boolean,
-    currentAgentCount: number,
-    maxAgents: number
+    maxAgents: number = 5   // по умолчанию 5
   ) => {
     if (!hasPeople) return
-    // [НАСТРОЙКА] Максимальное количество агентов на сцене (защита от переполнения)
-    const safeMax = Math.floor(Number(maxAgents) || 20)
+
+    // Удаляем завершённых агентов (синхронизация)
+    aiAgents.value = aiAgents.value.filter(agent => agent.state !== 'done')
+
+    // Считаем только активных агентов (исключая завершённых)
+    const activeCount = activeAgents.value.length
+    const safeMax = Math.floor(Number(maxAgents) || 5)
+
     if (safeMax <= 0) return
+
+    // Если уже достигнут лимит – не спавним
+    if (activeCount >= safeMax) return
+
+    // Сброс таймеров при первом вызове или после паузы
+    if (isFirstUpdate || dt > 1.0) {
+      resetSpawnTimers()
+      isFirstUpdate = false
+    }
+
     updateSpawnTimers(dt)
 
-    // Чтобы не спавнить одного и того же человека в разные потоки в одном кадре
     const spawnedThisTickIds = new Set<number>()
-    let spawnedThisTickCount = aiAgents.value.length
+    let spawnedThisTickCount = activeCount
 
     const canSpawn = () => spawnedThisTickCount < safeMax
 
@@ -544,21 +588,15 @@ export function useSimulatorSpawn(
       return success
     }
 
-    // Попытки спавна для каждого направления
-    // Интервалы берутся из конфига (cfg) или настроек пользователя (simOpts)
-
-    // Пешеходы на вход
     if (shouldSpawn(spawnTimerPersonEnter, nextSpawnTimePersonEnter)) {
       if (attemptSpawn(spawnTimerPersonEnter, nextSpawnTimePersonEnter, 'enter', 'person', cfg.intervalMin, cfg.intervalMax)) {
         spawnTimerPersonEnter = 0
         nextSpawnTimePersonEnter = getNextInterval(cfg.intervalMin, cfg.intervalMax)
       } else {
-        // Если не удалось заспавнить (например, нет людей), сбрасываем таймер, чтобы не спамить попытки
         spawnTimerPersonEnter = 0
         nextSpawnTimePersonEnter = getNextInterval(cfg.intervalMin, cfg.intervalMax)
       }
     }
-    // Пешеходы на выход
     if (shouldSpawn(spawnTimerPersonExit, nextSpawnPersonExit)) {
       if (attemptSpawn(spawnTimerPersonExit, nextSpawnPersonExit, 'exit', 'person', cfg.intervalMin, cfg.intervalMax)) {
         spawnTimerPersonExit = 0
@@ -568,7 +606,6 @@ export function useSimulatorSpawn(
         nextSpawnPersonExit = getNextInterval(cfg.intervalMin, cfg.intervalMax)
       }
     }
-    // Авто на вход
     if (shouldSpawn(spawnTimerCarEnter, nextSpawnTimeCarEnter)) {
       if (attemptSpawn(spawnTimerCarEnter, nextSpawnTimeCarEnter, 'enter', 'car', simOpts.value.carSpawnIntervalMin, simOpts.value.carSpawnIntervalMax)) {
         spawnTimerCarEnter = 0
@@ -578,7 +615,6 @@ export function useSimulatorSpawn(
         nextSpawnTimeCarEnter = getNextInterval(simOpts.value.carSpawnIntervalMin, simOpts.value.carSpawnIntervalMax)
       }
     }
-    // Авто на выход
     if (shouldSpawn(spawnTimerCarExit, nextSpawnCarExit)) {
       if (attemptSpawn(spawnTimerCarExit, nextSpawnCarExit, 'exit', 'car', simOpts.value.carSpawnIntervalMin, simOpts.value.carSpawnIntervalMax)) {
         spawnTimerCarExit = 0
@@ -592,6 +628,9 @@ export function useSimulatorSpawn(
 
   // ----- Логирование при деспавне -----
   const handleAgentDone = async (agent: AiAgent) => {
+    if (agent.state === 'done') return
+    agent.state = 'done'
+
     if (agent.type === 'person' || (agent.type === 'car' && agent.occupants?.length)) {
       const personId = agent.element.personId
       if (personId) {

@@ -69,7 +69,7 @@
 
         //- Кнопка добавления
         button.add-btn.px-3.py-1.rounded-lg.border-2.border-dashed.border-gray-600.text-gray-400.text-xs.font-bold.transition-all.bg-transparent.shrink-0.h-8.flex.items-center(
-          class="hover:border-indigo-400 hover:text-indigo-300 hover:bg-gray-700"
+          class="hover:bg-gray-700 hover:border-indigo-400 hover:text-indigo-300"
           @click="openMenu($event, track)"
         ) ➕
 
@@ -226,6 +226,10 @@
 </template>
 
 <script setup lang="ts">
+// app/components/editor/ScenarioEditor.vue — script
+// Визуальный редактор сценариев: треки, блоки, контекстное меню.
+// [ИСПРАВЛЕНО]: editingBlock -> any (блок свободно мутируется в модалке),
+// kindMap -> Record<string, string> (kind может быть 'logic' вне BlockKind).
 import { ref, computed, reactive, nextTick } from 'vue'
 import type { Script, ScriptTrack, LogicBlock, BlockKind, SceneElement } from '../../types/scene'
 
@@ -239,7 +243,9 @@ const emit = defineEmits(['update:script', 'select:script', 'add:script', 'delet
 
 // --- State ---
 const isEditingBlock = ref(false)
-const editingBlock = ref<LogicBlock | null>(null)
+// [ИСПРАВЛЕНО] any: блок редактируется свободно (v-model по valueConfig.speed /
+// valueConfig.delay в шаблоне), строгое LogicBlock не описывает мутации модалки
+const editingBlock = ref<any>(null)
 const editingTrack = ref<ScriptTrack | null>(null)
 const isCreatingNew = ref(false) // Флаг: мы создаем новый блок или редактируем старый?
 
@@ -283,8 +289,10 @@ const icons: Record<string, string> = {
 
 const getBlockIcon = (b: any) => icons[b.type] || (b.kind === 'actor' ? '👤' : '📦')
 
+// [ИСПРАВЛЕНО] Record<string, string>: b.kind — string ('logic' входил в мапу,
+// но не входил в BlockKind); теперь индексация строкой валидна
 const getBlockClasses = (b: LogicBlock) => {
-  const kindMap: Record<BlockKind, string> = {
+  const kindMap: Record<string, string> = {
     action: 'bg-blue-600 hover:bg-blue-500',
     logic: 'bg-pink-600 hover:bg-pink-500',
     actor: 'bg-emerald-600 hover:bg-emerald-500',
@@ -295,23 +303,26 @@ const getBlockClasses = (b: LogicBlock) => {
 }
 
 // Генератор текста для бейджей
+// [ИСПРАВЛЕНО] valueConfig захватывается в константу vc: внутри коллбека
+// directions.find(...) сужение b.valueConfig не сохраняется
 const getBadgeText = (b: LogicBlock) => {
-  if (!b.valueConfig) return ''
-  
+  const vc = b.valueConfig
+  if (!vc) return ''
+
   if (b.type === 'point_coords') {
     // Парсим строку "x, y"
-    const parts = String(b.valueConfig.exact || '0,0').split(',')
-    if (parts.length === 2) return `${parts[0].trim()}, ${parts[1].trim()}`
-    return b.valueConfig.exact
+    const parts = String(vc.exact || '0,0').split(',')
+    if (parts.length === 2) return `${parts[0]?.trim()}, ${parts[1]?.trim()}`
+    return vc.exact
   }
-  if (b.type === 'distance') return `${b.valueConfig.exact || 0}px`
+  if (b.type === 'distance') return `${vc.exact || 0}px`
   if (b.type === 'direction') {
-    const d = directions.find(d => d.val === b.valueConfig.exact)
-    return d ? d.icon : b.valueConfig.exact
+    const d = directions.find(dir => dir.val === vc.exact)
+    return d ? d.icon : vc.exact
   }
-  if (b.type === 'move') return `${b.valueConfig.speed || 200}px/c`
-  if (b.type === 'wait') return `${b.valueConfig.delay || 1}c`
-  
+  if (b.type === 'move') return `${vc.speed || 200}px/c`
+  if (b.type === 'wait') return `${vc.delay || 1}c`
+
   return '' // Остальные не показываем, чтобы не захламлять
 }
 
@@ -354,9 +365,9 @@ const registry = computed(() => {
     })
   }
 
-  // Добавляем опцию "Точка (X,Y)" с пометкой immediateInput
+  // Опция "Точка (X,Y)" с пометкой immediateInput
   const manualPoint = { kind: 'target' as BlockKind, type: 'point_coords', label: '📍 Точка (X,Y)', meta: { immediateInput: true }, valueConfig: { mode: 'exact', exact: '0, 0' } }
-  
+
   if (spawnZones.length === 0) spawnZones.push(manualPoint)
   else spawnZones.push(manualPoint) // Всегда даем возможность ввести вручную
 
@@ -382,6 +393,7 @@ const analyzeContext = (sequence: LogicBlock[]) => {
   // Сканируем хвост последовательности
   for (let i = sequence.length - 1; i >= 0; i--) {
     const b = sequence[i]
+    if (!b) continue
     if (b.kind === 'action' || b.kind === 'logic') { state.lastAction = b; break }
     if (b.kind === 'actor') state.hasActor = true
     if (b.kind === 'target') state.hasTarget = true
@@ -407,9 +419,13 @@ const analyzeContext = (sequence: LogicBlock[]) => {
     else if (!state.hasTarget && !state.hasDir && !state.hasDist) {
       message = 'Куда ехать?'; needs.push(...registry.value.moveTargets); needs.push(...registry.value.param_vector)
     } else if (state.hasDir && !state.hasDist && !state.hasTarget) {
-      message = 'Как далеко?'; needs.push(registry.value.param_vector.find(p => p.type === 'distance')!)
+      const distParam = registry.value.param_vector.find(p => p.type === 'distance')
+      if (distParam) needs.push(distParam)
+      message = 'Как далеко?'
     } else if (state.hasDist && !state.hasDir && !state.hasTarget) {
-      message = 'В какую сторону?'; needs.push(registry.value.param_vector.find(p => p.type === 'direction')!)
+      const dirParam = registry.value.param_vector.find(p => p.type === 'direction')
+      if (dirParam) needs.push(dirParam)
+      message = 'В какую сторону?'
     } else isComplete = true
   } else if (actionType === 'check_distance') {
     if (!state.hasActor) { message = 'Кто проверяет?'; needs.push(...registry.value.actors) }
@@ -470,11 +486,11 @@ const selectOption = (opt: any) => {
 const openInputModal = (opt: any, track: ScriptTrack) => {
   // Готовим темплейт блока
   const block = { ...opt, id: `b_${Date.now()}`, valueConfig: JSON.parse(JSON.stringify(opt.valueConfig || {})) }
-  
+
   editingBlock.value = block
   editingTrack.value = track
   isCreatingNew.value = true
-  
+
   // Парсинг начальных значений для инпутов
   if (opt.type === 'point_coords') {
     const [x, y] = String(block.valueConfig.exact || '0,0').split(',').map(Number)

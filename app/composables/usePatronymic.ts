@@ -1,4 +1,7 @@
 // app/composables/usePatronymic.ts
+// Назначение: генерация отчества по имени отца и полу ребенка.
+// [ИСПРАВЛЕНО] noUncheckedIndexedAccess: split(' ')[0] даёт string | undefined,
+// обращение specialCases[nameLower] — объект | undefined.
 export const usePatronymic = () => {
 
   // Вспомогательные множества символов
@@ -8,26 +11,25 @@ export const usePatronymic = () => {
     'б', 'в', 'г', 'д', 'ж', 'з', 'к', 'л', 'м', 'н', 'п', 'р', 'с', 'т', 'ф', 'х', 'ц', 'ч', 'ш', 'щ'
   ])
 
-  // Особые случаи (исторические формы)
-  // Ключи приводим к нижнему регистру
+  // Особые случаи (исторические формы). Ключи в нижнем регистре.
   const specialCases: Record<string, { m: string; f: string }> = {
     'никита':   { m: 'Никитич',    f: 'Никитична' },
     'савва':    { m: 'Саввич',     f: 'Саввична' },
-    'кузьма':   { m: 'Кузьмич',    f: 'Кузьминична' }, 
-    'лука':     { m: 'Лукич',      f: 'Лукинична' }, 
+    'кузьма':   { m: 'Кузьмич',    f: 'Кузьминична' },
+    'лука':     { m: 'Лукич',      f: 'Лукинична' },
     'фома':     { m: 'Фомич',      f: 'Фоминична' },
     'илья':     { m: 'Ильич',      f: 'Ильинична' },
-    'яков':     { m: 'Яковлевич',  f: 'Яковлевна' }, 
-    'лев':      { m: 'Львович',    f: 'Львовна' },   
-    'павел':    { m: 'Павлович',   f: 'Павловна' },  
-    'игорь':    { m: 'Игоревич',   f: 'Игоревна' },  
+    'яков':     { m: 'Яковлевич',  f: 'Яковлевна' },
+    'лев':      { m: 'Львович',    f: 'Львовна' },
+    'павел':    { m: 'Павлович',   f: 'Павловна' },
+    'игорь':    { m: 'Игоревич',   f: 'Игоревна' },
     'валерий':  { m: 'Валерьевич', f: 'Валерьевна' },
     'сергей':   { m: 'Сергеевич',  f: 'Сергеевна' },
     'андрей':   { m: 'Андреевич',  f: 'Андреевна' },
     'дмитрий':  { m: 'Дмитриевич', f: 'Дмитриевна' },
     'николай':  { m: 'Николаевич', f: 'Николаевна' },
   }
-  
+
   /**
    * Генерирует отчество по имени отца и полу ребенка
    * @param fatherName Имя отца (в именительном падеже)
@@ -35,13 +37,14 @@ export const usePatronymic = () => {
    */
   const generatePatronymic = (fatherName: string, gender: 'male' | 'female'): string => {
     if (!fatherName) return ''
-    
-    // ИСПРАВЛЕНИЕ: Берем только первое слово, если передали полное ФИО
-    const nameLower = fatherName.toLowerCase().trim().split(' ')[0]
-    
+
+    // Берем только первое слово, если передали полное ФИО
+    const nameLower = fatherName.toLowerCase().trim().split(' ')[0] ?? ''
+
     // 1. Проверка особых случаев
-    if (specialCases[nameLower]) {
-      return gender === 'male' ? specialCases[nameLower].m : specialCases[nameLower].f
+    const special = specialCases[nameLower]
+    if (special) {
+      return gender === 'male' ? special.m : special.f
     }
 
     let base = nameLower
@@ -55,12 +58,12 @@ export const usePatronymic = () => {
 
     // 3. Обработка окончания -й или -ь (отбрасываются)
     let suffixStart = '' // 'ов' или 'ев'
-    
+
     if (lastChar === 'й' || lastChar === 'ь') {
       base = base.slice(0, -1)
       lastChar = base.slice(-1)
-      suffixStart = 'ев' 
-    } 
+      suffixStart = 'ев'
+    }
     else if (hushers.has(lastChar) || lastChar === 'ц') {
       // 4. Шипящие и Ц -> -ев-
       suffixStart = 'ев'
@@ -76,7 +79,7 @@ export const usePatronymic = () => {
 
     // Формируем результат
     const ending = gender === 'male' ? 'ич' : 'на'
-    
+
     // Возвращаем с большой буквы
     return (base.charAt(0).toUpperCase() + base.slice(1) + suffixStart + ending)
   }

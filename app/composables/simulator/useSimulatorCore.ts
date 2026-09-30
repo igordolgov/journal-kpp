@@ -1,4 +1,19 @@
-// composables/simulator/useSimulatorCore.ts
+// app/composables/simulator/useSimulatorCore.ts
+// Назначение: ядро симулятора — загрузка сцены, фиксированные координаты,
+// нормализация элементов, анимация ворот (GSAP) и их звук.
+//
+// [РЕФАКТОРИНГ — финальный пункт анти-утечечного плана]:
+//  1. [ИСПРАВЛЕНО] loadScene() убивает все твины ворот старой сцены и глушит
+//     мотор. Раньше твины переживали замену сцены: мутировали settings
+//     осиротевших элементов и в onComplete дёргали звуки несуществующих ворот.
+//  2. [ИСПРАВЛЕНО] onComplete: wicket-slam — только если калитка ещё на сцене;
+//     stopPool('gate-active') — ВСЕГДА (мотор зациклен, обязан глушиться).
+//  3. [ИСПРАВЛЕНО] onScopeDispose: добавлен resetPool('gate-active') — kill
+//     твина НЕ вызывает onComplete, поэтому при unmount симулятора зацикленный
+//     мотор продолжал играть вечно.
+//  4. [ДОБАВЛЕНО] killAllGateTweens() экспортируется — для явного сброса
+//     из вызывающего кода (перезапуск симуляции).
+
 import { ref, type Ref, onScopeDispose } from 'vue'
 import gsap from 'gsap'
 import { useAudioEngine } from '~/composables/useAudioEngine'
@@ -12,7 +27,7 @@ import { generateSlidingGateSVG, generateWicketSVG } from '~/constants/library'
 import type { SceneElement } from '~/types/simulator'
 
 export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
-  // ✅ audio теперь внутри setup-контекста, а не на уровне модуля
+  // Аудио-движок внутри setup-контекста (безопасно для SSR)
   const audio = useAudioEngine()
 
   const fixedXPerson = ref(0)
@@ -20,10 +35,25 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
   const fixedXCar = ref(0)
   const fixedYCar = ref(0)
 
+  // Реестр активных твинов ворот: id ворот -> tween.
+  // Гарантирует: один твин на ворота, kill при перезапуске анимации,
+  // полная зачистка при смене сцены и unmount.
   const gateTweens = new Map<string, gsap.core.Tween>()
-  onScopeDispose(() => {
+
+  // Убить все твины ворот (без вызова onComplete у каждого — так работает GSAP).
+  // Вызывается при смене сцены, unmount и ручном сбросе.
+  const killAllGateTweens = () => {
     gateTweens.forEach(tween => tween.kill())
     gateTweens.clear()
+  }
+
+  // Автоматическая зачистка при размонтировании.
+  // [ИСПРАВЛЕНО] добавлен resetPool('gate-active'): kill твина не триггерит
+  // onComplete, а мотор ворот — Зацикленный звук; без сброса он играл вечно
+  // после unmount симулятора.
+  onScopeDispose(() => {
+    killAllGateTweens()
+    audio.resetPool('gate-active')
   })
 
   const initManualCoords = () => {
@@ -117,6 +147,14 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
   }
 
   const loadScene = (config: any) => {
+    // [ИСПРАВЛЕНО] смена сцены: сначала зачистка старой.
+    // 1) kill всех твинов — иначе они мутируют settings осиротевших элементов
+    //    и дёргают звуки несуществующих ворот;
+    // 2) resetPool('gate-active') — kill не вызывает onComplete, а мотор
+    //    зациклен: без сброса звук играл бы до конца таймлайна и дольше.
+    killAllGateTweens()
+    audio.resetPool('gate-active')
+
     if (config && config.elements) {
       simElements.value = config.elements.map((el: any) => normalizeElement(el))
       console.log(`[loadScene] Загружено элементов: ${simElements.value.length}, из них ворот: ${simElements.value.filter(el => el.category === 'gate' || el.category === 'barrier').length}`)
@@ -183,10 +221,14 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
         gateTweens.delete(gateId)
 
         if (isWicket) {
-          if (!targetOpen) {
+          // [ИСПРАВЛЕНО] звук удара — только если калитка ещё на сцене
+          // (её могли удалить/заменить сцену во время анимации)
+          const stillExists = simElements.value.some(g => String(g.id) === gateId)
+          if (!targetOpen && stillExists) {
             audio.playFromPool('wicket-sound', 'wicket-slam', 0.8)
           }
         } else {
+          // Мотор глушим ВСЕГДА — звук зацикленный
           audio.stopPool('gate-active')
         }
       }
@@ -269,7 +311,6 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
   }
 
   const openGateWithSound = (gate: SceneElement): boolean => {
-    console.log('[openGateWithSound]', gate.id)
     if (!gate.settings) gate.settings = {}
     const isWicket = gate.settings.gateType === 'wicket' || (gate.width && gate.width <= 60)
     if (isWicket) {
@@ -279,7 +320,6 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
   }
 
   const closeGateWithSound = (gate: SceneElement): boolean => {
-    console.log('[closeGateWithSound]', gate.id)
     if (!gate.settings) gate.settings = {}
     const isWicket = gate.settings.gateType === 'wicket' || (gate.width && gate.width <= 60)
     if (isWicket) {
@@ -305,6 +345,7 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
     openGateWithSound,
     closeGateWithSound,
     initManualCoords,
+    killAllGateTweens,
     gateTweens,
   }
 }

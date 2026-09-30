@@ -148,13 +148,21 @@ dialog.modal(
 </template>
 
 <script setup lang="ts">
+// app/components/database/PersonFormModal.vue — script
+// [ИСПРАВЛЕНО] type-only props (runtime Object/Array давали Object/unknown[]),
+// fio_short добавлен в тип payload (вычислялся, но отсутствовал в форме),
+// charAt(0) вместо индекса строки.
 import { reactive, watch, computed } from 'vue'
 
 // --- Props & Emits ---
-const props = defineProps({
-  isOpen: Boolean,
-  person: Object,       // Объект редактируемого человека (если есть)
-  allPeople: Array      // Полный список людей для выбора родственников
+const props = withDefaults(defineProps<{
+  isOpen?: boolean
+  person?: any
+  allPeople?: any[]
+}>(), {
+  isOpen: false,
+  person: null,
+  allPeople: () => []
 })
 
 const emit = defineEmits(['close', 'save'])
@@ -173,7 +181,7 @@ const form = reactive({
   phone: '',
   birth_date: '',
   exit_category: null as string | null,
-  status: null as string | null, // ДОБАВЛЕНО ПОЛЕ СТАТУСА
+  status: null as string | null, // Исключение из симуляции
   gender: 'male',
   main_family_id: null as number | null,
   relation: ''
@@ -189,7 +197,7 @@ watch(() => props.person, (newVal) => {
       phone: newVal.phone || '',
       birth_date: newVal.birth_date || '',
       exit_category: newVal.exit_category || null,
-      status: newVal.status === undefined ? null : newVal.status, // ОБРАБОТКА UNDEFINED -> NULL
+      status: newVal.status === undefined ? null : newVal.status, // undefined -> null
       gender: newVal.gender || 'male',
       main_family_id: newVal.main_family_id,
       relation: newVal.relation || ''
@@ -202,7 +210,7 @@ watch(() => props.person, (newVal) => {
       phone: '',
       birth_date: '',
       exit_category: null,
-      status: null, // СБРОС СТАТУСА
+      status: null, // Сброс статуса
       gender: 'male',
       main_family_id: null,
       relation: ''
@@ -218,16 +226,19 @@ const relatives = computed(() => {
 
 // --- Methods ---
 const onSave = () => {
-  const payload = { ...form }
-  
+  // [ИСПРАВЛЕНО] fio_short — вычисляемое поле, отсутствовавшее в типе формы
+  const payload: typeof form & { fio_short?: string } = { ...form }
+
   if (!payload.main_family_id) payload.relation = ''
 
   if (payload.fio) {
     const parts = payload.fio.trim().split(/\s+/)
-    if (parts.length >= 2) {
-      payload.fio_short = `${parts[0]} ${parts[1][0]}.`
-    } else {
-      payload.fio_short = parts[0]
+    const first = parts[0]
+    if (parts.length >= 2 && parts[1]) {
+      // [ИСПРАВЛЕНО] charAt(0) — индекс строки даёт string | undefined
+      payload.fio_short = `${first} ${parts[1].charAt(0)}.`
+    } else if (first) {
+      payload.fio_short = first
     }
   }
 

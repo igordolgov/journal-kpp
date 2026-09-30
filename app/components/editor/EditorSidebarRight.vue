@@ -1,431 +1,604 @@
-<!-- app\components\editor\EditorSidebarRight.vue -->
+<!-- app/components/editor/EditorSidebarRight.vue -->
 <template lang='pug'>
-aside.flex.flex-col.h-full.overflow-hidden.border-l.border-gray-700.bg-gray-900
-  .flex.h-7.items-center.justify-between.border-b.border-gray-700.p-1.px-2.bg-gray-800
-    span.text-xs.font-bold Инспектор
-    
-    button.btn.btn-ghost.btn-xs.text-red-400.w-6.h-6.p-0(
+aside.flex.flex-col.h-full.overflow-hidden.border-l.border-gray-700.bg-gray-900(
+  class="min-w-0"
+)
+  //- ШАПКА
+  .flex.h-8.items-center.justify-between.border-b.border-gray-700.bg-gray-800.flex-shrink-0(
+    class="px-3"
+  )
+    .flex.items-center(
+      class="gap-4 min-w-0"
+    )
+      span.text-base(
+        v-if="selectedElement"
+      ) {{ getElementIcon(selectedElement) }}
+      span.text-base(
+        v-else-if="selectedControl"
+      ) 🎛️
+      span.text-base(
+        v-else-if="selectedPanel"
+      ) 📟
+      span.text-base(
+        v-else
+      ) ⚙️
+      span.text-sm.font-semibold.truncate(
+        v-if="selectedElement"
+      ) {{ selectedElement.name || 'Элемент' }}
+      span.text-sm.font-semibold.truncate(
+        v-else-if="selectedControl"
+      ) {{ selectedControl.settings?.label || selectedControl.type }}
+      span.text-sm.font-semibold.truncate(
+        v-else-if="selectedPanel"
+      ) {{ selectedPanel.title || 'Панель' }}
+      span.text-sm.font-semibold.truncate(
+        v-else
+      ) Сцена
+
+    button.btn.btn-ghost.btn-xs.text-red-400.w-7.h-7.p-0(
       v-if="selectedElement"
       @click="$emit('delete:element', selectedElement.id)"
-      title="Удалить объект"
+      title="Удалить"
     ) 🗑️
-    
-    button.btn.btn-ghost.btn-xs.text-red-400.w-6.h-6.p-0(
+
+    button.btn.btn-ghost.btn-xs.text-red-400.w-7.h-7.p-0(
       v-else-if="selectedPanel && !selectedControl"
       @click="$emit('delete-panel', selectedPanel.id)"
-      title="Удалить панель"
+      title="Удалить"
     ) 🗑️
 
-  .flex-1.overflow-y-auto.p-2.text-xs
+  //- КОНТЕНТ
+  .flex-1.text-xs(
+    class="space-y-4 px-3 py-3 min-h-0 overflow-x-hidden overflow-y-auto"
+  )
     //- ==========================================
-    //- ВЫБРАН ЭЛЕМЕНТ СЦЕНЫ
+    //- ЭЛЕМЕНТ СЦЕНЫ
     //- ==========================================
     template(v-if="selectedElement")
-      .mb-2
-        .grid.grid-cols-2.gap-2
-          .flex
-            .mb-1.text-gray-400 Название:
-            input.input.input-xs.input-bordered.bg-gray-800(type="text" :value="selectedElement.name" @input="handleInput('name', $event.target.value)")
-          .flex
-            .mb-1.text-gray-400 Роль:
-            select.select.select-xs.select-bordered.rounded-md.bg-gray-800(:value="selectedElement.type" @change="handleInput('type', $event.target.value)")
-              option(value="element") Обычный элемент
+      //- Секция: Основное
+      section
+        .section-title Основное
+        .grid.grid-cols-6(
+          class="gap-4"
+        )
+          .field
+            label.field-label Имя
+            input.field-input(
+              type="text"
+              :value="selectedElement.name"
+              @input="handleInput('name', evValue($event))"
+            )
+          .field
+            label.field-label Роль
+            select.field-input(
+              :value="selectedElement.type"
+              @change="handleInput('type', evValue($event))"
+            )
+              option(value="element") Обычный
               option(value="actor") Актер
-              option(value="gate") Ворота/Калитка
+              option(value="gate") Ворота
               option(value="zone") Зона
-              
-      .mb-2.text-gray-400 Позиция и Размер:
-      .grid.grid-cols-4.gap-2.mb-2
-        .flex.items-center
-          label.text-gray-400 X:
-          input.input.input-xs.input-bordered.w-full.bg-gray-800(type="number" :value="selectedElement.x" @input="handleInput('x', Number($event.target.value))")
-        .flex.items-center
-          label.text-gray-400 Y:
-          input.input.input-xs.input-bordered.w-full.bg-gray-800(type="number" :value="selectedElement.y" @input="handleInput('y', Number($event.target.value))")
-        .flex.items-center
-          label.text-gray-400 W:
-          input.input.input-xs.input-bordered.w-full.bg-gray-800(type="number" :value="selectedElement.width" @input="onWidthChange")
-        .flex.items-center
-          label.text-gray-400 H:
-          input.input.input-xs.input-bordered.w-full.bg-gray-800(type="number" :value="selectedElement.height" @input="onHeightChange")
-          button.btn.btn-ghost.btn-xs.flex-shrink-0.w-6.h-6.p-0(:class="aspectRatioLocked ? 'text-blue-400' : 'text-gray-600'" @click="toggleLock") 🔒
 
-      //- УПРАВЛЕНИЕ Z-УРОВНЕМ
-      .mb-2.text-gray-400 Слои и порядок:
-      .flex.items-center.gap-2.mb-2
-        button.btn.btn-ghost.btn-xs.w-8.h-8.p-0.text-gray-400(@click="handleZIndex(-10)" title="На задний план") ⬇
-        input.input.input-xs.input-bordered.w-16.text-center.bg-gray-800(type="number" :value="selectedElement.zIndex || 0" @input="handleInput('zIndex', Number($event.target.value))")
-        button.btn.btn-ghost.btn-xs.w-8.h-8.p-0.text-gray-400(@click="handleZIndex(10)" title="На передний план") ⬆
+      //- Секция: Позиция и размер
+      section
+        .section-title Позиция и размер
+        .grid.grid-cols-2(
+          class="gap-2"
+        )
+          .field
+            label.field-label X
+            input.field-input(
+              type="number"
+              :value="selectedElement.x"
+              @input="handleInput('x', evNumber($event))"
+            )
+          .field
+            label.field-label Y
+            input.field-input(
+              type="number"
+              :value="selectedElement.y"
+              @input="handleInput('y', evNumber($event))"
+            )
+          .field
+            label.field-label Ширина
+            input.field-input(
+              type="number"
+              :value="selectedElement.width"
+              @input="onWidthChange"
+            )
+          .field
+            label.field-label Высота
+            input.field-input(
+              type="number"
+              :value="selectedElement.height"
+              @input="onHeightChange"
+            )
+
+        .grid.grid-cols-6(
+          class="gap-4 mt-4"
+        )
+          .field
+            label.field-label Z-уровень
+            input.field-input(
+              type="number"
+              :value="selectedElement.zIndex || 0"
+              @input="handleInput('zIndex', evNumber($event))"
+            )
+          .field
+            label.field-label Пропорции
+            button.lock-btn.w-full(
+              :class="aspectRatioLocked ? 'active' : ''"
+              @click="toggleLock"
+            ) {{ aspectRatioLocked ? '🔒 Сохранять' : '🔓 Свободно' }}
+
+        .grid.grid-cols-6.items-center(
+          class="gap-4 mt-4"
+        )
+          button.z-btn.flex-0(
+            @click="handleZIndex(-10)"
+            title="На задний план"
+          ) ⬇ Назад
+          button.z-btn.flex-0(
+            @click="handleZIndex(10)"
+            title="На передний план"
+          ) ⬆ Вперёд
 
       //- ==========================================
-      //- БЛОК ДЛЯ ВОРОТ/КАЛИТКИ
+      //- ВОРОТА / КАЛИТКА
       //- ==========================================
       template(v-if="isGateElement")
-        .mt-3.rounded.p-2.bg-gray-800
-          .mb-2.text-gray-400 Свойства ворот/калитки
-          .flex.items-center.gap-2.mb-2
-            span.text-gray-400 Тип:
-            select.select.select-xs.select-bordered.bg-gray-800(:value="selectedElement.settings?.gateType" @change="updateGateType($event.target.value)")
-              option(value="") — Выберите тип —
-              option(value="sliding") Откатные (ворота)
-              option(value="wicket") Распашная (калитка)
-            button.btn.btn-xs.border-none(:class="selectedElement.settings?.isOpen ? 'btn-success' : 'btn-warning'" @click="toggleGateOpen") {{ selectedElement.settings?.isOpen ? 'Открыты' : 'Закрыты' }}
-          .flex.items-center.gap-2.mb-2
-            span.w-24.text-gray-400 Время открытия:
-            input.input.input-xs.input-bordered.w-20.bg-gray-800(type="number" step="0.5" min="0.5" :value="selectedElement.settings?.openDuration || 2" @input="updateGateDuration('open', Number($event.target.value))")
-            span.text-gray-400 сек
-          .flex.items-center.gap-2.mb-2
-            span.w-24.text-gray-400 Время закрытия:
-            input.input.input-xs.input-bordered.w-20.bg-gray-800(type="number" step="0.5" min="0.5" :value="selectedElement.settings?.closeDuration || 2" @input="updateGateDuration('close', Number($event.target.value))")
-            span.text-gray-400 сек
+        section
+          .section-title Ворота / Калитка
+          .grid.grid-cols-6(
+            class="gap-4"
+          )
+            .field
+              label.field-label Тип
+              select.field-input(
+                :value="selectedElement.settings?.gateType"
+                @change="updateGateType(evValue($event))"
+              )
+                option(value="") — Выберите —
+                option(value="sliding") Откатные
+                option(value="wicket") Распашная
+            .field
+              label.field-label Статус
+              button.btn.w-full.h-full(
+                class="h-6 text-xs"
+                :class="selectedElement.settings?.isOpen ? 'btn-success' : 'btn-warning'"
+                @click="toggleGateOpen"
+              ) {{ selectedElement.settings?.isOpen ? '🔓 Открыты' : '🔒 Закрыты' }}
 
-          .mt-3.pt-2.border-t.border-gray-700
-          .mb-2.text-gray-400 Внешний вид
-          .grid.grid-cols-2.gap-2.mb-2
-            .flex.items-center.gap-1
-              label.text-gray-400 Фон:
-              input.input.input-xs.input-bordered.w-10.h-6.p-0.flex-shrink-0.bg-gray-800(type="color" :value="selectedElement.settings?.frameColor || '#000000'" @input="updateGateStyle('frameColor', $event.target.value)")
-              input.input.input-xs.input-bordered.w-full.bg-gray-900(type="text" :value="selectedElement.settings?.frameColor || 'none'" @input="updateGateStyle('frameColor', $event.target.value)")
-            .flex.items-center.gap-1
-              label.text-gray-400 Прутки:
-              input.input.input-xs.input-bordered.w-10.h-6.p-0.flex-shrink-0.bg-gray-800(type="color" :value="selectedElement.settings?.barColor || '#9ca3af'" @input="updateGateStyle('barColor', $event.target.value)")
-              input.input.input-xs.input-bordered.w-full.bg-gray-900(type="text" :value="selectedElement.settings?.barColor || '#9ca3af'" @input="updateGateStyle('barColor', $event.target.value)")
-          
-          .grid.grid-cols-3.gap-2.mb-2
-            .flex.items-center.gap-1
-              label.text-gray-400 Толщ:
-              input.input.input-xs.input-bordered.w-full.bg-gray-800(type="number" min="1" max="20" :value="selectedElement.settings?.barWidth || 4" @input="updateGateStyle('barWidth', Number($event.target.value))")
-            .flex.items-center.gap-1
-              label.text-gray-400 Шаг:
-              input.input.input-xs.input-bordered.w-full.bg-gray-800(type="number" min="4" max="50" :value="selectedElement.settings?.barSpacing || 12" @input="updateGateStyle('barSpacing', Number($event.target.value))")
-            .flex.items-center.gap-1
-              label.text-gray-400 Прозр:
-              input.input.input-xs.input-bordered.w-full.bg-gray-800(type="number" step="0.1" min="0.1" max="1" :value="selectedElement.settings?.barOpacity ?? 0.9" @input="updateGateStyle('barOpacity', Number($event.target.value))")
+          .grid.grid-cols-6(
+            class="gap-4 mt-4"
+          )
+            .field
+              label.field-label Открытие (с)
+              input.field-input(
+                type="number"
+                step="0.5"
+                min="0.5"
+                :value="selectedElement.settings?.openDuration || 2"
+                @input="updateGateDuration('open', evNumber($event))"
+              )
+            .field
+              label.field-label Закрытие (с)
+              input.field-input(
+                type="number"
+                step="0.5"
+                min="0.5"
+                :value="selectedElement.settings?.closeDuration || 2"
+                @input="updateGateDuration('close', evNumber($event))"
+              )
+
+        section
+          .section-title Внешний вид
+          .grid.grid-cols-6(
+            class="gap-4"
+          )
+            .field
+              label.field-label Фон
+              input.color-input(
+                type="color"
+                :value="selectedElement.settings?.frameColor || '#000000'"
+                @input="updateGateStyle('frameColor', evValue($event))"
+              )
+            .field
+              label.field-label Прутки
+              input.color-input(
+                type="color"
+                :value="selectedElement.settings?.barColor || '#9ca3af'"
+                @input="updateGateStyle('barColor', evValue($event))"
+              )
+            .field
+              label.field-label Толщина
+              input.field-input(
+                type="number"
+                min="1"
+                max="20"
+                :value="selectedElement.settings?.barWidth || 4"
+                @input="updateGateStyle('barWidth', evNumber($event))"
+              )
+            .field
+              label.field-label Шаг
+              input.field-input(
+                type="number"
+                min="4"
+                max="50"
+                :value="selectedElement.settings?.barSpacing || 12"
+                @input="updateGateStyle('barSpacing', evNumber($event))"
+              )
+
+          .field.mt-2
+            label.field-label Прозрачность
+            input.field-input(
+              type="number"
+              step="0.1"
+              min="0.1"
+              max="1"
+              :value="selectedElement.settings?.barOpacity ?? 0.9"
+              @input="updateGateStyle('barOpacity', evNumber($event))"
+            )
 
           template(v-if="isWicketGate")
-            .grid.grid-cols-3.gap-2.mb-2
-              .flex.items-center.gap-1
-                label.text-gray-400 Ручка:
-                input.input.input-xs.input-bordered.w-10.h-6.p-0.flex-shrink-0.bg-gray-800(type="color" :value="selectedElement.settings?.handleColor || '#d97706'" @input="updateGateStyle('handleColor', $event.target.value)")
-              .flex.items-center.gap-1
-                label.text-gray-400 Шир:
-                input.input.input-xs.input-bordered.w-full.bg-gray-800(type="number" min="2" max="20" :value="selectedElement.settings?.handleWidth || 8" @input="updateGateStyle('handleWidth', Number($event.target.value))")
-              .flex.items-center.gap-1
-                label.text-gray-400 Выс:
-                input.input.input-xs.input-bordered.w-full.bg-gray-800(type="number" min="4" max="40" :value="selectedElement.settings?.handleHeight || 16" @input="updateGateStyle('handleHeight', Number($event.target.value))")
+            .grid.grid-cols-6(
+              class="gap-4 mt-4"
+            )
+              .field
+                label.field-label Цвет ручки
+                input.color-input(
+                  type="color"
+                  :value="selectedElement.settings?.handleColor || '#d97706'"
+                  @input="updateGateStyle('handleColor', evValue($event))"
+                )
+              .field
+                label.field-label Ширина ручки
+                input.field-input(
+                  type="number"
+                  min="2"
+                  max="20"
+                  :value="selectedElement.settings?.handleWidth || 8"
+                  @input="updateGateStyle('handleWidth', evNumber($event))"
+                )
+            .field.mt-2
+              label.field-label Высота ручки
+              input.field-input(
+                type="number"
+                min="4"
+                max="40"
+                :value="selectedElement.settings?.handleHeight || 16"
+                @input="updateGateStyle('handleHeight', evNumber($event))"
+              )
 
-          .mt-3.pt-2.border-t.border-gray-700
-          .mb-2.text-gray-300.font-bold Точки траекторий
-          .text-xxs.text-gray-500.mb-3 Смещение от левого верхнего угла ворот
-          
-          template(v-if="!selectedElement.settings?.gateType")
-            .text-xxs.text-yellow-500.ml-3 ⚠️ Сначала выберите тип (Откатные или Калитка)
-
-          template(v-if="showCarTrajectory")
-            .mb-3
-              .text-xxs.text-green-400.mb-1.font-bold ⬇ ВЪЕЗД АВТО
-              .text-xxs.text-gray-500.mb-1.ml-3 Спавн (появление снаружи)
-              .grid.grid-cols-2.gap-x-2.gap-y-1.mb-2.ml-3
-                .flex.items-center.gap-1
-                  span.w-10.text-xxs.text-green-400 🚗 X:
-                  input.input.input-xs.input-bordered.w-full.bg-gray-900(type="number" step="1" :value="selectedElement.settings?.spawnEnterCarX || ''" @input="updatePoint('spawnEnterCar', 'x', $event)")
-                .flex.items-center.gap-1
-                  span.w-10.text-xxs.text-green-400 🚗 Y:
-                  input.input.input-xs.input-bordered.w-full.bg-gray-900(type="number" step="1" :value="selectedElement.settings?.spawnEnterCarY || ''" @input="updatePoint('spawnEnterCar', 'y', $event)")
-              .text-xxs.text-gray-500.mb-1.ml-3 Остановка (перед воротами)
-              .grid.grid-cols-2.gap-x-2.gap-y-1.mb-2.ml-3
-                .flex.items-center.gap-1
-                  span.w-10.text-xxs.text-orange-400 🚗 X:
-                  input.input.input-xs.input-bordered.w-full.bg-gray-900(type="number" step="1" :value="selectedElement.settings?.stopEnterCarX ?? ''" @input="updatePoint('stopEnterCar', 'x', $event)")
-                .flex.items-center.gap-1
-                  span.w-10.text-xxs.text-orange-400 🚗 Y:
-                  input.input.input-xs.input-bordered.w-full.bg-gray-900(type="number" step="1" :value="selectedElement.settings?.stopEnterCarY ?? ''" @input="updatePoint('stopEnterCar', 'y', $event)")
-              .text-xxs.text-gray-500.mb-1.ml-3 Движение (за воротами)
-              .grid.grid-cols-2.gap-x-2.gap-y-1.mb-2.ml-3
-                .flex.items-center.gap-1
-                  span.w-10.text-xxs.text-yellow-400 🚗 X:
-                  input.input.input-xs.input-bordered.w-full.bg-gray-900(type="number" step="1" :value="selectedElement.settings?.crossEnterCarX ?? ''" @input="updatePoint('crossEnterCar', 'x', $event)")
-                .flex.items-center.gap-1
-                  span.w-10.text-xxs.text-yellow-400 🚗 Y:
-                  input.input.input-xs.input-bordered.w-full.bg-gray-900(type="number" step="1" :value="selectedElement.settings?.crossEnterCarY ?? ''" @input="updatePoint('crossEnterCar', 'y', $event)")
-              .text-xxs.text-gray-500.mb-1.ml-3 Деспавн (уход вглубь)
-              .grid.grid-cols-2.gap-x-2.gap-y-1.ml-3
-                .flex.items-center.gap-1
-                  span.w-10.text-xxs.text-gray-400 🚗 X:
-                  input.input.input-xs.input-bordered.w-full.bg-gray-900(type="number" step="1" :value="selectedElement.settings?.despawnEnterCarX || ''" @input="updatePoint('despawnEnterCar', 'x', $event)")
-                .flex.items-center.gap-1
-                  span.w-10.text-xxs.text-gray-400 🚗 Y:
-                  input.input.input-xs.input-bordered.w-full.bg-gray-900(type="number" step="1" :value="selectedElement.settings?.despawnEnterCarY || ''" @input="updatePoint('despawnEnterCar', 'y', $event)")
-            .mb-1
-              .text-xxs.text-red-400.mb-1.font-bold ⬆ ВЫЕЗД АВТО
-              .text-xxs.text-gray-500.mb-1.ml-3 Спавн (появление изнутри)
-              .grid.grid-cols-2.gap-x-2.gap-y-1.mb-2.ml-3
-                .flex.items-center.gap-1
-                  span.w-10.text-xxs.text-red-400 🚗 X:
-                  input.input.input-xs.input-bordered.w-full.bg-gray-900(type="number" step="1" :value="selectedElement.settings?.spawnExitCarX || ''" @input="updatePoint('spawnExitCar', 'x', $event)")
-                .flex.items-center.gap-1
-                  span.w-10.text-xxs.text-red-400 🚗 Y:
-                  input.input.input-xs.input-bordered.w-full.bg-gray-900(type="number" step="1" :value="selectedElement.settings?.spawnExitCarY || ''" @input="updatePoint('spawnExitCar', 'y', $event)")
-              .text-xxs.text-gray-500.mb-1.ml-3 Остановка (перед воротами)
-              .grid.grid-cols-2.gap-x-2.gap-y-1.mb-2.ml-3
-                .flex.items-center.gap-1
-                  span.w-10.text-xxs.text-pink-400 🚗 X:
-                  input.input.input-xs.input-bordered.w-full.bg-gray-900(type="number" step="1" :value="selectedElement.settings?.stopExitCarX ?? ''" @input="updatePoint('stopExitCar', 'x', $event)")
-                .flex.items-center.gap-1
-                  span.w-10.text-xxs.text-pink-400 🚗 Y:
-                  input.input.input-xs.input-bordered.w-full.bg-gray-900(type="number" step="1" :value="selectedElement.settings?.stopExitCarY ?? ''" @input="updatePoint('stopExitCar', 'y', $event)")
-              .text-xxs.text-gray-500.mb-1.ml-3 Движение (за воротами)
-              .grid.grid-cols-2.gap-x-2.gap-y-1.mb-2.ml-3
-                .flex.items-center.gap-1
-                  span.w-10.text-xxs.text-yellow-400 🚗 X:
-                  input.input.input-xs.input-bordered.w-full.bg-gray-900(type="number" step="1" :value="selectedElement.settings?.crossExitCarX ?? ''" @input="updatePoint('crossExitCar', 'x', $event)")
-                .flex.items-center.gap-1
-                  span.w-10.text-xxs.text-yellow-400 🚗 Y:
-                  input.input.input-xs.input-bordered.w-full.bg-gray-900(type="number" step="1" :value="selectedElement.settings?.crossExitCarY ?? ''" @input="updatePoint('crossExitCar', 'y', $event)")
-              .text-xxs.text-gray-500.mb-1.ml-3 Деспавн (уход за экран)
-              .grid.grid-cols-2.gap-x-2.gap-y-1.ml-3
-                .flex.items-center.gap-1
-                  span.w-10.text-xxs.text-gray-400 🚗 X:
-                  input.input.input-xs.input-bordered.w-full.bg-gray-900(type="number" step="1" :value="selectedElement.settings?.despawnExitCarX || ''" @input="updatePoint('despawnExitCar', 'x', $event)")
-                .flex.items-center.gap-1
-                  span.w-10.text-xxs.text-gray-400 🚗 Y:
-                  input.input.input-xs.input-bordered.w-full.bg-gray-900(type="number" step="1" :value="selectedElement.settings?.despawnExitCarY || ''" @input="updatePoint('despawnExitCar', 'y', $event)")
-
-          template(v-if="showPersonTrajectory")
-            .mb-3
-              .text-xxs.text-green-400.mb-1.font-bold ⬇ ВХОД ПЕШЕХОДА
-              .text-xxs.text-gray-500.mb-1.ml-3 Спавн (появление снаружи)
-              .grid.grid-cols-2.gap-x-2.gap-y-1.mb-2.ml-3
-                .flex.items-center.gap-1
-                  span.w-10.text-xxs.text-green-400 👤 X:
-                  input.input.input-xs.input-bordered.w-full.bg-gray-900(type="number" step="1" :value="selectedElement.settings?.spawnEnterPersonX || ''" @input="updatePoint('spawnEnterPerson', 'x', $event)")
-                .flex.items-center.gap-1
-                  span.w-10.text-xxs.text-green-400 👤 Y:
-                  input.input.input-xs.input-bordered.w-full.bg-gray-900(type="number" step="1" :value="selectedElement.settings?.spawnEnterPersonY || ''" @input="updatePoint('spawnEnterPerson', 'y', $event)")
-              .text-xxs.text-gray-500.mb-1.ml-3 Остановка (перед калиткой)
-              .grid.grid-cols-2.gap-x-2.gap-y-1.mb-2.ml-3
-                .flex.items-center.gap-1
-                  span.w-10.text-xxs.text-cyan-400 👤 X:
-                  input.input.input-xs.input-bordered.w-full.bg-gray-900(type="number" step="1" :value="selectedElement.settings?.stopEnterPersonX ?? ''" @input="updatePoint('stopEnterPerson', 'x', $event)")
-                .flex.items-center.gap-1
-                  span.w-10.text-xxs.text-cyan-400 👤 Y:
-                  input.input.input-xs.input-bordered.w-full.bg-gray-900(type="number" step="1" :value="selectedElement.settings?.stopEnterPersonY ?? ''" @input="updatePoint('stopEnterPerson', 'y', $event)")
-              .text-xxs.text-gray-500.mb-1.ml-3 Движение (за калиткой)
-              .grid.grid-cols-2.gap-x-2.gap-y-1.mb-2.ml-3
-                .flex.items-center.gap-1
-                  span.w-10.text-xxs.text-yellow-400 👤 X:
-                  input.input.input-xs.input-bordered.w-full.bg-gray-900(type="number" step="1" :value="selectedElement.settings?.crossEnterPersonX ?? ''" @input="updatePoint('crossEnterPerson', 'x', $event)")
-                .flex.items-center.gap-1
-                  span.w-10.text-xxs.text-yellow-400 👤 Y:
-                  input.input.input-xs.input-bordered.w-full.bg-gray-900(type="number" step="1" :value="selectedElement.settings?.crossEnterPersonY ?? ''" @input="updatePoint('crossEnterPerson', 'y', $event)")
-              .text-xxs.text-gray-500.mb-1.ml-3 Деспавн (уход вглубь)
-              .grid.grid-cols-2.gap-x-2.gap-y-1.ml-3
-                .flex.items-center.gap-1
-                  span.w-10.text-xxs.text-gray-400 👤 X:
-                  input.input.input-xs.input-bordered.w-full.bg-gray-900(type="number" step="1" :value="selectedElement.settings?.despawnEnterPersonX || ''" @input="updatePoint('despawnEnterPerson', 'x', $event)")
-                .flex.items-center.gap-1
-                  span.w-10.text-xxs.text-gray-400 👤 Y:
-                  input.input.input-xs.input-bordered.w-full.bg-gray-900(type="number" step="1" :value="selectedElement.settings?.despawnEnterPersonY || ''" @input="updatePoint('despawnEnterPerson', 'y', $event)")
-            .mb-1
-              .text-xxs.text-red-400.mb-1.font-bold ⬆ ВЫХОД ПЕШЕХОДА
-              .text-xxs.text-gray-500.mb-1.ml-3 Спавн (появление изнутри)
-              .grid.grid-cols-2.gap-x-2.gap-y-1.mb-2.ml-3
-                .flex.items-center.gap-1
-                  span.w-10.text-xxs.text-red-400 👤 X:
-                  input.input.input-xs.input-bordered.w-full.bg-gray-900(type="number" step="1" :value="selectedElement.settings?.spawnExitPersonX || ''" @input="updatePoint('spawnExitPerson', 'x', $event)")
-                .flex.items-center.gap-1
-                  span.w-10.text-xxs.text-red-400 👤 Y:
-                  input.input.input-xs.input-bordered.w-full.bg-gray-900(type="number" step="1" :value="selectedElement.settings?.spawnExitPersonY || ''" @input="updatePoint('spawnExitPerson', 'y', $event)")
-              .text-xxs.text-gray-500.mb-1.ml-3 Остановка (перед калиткой)
-              .grid.grid-cols-2.gap-x-2.gap-y-1.mb-2.ml-3
-                .flex.items-center.gap-1
-                  span.w-10.text-xxs.text-purple-400 👤 X:
-                  input.input.input-xs.input-bordered.w-full.bg-gray-900(type="number" step="1" :value="selectedElement.settings?.stopExitPersonX ?? ''" @input="updatePoint('stopExitPerson', 'x', $event)")
-                .flex.items-center.gap-1
-                  span.w-10.text-xxs.text-purple-400 👤 Y:
-                  input.input.input-xs.input-bordered.w-full.bg-gray-900(type="number" step="1" :value="selectedElement.settings?.stopExitPersonY ?? ''" @input="updatePoint('stopExitPerson', 'y', $event)")
-              .text-xxs.text-gray-500.mb-1.ml-3 Движение (за калиткой)
-              .grid.grid-cols-2.gap-x-2.gap-y-1.mb-2.ml-3
-                .flex.items-center.gap-1
-                  span.w-10.text-xxs.text-yellow-400 👤 X:
-                  input.input.input-xs.input-bordered.w-full.bg-gray-900(type="number" step="1" :value="selectedElement.settings?.crossExitPersonX ?? ''" @input="updatePoint('crossExitPerson', 'x', $event)")
-                .flex.items-center.gap-1
-                  span.w-10.text-xxs.text-yellow-400 👤 Y:
-                  input.input.input-xs.input-bordered.w-full.bg-gray-900(type="number" step="1" :value="selectedElement.settings?.crossExitPersonY ?? ''" @input="updatePoint('crossExitPerson', 'y', $event)")
-              .text-xxs.text-gray-500.mb-1.ml-3 Деспавн (уход за экран)
-              .grid.grid-cols-2.gap-x-2.gap-y-1.ml-3
-                .flex.items-center.gap-1
-                  span.w-10.text-xxs.text-gray-400 👤 X:
-                  input.input.input-xs.input-bordered.w-full.bg-gray-900(type="number" step="1" :value="selectedElement.settings?.despawnExitPersonX || ''" @input="updatePoint('despawnExitPerson', 'x', $event)")
-                .flex.items-center.gap-1
-                  span.w-10.text-xxs.text-gray-400 👤 Y:
-                  input.input.input-xs.input-bordered.w-full.bg-gray-900(type="number" step="1" :value="selectedElement.settings?.despawnExitPersonY || ''" @input="updatePoint('despawnExitPerson', 'y', $event)")
+        section(
+          v-if="showCarTrajectory || showPersonTrajectory"
+        )
+          .section-title Точки траектории
+          TrajectoryEditor(
+            :settings="selectedElement.settings"
+            :gateType="selectedElement.settings?.gateType"
+            @update:settings="onTrajectoryUpdate"
+          )
 
     //- ==========================================
-    //- ИНСПЕКТОР ПАНЕЛИ
+    //- ПАНЕЛЬ
     //- ==========================================
     template(v-else-if="selectedPanel && !selectedControl")
-      .mb-2.text-gray-300.font-bold Настройки Панели
-      .grid.grid-cols-2.gap-2.mb-2
-        .flex.col-span-2
-          .mb-1.text-gray-400 Заголовок:
-          input.input.input-xs.input-bordered.w-full.bg-gray-800(type="text" :value="selectedPanel.title" @input="updatePanel('title', $event.target.value)")
-        .flex.items-center.gap-1
-          label.text-gray-400 Z-уровень:
-          input.input.input-xs.input-bordered.w-full.bg-gray-800(type="number" :value="selectedPanel.zIndex || 100" @input="updatePanel('zIndex', Number($event.target.value))")
-        .flex.items-center.gap-1
-          label.text-gray-400 Фон:
-          input.input.input-xs.input-bordered.w-full.h-6.p-0.bg-gray-800(type="color" :value="selectedPanel.bgColor || '#2d3748'" @input="updatePanel('bgColor', $event.target.value)")
-        .flex.items-center.gap-1
-          label.text-gray-400 Рамка:
-          input.input.input-xs.input-bordered.w-full.h-6.p-0.bg-gray-800(type="color" :value="selectedPanel.borderColor || '#4a5568'" @input="updatePanel('borderColor', $event.target.value)")
-      .mb-2.text-gray-500 Примечание: Для изменения размера перетаскивайте углы панели на холсте.
+      section
+        .section-title Основное
+        .field
+          label.field-label Заголовок
+          input.field-input(
+            type="text"
+            :value="selectedPanel.title"
+            @input="updatePanel('title', evValue($event))"
+          )
+
+      section
+        .section-title Оформление
+        .grid.grid-cols-6(
+          class="gap-4"
+        )
+          .field
+            label.field-label Z-уровень
+            input.field-input(
+              type="number"
+              :value="selectedPanel.zIndex || 100"
+              @input="updatePanel('zIndex', evNumber($event))"
+            )
+          .field
+            label.field-label Фон
+            input.color-input(
+              type="color"
+              :value="selectedPanel.bgColor || '#2d3748'"
+              @input="updatePanel('bgColor', evValue($event))"
+            )
+        .field.mt-2
+          label.field-label Рамка
+          input.color-input(
+            type="color"
+            :value="selectedPanel.borderColor || '#4a5568'"
+            @input="updatePanel('borderColor', evValue($event))"
+          )
+
+      .hint Перетаскивайте углы панели на холсте.
 
     //- ==========================================
-    //- ВЫБРАН КОНТРОЛ (КНОПКА НА ПАНЕЛИ)
+    //- КОНТРОЛ
     //- ==========================================
     template(v-else-if="selectedControl")
-      .mb-2
-        .grid.grid-cols-2.gap-2
-          .flex
-            .mb-1.text-gray-400 Тип:
-            input.input.input-xs.input-bordered.bg-gray-800(type="text" :value="selectedControl.type" disabled)
-          .flex
-            .mb-1.text-gray-400 ID:
-            input.input.input-xs.input-bordered.bg-gray-800(type="text" :value="selectedControl.id" disabled)
-            
-      // === НОВЫЙ БЛОК: ГОРЯЧАЯ КЛАВИША ===
-      .mb-2.text-gray-400 Управление:
-      .flex.items-center.gap-2.mb-3
-        span.text-gray-400.w-28 Горячая клавиша:
-        button.btn.btn-xs.border.border-gray-600.w-28.h-6.flex.items-center.justify-center.text-center.font-mono(
-          :class="isListeningHotkey ? 'border-amber-500 text-amber-400 bg-amber-500/10 animate-pulse' : 'hover:border-gray-400'"
-          @click="startListeningHotkey"
-          @dblclick.prevent
+      section
+        .section-title Информация
+        .grid.grid-cols-6(
+          class="gap-4"
         )
-          span(v-if="isListeningHotkey") Нажмите...
-          span(v-else-if="selectedControl?.settings?.hotkey") {{ selectedControl.settings.hotkey }}
-          span(v-else.text-gray-600) Не задана
-        button.btn.btn-ghost.btn-xs.text-red-400.w-6.h-6.p-0(
-          v-if="selectedControl?.settings?.hotkey && !isListeningHotkey"
-          @click="clearHotkey"
-          title="Сбросить"
-        ) ✕
-      // === КОНЕЦ БЛОКА ===
+          .field
+            label.field-label Тип
+            input.field-input(
+              type="text"
+              :value="selectedControl.type"
+              disabled
+            )
+          .field
+            label.field-label ID
+            input.field-input(
+              type="text"
+              :value="selectedControl.id"
+              disabled
+            )
 
-      .mb-2.text-gray-400 Внешний вид:
-      .grid.grid-cols-2.gap-2.mb-2
-        .flex.items-center
-          label.text-gray-400 Цвет:
-          input.input.input-xs.input-bordered.w-full.bg-gray-800(type="color" v-model="controlColor")
-        .flex.items-center
-          label.text-gray-400 Ширина:
-          input.input.input-xs.input-bordered.w-full.bg-gray-800(type="number" v-model="controlWidth" min="20")
-        .flex.items-center
-          label.text-gray-400 Высота:
-          input.input.input-xs.input-bordered.w-full.bg-gray-800(type="number" v-model="controlHeight" min="20")
-        .flex.items-center
-          label.text-gray-400 Скругление:
-          input.input.input-xs.input-bordered.w-full.bg-gray-800(type="number" v-model="controlBorderRadius" min="0" max="50")
-      .mb-2.text-gray-400 Надпись:
-      .grid.grid-cols-2.gap-2.mb-2
-        .flex.items-center
-          label.text-gray-400 Текст:
-          input.input.input-xs.input-bordered.w-full.bg-gray-800(type="text" v-model="controlLabel")
-        .flex.items-center
-          .flex.items-center
-          label.text-gray-400 Положение:
-          select.select.select-xs.select-bordered.bg-gray-800(v-model="controlLabelPosition")
-            option(value="inside") Внутри кнопки
-            option(value="bottom") Под кнопкой
-        .flex.items-center
-          label.text-gray-400 Шрифт:
-          input.input.input-xs.input-bordered.w-full.bg-gray-800(type="number" v-model="controlFontSize" min="8" max="24")
-        .flex.items-center
-          label.text-gray-400 Цвет:
-          input.input.input-xs.input-bordered.w-full.bg-gray-800(type="color" v-model="controlTextColor")
-        .flex.items-center
-          label.text-gray-400 Выравн.:
-          select.select.select-xs.select-bordered.bg-gray-800(v-model="controlLabelAlign")
-            option(value="left") По левому краю
-            option(value="center") По центру
-            option(value="right") По правому краю
-        .flex.items-center
-          label.text-gray-400 Фон:
-          input.input.input-xs.input-bordered.w-full.bg-gray-800(type="text" v-model="controlLabelBg" placeholder="transparent или #000")
-        .flex.items-center
-          label.text-gray-400 Padding:
-          input.input.input-xs.input-bordered.w-full.bg-gray-800(type="text" v-model="controlLabelPadding" placeholder="2px 4px")
-        .flex.items-center
-          label.text-gray-400 Margin:
-          input.input.input-xs.input-bordered.w-full.bg-gray-800(type="number" v-model="controlLabelMarginTop" min="0" max="20")
-      .mb-2.text-gray-400 Управление:
-      .flex.items-center.gap-2.mb-2
-        span.text-gray-400 Цель:
-        select.select.select-xs.select-bordered.bg-gray-800.flex-1(v-model="controlTargetGateId")
+      section
+        .section-title Горячая клавиша
+        .flex.items-center(
+          class="gap-4"
+        )
+          button.hotkey-btn.flex-1(
+            :class="isListeningHotkey ? 'listening' : ''"
+            @click="startListeningHotkey"
+            @dblclick.prevent
+          )
+            span(v-if="isListeningHotkey") Нажмите клавишу...
+            span(v-else-if="selectedControl?.settings?.hotkey") {{ selectedControl.settings.hotkey }}
+            span(v-else) Не задана
+          button.btn.btn-ghost.btn-xs.text-red-400.w-7.h-7.p-0(
+            v-if="selectedControl?.settings?.hotkey && !isListeningHotkey"
+            @click="clearHotkey"
+            title="Сбросить"
+          ) ✕
+
+      section
+        .section-title Внешний вид
+        .grid.grid-cols-6(
+          class="gap-4"
+        )
+          .field
+            label.field-label Цвет
+            input.color-input(
+              type="color"
+              v-model="controlColor"
+            )
+          .field
+            label.field-label Ширина
+            input.field-input(
+              type="number"
+              v-model="controlWidth"
+              min="20"
+            )
+          .field
+            label.field-label Высота
+            input.field-input(
+              type="number"
+              v-model="controlHeight"
+              min="20"
+            )
+          .field
+            label.field-label Скругление
+            input.field-input(
+              type="number"
+              v-model="controlBorderRadius"
+              min="0"
+              max="50"
+            )
+          .field
+            label.field-label Шрифт
+            input.field-input(
+              type="number"
+              v-model="controlFontSize"
+              min="8"
+              max="24"
+            )
+          .field
+            label.field-label Цвет текста
+            input.color-input(
+              type="color"
+              v-model="controlTextColor"
+            )
+
+      section
+        .section-title Надпись
+        .field
+          label.field-label Текст
+          input.field-input(
+            type="text"
+            v-model="controlLabel"
+          )
+
+        .grid.grid-cols-6(
+          class="gap-4 mt-4"
+        )
+          .field
+            label.field-label Позиция
+            select.field-input(
+              v-model="controlLabelPosition"
+            )
+              option(value="inside") Внутри
+              option(value="bottom") Снизу
+          .field
+            label.field-label Выравнивание
+            select.field-input(
+              v-model="controlLabelAlign"
+            )
+              option(value="left") Слева
+              option(value="center") Центр
+              option(value="right") Справа
+
+        .grid.grid-cols-6(
+          class="gap-4 mt-4"
+        )
+          .field
+            label.field-label Фон
+            input.field-input(
+              type="text"
+              v-model="controlLabelBg"
+              placeholder="—"
+            )
+          .field
+            label.field-label Padding
+            input.field-input(
+              type="text"
+              v-model="controlLabelPadding"
+              placeholder="—"
+            )
+
+        .field.mt-2
+          label.field-label Отступ сверху
+          input.field-input(
+            type="number"
+            v-model="controlLabelMarginTop"
+            min="0"
+            max="20"
+          )
+
+      section
+        .section-title Цель
+        select.field-input.w-full(
+          v-model="controlTargetGateId"
+        )
           option(value="") — Не выбрано —
-          option(v-for="gate in availableGates" :key="gate.id" :value="gate.id") {{ getGateDisplayName(gate) }}
-      .flex.justify-end.mt-2
-        button.btn.btn-xs.btn-error(@click="$emit('delete-control', { pId: selectedControlPanelId, cId: selectedControl.id })") Удалить
+          option(
+            v-for="gate in availableGates"
+            :key="gate.id"
+            :value="gate.id"
+          ) {{ getGateDisplayName(gate) }}
+
+      button.btn.btn-sm.btn-error.w-full.mt-2(
+        class="h-8 text-sm"
+        @click="$emit('delete-control', { pId: selectedControlPanelId, cId: selectedControl.id })"
+      ) Удалить кнопку
 
     //- ==========================================
-    //- НАСТРОЙКИ СЦЕНЫ
+    //- СЦЕНА
     //- ==========================================
     template(v-else)
-      .mb-3.text-gray-400 Настройки Сцены
-      .grid.grid-cols-2.gap-2.mb-2
-        .flex.items-center.gap-1
-          label.text-gray-400 ширина:
-          input.input.input-xs.input-bordered.w-16.text-center.bg-gray-800(type="number" :value="settings.width" @input="$emit('update:settings', { key: 'width', val: Number($event.target.value) })")
-          span.text-gray-400 px
-        .flex.items-center.gap-1
-          label.text-gray-400 высота:
-          input.input.input-xs.input-bordered.w-16.text-center.bg-gray-800(type="number" :value="settings.height" @input="$emit('update:settings', { key: 'height', val: Number($event.target.value) })")
-          span.text-gray-400 px
-      .flex.items-center.gap-2.mb-3
-        .text-gray-400 Цвет фона:
-        input.input.input-xs.input-bordered.flex-1.h-6.p-0.bg-gray-800(type="color" :value="settings.bgColor" @input="$emit('update:settings', { key: 'bgColor', val: $event.target.value })")
+      section
+        .section-title Размер холста
+        .grid.grid-cols-6(
+          class="gap-4"
+        )
+          .field
+            label.field-label Ширина
+            input.field-input(
+              type="number"
+              :value="settings.width"
+              @input="$emit('update:settings', { key: 'width', val: evNumber($event) })"
+            )
+          .field
+            label.field-label Высота
+            input.field-input(
+              type="number"
+              :value="settings.height"
+              @input="$emit('update:settings', { key: 'height', val: evNumber($event) })"
+            )
 
-      .mt-3.pt-3.border-t.border-gray-700
-      .mb-2.text-gray-300.font-bold Трафик (Симуляция)
-      .flex.items-center.gap-2.mb-3
-        .text-gray-400.w-28 Макс. агентов:
-        input.input.input-xs.input-bordered.w-20.text-center.bg-gray-800(type="number" min="1" max="100" :value="settings.traffic?.maxAgents ?? 4" @input="updateTraffic('maxAgents', Number($event.target.value))")
-        
-      .text-xxs.text-gray-500.mb-1.ml-1 Интервал спавна людей (сек)
-      .grid.grid-cols-2.gap-2.mb-3.ml-1
-        .flex.items-center.gap-1
-          label.text-gray-400 От:
-          input.input.input-xs.input-bordered.w-full.bg-gray-800(type="number" min="1" :value="settings.traffic?.spawnIntervalMin || 10" @input="updateTraffic('spawnIntervalMin', Number($event.target.value))")
-        .flex.items-center.gap-1
-          label.text-gray-400 До:
-          input.input.input-xs.input-bordered.w-full.bg-gray-800(type="number" min="1" :value="settings.traffic?.spawnIntervalMax || 30" @input="updateTraffic('spawnIntervalMax', Number($event.target.value))")
+        .field.mt-2
+          label.field-label Цвет фона
+          input.color-input(
+            type="color"
+            :value="settings.bgColor"
+            @input="$emit('update:settings', { key: 'bgColor', val: evValue($event) })"
+          )
 
-      .text-xxs.text-gray-500.mb-1.ml-1 Интервал спавна авто (сек)
-      .grid.grid-cols-2.gap-2.mb-1.ml-1
-        .flex.items-center.gap-1
-          label.text-gray-400 От:
-          input.input.input-xs.input-bordered.w-full.bg-gray-800(type="number" min="1" :value="settings.traffic?.carSpawnIntervalMin || 5" @input="updateTraffic('carSpawnIntervalMin', Number($event.target.value))")
-        .flex.items-center.gap-1
-          label.text-gray-400 До:
-          input.input.input-xs.input-bordered.w-full.bg-gray-800(type="number" min="1" :value="settings.traffic?.carSpawnIntervalMax || 15" @input="updateTraffic('carSpawnIntervalMax', Number($event.target.value))")
+      section
+        .section-title Трафик (симуляция)
+        .grid.grid-cols-6(
+          class="gap-4"
+        )
+          .field
+            label.field-label Макс. агентов
+            input.field-input(
+              type="number"
+              min="1"
+              max="100"
+              :value="settings.traffic?.maxAgents ?? 4"
+              @input="updateTraffic('maxAgents', evNumber($event))"
+            )
+          .field
+            label.field-label Ширина машин
+            input.field-input(
+              type="number"
+              min="50"
+              :value="settings.traffic?.carWidth || 160"
+              @input="updateTraffic('carWidth', evNumber($event))"
+            )
+          .field
+            label.field-label Высота машин
+            input.field-input(
+              type="number"
+              min="30"
+              :value="settings.traffic?.carHeight"
+              @input="updateTraffic('carHeight', evNumber($event))"
+            )
 
-      .text-xxs.text-gray-500.mb-1.mt-2.ml-1 Размер машин (пиксели)
-      .grid.grid-cols-2.gap-2.mb-1.ml-1
-        .flex.items-center.gap-1
-          label.text-gray-400 Ширина:
-          input.input.input-xs.input-bordered.w-full.bg-gray-800(type="number" min="50" :value="settings.traffic?.carWidth || 160" @input="updateTraffic('carWidth', Number($event.target.value))")
-        .flex.items-center.gap-1
-          label.text-gray-400 Высота:
-          input.input.input-xs.input-bordered.w-full.bg-gray-800(type="number" min="30" :value="settings.traffic?.carHeight")
+        .grid.grid-cols-6(
+          class="gap-4 mt-4"
+        )
+          .field
+            label.field-label Люди: интервал от
+            input.field-input(
+              type="number"
+              min="1"
+              :value="settings.traffic?.spawnIntervalMin || 10"
+              @input="updateTraffic('spawnIntervalMin', evNumber($event))"
+            )
+          .field
+            label.field-label Люди: до
+            input.field-input(
+              type="number"
+              min="1"
+              :value="settings.traffic?.spawnIntervalMax || 30"
+              @input="updateTraffic('spawnIntervalMax', evNumber($event))"
+            )
+
+        .grid.grid-cols-6(
+          class="gap-4 mt-4"
+        )
+          .field
+            label.field-label Авто: интервал от
+            input.field-input(
+              type="number"
+              min="1"
+              :value="settings.traffic?.carSpawnIntervalMin || 5"
+              @input="updateTraffic('carSpawnIntervalMin', evNumber($event))"
+            )
+          .field
+            label.field-label Авто: до
+            input.field-input(
+              type="number"
+              min="1"
+              :value="settings.traffic?.carSpawnIntervalMax || 15"
+              @input="updateTraffic('carSpawnIntervalMax', evNumber($event))"
+            )
 </template>
 
 <script setup lang="ts">
+// app/components/editor/EditorSidebarRight.vue — script
+// Инспектор редактора: свойства элемента / панели / контрола / сцены.
+// [ИСПРАВЛЕНО] evValue/evNumber: $event.target в шаблоне типизируется как
+// EventTarget | null без .value — все обработчики переведены на хелперы.
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import type { SceneElement, SceneSettings, Control, Panel } from '../../types/scene'
+import TrajectoryEditor from './TrajectoryEditor.vue'
 
-// ИСПРАВЛЕНИЕ: Используем withDefaults, чтобы приложение не крашилось,
-// если родитель временно не передал пропс panels
 const props = withDefaults(defineProps<{
   selectedElement: SceneElement | null
   selectedControl?: Control | null
@@ -444,9 +617,12 @@ const emit = defineEmits([
   'update:panel', 'delete-panel', 'execute-control'
 ])
 
-// ==========================================
-// ЛОГИКА НАЗНАЧЕНИЯ ГОРЯЧИХ КЛАВИШ
-// ==========================================
+// --- Хелперы событий (замена $event.target.value из шаблона) ---
+// Читает строковое значение из события input/change
+const evValue = (e: Event): string => (e.target as HTMLInputElement | HTMLSelectElement | null)?.value ?? ''
+// Читает числовое значение из события
+const evNumber = (e: Event): number => Number(evValue(e))
+
 const isListeningHotkey = ref(false)
 
 const startListeningHotkey = () => {
@@ -466,28 +642,22 @@ const formatHotkey = (e: KeyboardEvent): string | null => {
   if (e.ctrlKey || e.metaKey) parts.push('Ctrl')
   if (e.altKey) parts.push('Alt')
   if (e.shiftKey) parts.push('Shift')
-
   let key = e.key
   if (key === ' ') key = 'Space'
   else if (key.length === 1) key = key.toUpperCase()
-
   parts.push(key)
   return parts.join(' + ')
 }
 
 const handleGlobalKeyDown = (e: KeyboardEvent) => {
   const hotkeyStr = formatHotkey(e)
-  
-  // ЕСЛИ МЫ ЗАПИСЫВАЕМ НОВУЮ КЛАВИШУ — ПЕРЕХВАТЫВАЕМ
   if (isListeningHotkey.value) {
     e.preventDefault()
-    e.stopImmediatePropagation() 
-
+    e.stopImmediatePropagation()
     if (e.key === 'Escape') {
       isListeningHotkey.value = false
       return
     }
-
     if (hotkeyStr) {
       updateControlSetting('hotkey', hotkeyStr)
       isListeningHotkey.value = false
@@ -496,7 +666,6 @@ const handleGlobalKeyDown = (e: KeyboardEvent) => {
   }
 }
 
-// Используем { capture: true }, чтобы наш слушатель срабатывал ДО глобальных слушателей приложения
 onMounted(() => {
   window.addEventListener('keydown', handleGlobalKeyDown, { capture: true })
 })
@@ -504,34 +673,40 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener('keydown', handleGlobalKeyDown, { capture: true })
 })
-// ==========================================
 
-// --- Вычисляемые свойства ---
 const selectedPanel = computed(() => props.panels?.find(p => p.id === props.selectedPanelId) || null)
-
 const isGateElement = computed(() => props.selectedElement?.category === 'gate' || props.selectedElement?.type === 'gate')
 const isSlidingGate = computed(() => props.selectedElement?.settings?.gateType === 'sliding')
 const isWicketGate = computed(() => props.selectedElement?.settings?.gateType === 'wicket')
-
 const showPersonTrajectory = computed(() => isWicketGate.value)
 const showCarTrajectory = computed(() => isSlidingGate.value)
 
-// --- Для элементов сцены ---
+const getElementIcon = (el: SceneElement | null): string => {
+  if (!el) return '📦'
+  if (el.type === 'person' || el.category === 'human') return '👤'
+  if (el.category === 'gate' || el.type === 'gate') return '🚪'
+  if (el.type === 'traffic_road') return '🛣️'
+  if (el.category === 'spawn_car' || el.category === 'despawn_car') return '🚗'
+  if (el.category === 'spawn_person' || el.category === 'despawn_person') return '🚶'
+  return '📦'
+}
+
 const aspectRatioLocked = ref(false)
 let currentRatio: number | null = null
 
 const toggleLock = () => {
   aspectRatioLocked.value = !aspectRatioLocked.value
   if (aspectRatioLocked.value && props.selectedElement) {
-    const w = props.selectedElement.width
-    const h = props.selectedElement.height
+    // [ИСПРАВЛЕНО] width/height опциональны — явный fallback до арифметики
+    const w = props.selectedElement.width ?? 0
+    const h = props.selectedElement.height ?? 0
     currentRatio = (h > 0) ? w / h : 1
   } else currentRatio = null
 }
 
 const onWidthChange = (e: Event) => {
   if (!props.selectedElement) return
-  const newWidth = Number((e.target as HTMLInputElement).value)
+  const newWidth = evNumber(e)
   const changes: any = { width: newWidth }
   if (aspectRatioLocked.value && currentRatio !== null) {
     let newHeight = Math.round(newWidth / currentRatio)
@@ -544,7 +719,7 @@ const onWidthChange = (e: Event) => {
 
 const onHeightChange = (e: Event) => {
   if (!props.selectedElement) return
-  const newHeight = Number((e.target as HTMLInputElement).value)
+  const newHeight = evNumber(e)
   const changes: any = { height: newHeight }
   if (aspectRatioLocked.value && currentRatio !== null) {
     let newWidth = Math.round(newHeight * currentRatio)
@@ -559,14 +734,12 @@ const handleInput = (key: string, value: any) => {
   if (props.selectedElement) emit('update:element', props.selectedElement.id, { [key]: value })
 }
 
-// Управление Z-уровнем
 const handleZIndex = (step: number) => {
   if (!props.selectedElement) return
   const newZ = (props.selectedElement.zIndex || 0) + step
   emit('update:element', props.selectedElement.id, { zIndex: newZ })
 }
 
-// --- Логика ворот ---
 const updateGateType = (type: string) => {
   if (props.selectedElement) emit('update:element', props.selectedElement.id, { settings: { ...props.selectedElement.settings, gateType: type } })
 }
@@ -592,28 +765,16 @@ const updateGateStyle = (key: string, value: any) => {
   emit('update:element', props.selectedElement.id, { settings })
 }
 
-const updatePoint = (prefix: string, axis: 'x' | 'y', e: Event) => {
+const onTrajectoryUpdate = (newSettings: Record<string, any>) => {
   if (!props.selectedElement) return
-  const rawValue = (e.target as HTMLInputElement).value
-  const settings = { ...props.selectedElement.settings }
-  const key = `${prefix}${axis.toUpperCase()}`
-  
-  if (rawValue === '' || rawValue === null) {
-    delete settings[key]
-  } else {
-    settings[key] = Number(rawValue)
-  }
-  
-  emit('update:element', props.selectedElement.id, { settings })
+  emit('update:element', props.selectedElement.id, { settings: newSettings })
 }
 
-// --- Логика панели ---
 const updatePanel = (key: string, value: any) => {
   if (!props.selectedPanelId) return
   emit('update:panel', props.selectedPanelId, { [key]: value })
 }
 
-// --- Логика контролов ---
 const controlLabel = computed({ get: () => props.selectedControl?.settings?.label || '', set: (val) => updateControlSetting('label', val) })
 const controlColor = computed({ get: () => props.selectedControl?.settings?.color || '#3b82f6', set: (val) => updateControlSetting('color', val) })
 const controlWidth = computed({ get: () => props.selectedControl?.settings?.width || 60, set: (val) => updateControlSetting('width', Number(val)) })
@@ -634,7 +795,6 @@ const updateControlSetting = (key: string, value: any) => {
   emit('update:control', props.selectedControlPanelId, props.selectedControl.id, { settings: newSettings })
 }
 
-// --- Логика сцены ---
 const updateTraffic = (key: string, value: number) => {
   emit('update:settings', { key: `traffic.${key}`, val: value })
 }
@@ -642,8 +802,199 @@ const updateTraffic = (key: string, value: number) => {
 const availableGates = computed(() => props.sceneElements.filter(el => el.category === 'gate' || el.category === 'barrier' || el.type === 'gate'))
 
 const getGateDisplayName = (gate: SceneElement) => {
-  let typeName = gate.settings?.gateType === 'wicket' ? 'Калитка' : 'Ворота'
+  const typeName = gate.settings?.gateType === 'wicket' ? 'Калитка' : 'Ворота'
   if (gate.name) return `${typeName}: ${gate.name}`
   return `${typeName} (${gate.id.slice(-6)})`
 }
 </script>
+
+<style scoped>
+.text-xs {
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+/* ==========================================
+   ЗАГОЛОВКИ СЕКЦИЙ
+   ========================================== */
+.section-title {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #6b7280;
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* ==========================================
+   ПОЛЯ (универсальный класс)
+   ========================================== */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.field-label {
+  font-size: 11px;
+  color: #9ca3af;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.field-input {
+  width: 100%;
+  height: 26px;
+  padding: 0 8px;
+  font-size: 12px;
+  background: #1f2937;
+  border: 1px solid #374151;
+  border-radius: 4px;
+  color: #e5e7eb;
+  outline: none;
+  transition: border-color 0.15s;
+  min-width: 0;
+}
+.field-input::-webkit-outer-spin-button,
+.field-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.field-input:focus {
+  border-color: #3b82f6;
+}
+.field-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ==========================================
+    ЦВЕТОВЫЕ ПОЛЯ
+   ========================================== */
+.color-input {
+  width: 100%;
+  height: 26px;
+  padding: 0;
+  border: 1px solid #374151;
+  border-radius: 4px;
+  cursor: pointer;
+  background: transparent;
+}
+.color-input::-webkit-color-swatch-wrapper { padding: 0; }
+.color-input::-webkit-color-swatch { border: none; border-radius: 3px; }
+
+/* ==========================================
+    КНОПКИ
+   ========================================== */
+.z-btn {
+  flex: 1;
+  height: 26px;
+  padding: 0 10px;
+  font-size: 12px;
+  background: #1f2937;
+  border: 1px solid #374151;
+  border-radius: 4px;
+  color: #9ca3af;
+  cursor: pointer;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.z-btn:hover {
+  background: #374151;
+  color: #e5e7eb;
+}
+.z-btn:active {
+  transform: scale(0.97);
+}
+
+.lock-btn {
+  height: 26px;
+  padding: 0;
+  font-size: 12px;
+  background: #1f2937;
+  border: 1px solid #374151;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #9ca3af;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.lock-btn:hover {
+  background: #374151;
+  color: #e5e7eb;
+}
+.lock-btn.active {
+  color: #3b82f6;
+  border-color: #3b82f6;
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.hotkey-btn {
+  height: 26px;
+  padding: 0 10px;
+  font-family: monospace;
+  font-size: 12px;
+  background: #1f2937;
+  border: 1px solid #4b5563;
+  border-radius: 4px;
+  color: #e5e7eb;
+  cursor: pointer;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+}
+.hotkey-btn:hover {
+  border-color: #6b7280;
+}
+.hotkey-btn.listening {
+  border-color: #f59e0b;
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.1);
+  animation: pulse 1s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+/* ==========================================
+    ПОДСКАЗКА
+   ========================================== */
+.hint {
+  font-size: 11px;
+  color: #6b7280;
+  font-style: italic;
+  padding: 8px 10px;
+  background: rgba(31, 41, 55, 0.5);
+  border-radius: 4px;
+  margin-top: 0.5rem;
+  line-height: 1.4;
+}
+
+/* ==========================================
+    СКРОЛЛБАР
+   ========================================== */
+aside ::-webkit-scrollbar {
+  width: 4px;
+}
+aside ::-webkit-scrollbar-track {
+  background: transparent;
+}
+aside ::-webkit-scrollbar-thumb {
+  background: #ffffff10;
+  border-radius: 2px;
+}
+aside ::-webkit-scrollbar-thumb:hover {
+  background: #ffffff20;
+}
+</style>

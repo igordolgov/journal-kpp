@@ -1,4 +1,8 @@
 // app/composables/usePersonGenerator.ts
+// Назначение: генератор случайной внешности персонажей (IPersonAppearance).
+// [ИСПРАВЛЕНО]: индексация палитр даёт string | undefined (noUncheckedIndexedAccess)
+// — введён хелпер pick(); clothingStyle добавлен в интерфейс (использовался в
+// логике юбки/платья, но не был объявлен); includes защищён fallback'ом.
 import { reactive } from 'vue'
 import { nanoid } from 'nanoid'
 
@@ -16,6 +20,8 @@ export interface IPersonAppearance {
   headwearColor: string
   topColor: string
   bottomColor: string
+  // [ДОБАВЛЕНО] стиль одежды влияет на цвет низа (юбка/платье -> тон кожи)
+  clothingStyle?: string
   accessories: string[]
   animation: {
     speed: number
@@ -39,12 +45,17 @@ const PALETTES = {
   hats: ['#1f2937', '#dc2626', '#3b82f6', '#78350f', '#6b7280']
 }
 
+// [ДОБАВЛЕНО] безопасный выбор из палитры: обращение по индексу даёт
+// string | undefined — fallback страхует от пустого справочника
+const pick = (arr: readonly string[], fallback: string): string =>
+  arr[Math.floor(Math.random() * arr.length)] ?? fallback
+
 export const usePersonGenerator = () => {
-  
+
   const createRandomPerson = (overrides: PersonOverrides = {}): IPersonAppearance => {
     // 1. Базовые характеристики
     const gender = overrides.gender || (Math.random() > 0.5 ? 'male' : 'female')
-    
+
     // Распределение возрастов: 20% дети, 60% взрослые, 20% пожилые
     let ageGroup = overrides.ageGroup || 'adult'
     if (!overrides.ageGroup) {
@@ -54,8 +65,8 @@ export const usePersonGenerator = () => {
     }
 
     // 2. Цвета
-    const skinTone = overrides.skinTone || PALETTES.skin[Math.floor(Math.random() * PALETTES.skin.length)]
-    const hairColor = overrides.hairColor || PALETTES.hair[Math.floor(Math.random() * PALETTES.hair.length)]
+    const skinTone = overrides.skinTone || pick(PALETTES.skin, '#fcd34d')
+    const hairColor = overrides.hairColor || pick(PALETTES.hair, '#292524')
 
     // 3. Логика причесок по правилам
     let hairStyleId = 'short'
@@ -63,14 +74,14 @@ export const usePersonGenerator = () => {
 
     if (gender === 'male') {
       if (ageGroup === 'child') {
-        hairStyleId = ['short', 'bald', 'mohawk'][Math.floor(Math.random() * 3)]
+        hairStyleId = pick(['short', 'bald', 'mohawk'], 'short')
       } else if (ageGroup === 'elder') {
         hairStyleId = Math.random() > 0.3 ? 'short' : 'bald'
-        if (hairStyleId === 'short') hasRecedingHairline = Math.random() > 0.2 
+        if (hairStyleId === 'short') hasRecedingHairline = Math.random() > 0.2
       } else {
         // Взрослый мужчина
         hairStyleId = Math.random() > 0.15 ? 'short' : 'bald'
-        // 40% шанс, что у взрослого мужчины с короткой стрижкой будут залысины
+        // [НАСТРОЙКА] 40% шанс залысин у взрослого мужчины с короткой стрижкой
         if (hairStyleId === 'short' && Math.random() > 0.6) {
           hasRecedingHairline = true;
         }
@@ -78,28 +89,28 @@ export const usePersonGenerator = () => {
     } else {
       // Женщины
       if (ageGroup === 'child') {
-        hairStyleId = ['short', 'long', 'ponytail', 'bun', 'mohawk'][Math.floor(Math.random() * 5)]
+        hairStyleId = pick(['short', 'long', 'ponytail', 'bun', 'mohawk'], 'short')
       } else {
-        hairStyleId = ['short', 'long', 'ponytail', 'bun'][Math.floor(Math.random() * 4)]
+        hairStyleId = pick(['short', 'long', 'ponytail', 'bun'], 'short')
       }
     }
 
     // 4. Растительность на лице
     let facialHair = 'none'
     if (gender === 'male' && ageGroup !== 'child' && Math.random() < 0.4) {
-      facialHair = ['mustache', 'beard', 'goatee'][Math.floor(Math.random() * 3)]
+      facialHair = pick(['mustache', 'beard', 'goatee'], 'none')
     }
 
     // 5. Головной убор
     let headwear = 'none'
     if (Math.random() < 0.25) {
-      headwear = ['cap', 'hat', 'beanie'][Math.floor(Math.random() * 3)]
+      headwear = pick(['cap', 'hat', 'beanie'], 'none')
     }
 
     // 6. Формирование объекта
     return reactive({
       id: nanoid(6),
-      name: '', 
+      name: '',
       gender,
       ageGroup,
       skinTone,
@@ -108,9 +119,10 @@ export const usePersonGenerator = () => {
       hasRecedingHairline,
       facialHair,
       headwear,
-      headwearColor: PALETTES.hats[Math.floor(Math.random() * PALETTES.hats.length)],
-      topColor: PALETTES.clothes.tops[Math.floor(Math.random() * PALETTES.clothes.tops.length)],
-      bottomColor: overrides.bottomColor || (['skirt', 'dress'].includes(overrides.clothingStyle) ? skinTone : PALETTES.clothes.bottoms[Math.floor(Math.random() * PALETTES.clothes.bottoms.length)]),
+      headwearColor: pick(PALETTES.hats, '#1f2937'),
+      topColor: pick(PALETTES.clothes.tops, '#3b82f6'),
+      bottomColor: overrides.bottomColor
+        || (['skirt', 'dress'].includes(overrides.clothingStyle || '') ? skinTone : pick(PALETTES.clothes.bottoms, '#1e3a8a')),
       accessories: Math.random() > 0.8 ? ['glasses'] : [],
       animation: {
         speed: 1,

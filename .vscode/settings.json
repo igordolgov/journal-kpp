@@ -1,10 +1,24 @@
+// .vscode/settings.json
+// Настройки рабочей области VS Code.
+// Файл коммитится в репозиторий — по твоему рабочему процессу
+// (Windows + MX Linux через git) настройки применятся на обеих машинах.
 {
-    "editor.wordWrap": "on",
-    "python-envs.pythonProjects": [
-        {
-            "path": "app",
-            "envManager": "ms-python.python:venv",
-            "packageManager": "ms-python.python:pip"
-        }
-    ]
+  // Tailwind v4 использует собственные CSS at-rules (@plugin, @utility,
+  // @theme), которых нет в стандарте CSS. Встроенный CSS-валидатор VS Code
+  // помечает их как "Unknown at rule" — это ложное срабатывание, сборка
+  // проходит нормально. Tailwind CSS IntelliSense эти директивы понимает,
+  // поэтому встроенные предупреждения отключаем.
+  "css.lint.unknownAtRules": "ignore",
+  
+  // То же для SCSS-валидатора (sass есть в devDependencies — на будущее)
+  "scss.lint.unknownAtRules": "ignore",
+
+  "editor.wordWrap": "on",
+  "python-envs.pythonProjects": [
+    {
+      "path": "app",
+      "envManager": "ms-python.python:venv",
+      "packageManager": "ms-python.python:pip"
+    }
+  ]
 }

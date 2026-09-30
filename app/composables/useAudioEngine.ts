@@ -10,19 +10,26 @@
 // -----------------------------------------------------------------------------
 let ctx: AudioContext | null = null               // Основной аудиоконтекст
 let masterGain: GainNode | null = null            // Мастер-гейн (общая громкость)
-const pools = new Map<string, Array<{ nodes: any | null, state: 'idle' | 'playing', type: string }>>()
+// [ИСПРАВЛЕНО] тип элемента пула вынесен: без аннотации литерал { state: 'idle' }
+// в createPool расширяется до string и не проходит присваивание в Map
+type PoolItem = { nodes: any | null, state: 'idle' | 'playing', type: string }
+const pools = new Map<string, PoolItem[]>()
 const engineFreqMap = new Map<string, number>()   // Хранит текущую частоту двигателя для каждого пула
 
 export const useAudioEngine = () => {
   // ---------------------------------------------------------------------------
   // Заглушка для серверного рендеринга (звуки не нужны)
   // ---------------------------------------------------------------------------
-  if (process.server) {
+  // [ИСПРАВЛЕНО] process.server -> import.meta.server; в заглушку добавлен ctx —
+  // без него тип audio.ctx = «функция | undefined», и вызовы audio.ctx()
+  // в SimulatorWidget не проходят проверку
+  if (import.meta.server) {
     return {
       init: () => {}, playUI: () => {}, createPool: () => {},
       playFromPool: () => {}, setMasterVolume: () => {},
       disposePool: () => {}, stopPool: () => {}, updateVolume: () => true,
-      resetPool: () => {}, updateEngineVolume: () => true, setEnginePitch: () => {}
+      resetPool: () => {}, updateEngineVolume: () => true, setEnginePitch: () => {},
+      ctx: () => null
     }
   }
 
@@ -51,7 +58,7 @@ export const useAudioEngine = () => {
    */
   const createPool = (poolId: string, type: string, size: number = 5) => {
     if (pools.has(poolId)) return
-    const poolArray = []
+    const poolArray: PoolItem[] = []
     for (let i = 0; i < size; i++) poolArray.push({ nodes: null, state: 'idle', type })
     pools.set(poolId, poolArray)
   }
@@ -509,7 +516,7 @@ export const useAudioEngine = () => {
   /**
    * Плавное изменение громкости двигателя (более медленное, с постоянной времени 0.8 сек)
    */
-  const updateEngineVolume = (poolId, targetVolume, dt) => {
+  const updateEngineVolume = (poolId: string, targetVolume: number, dt: number): boolean => {
     const pool = pools.get(poolId)
     if (!pool) return true
     const playingItem = pool.find(n => n.state === 'playing' && n.nodes?.gain)
@@ -527,7 +534,7 @@ export const useAudioEngine = () => {
    * @param targetFreq - целевая частота (Гц)
    * @param dt - прошедшее время
    */
-  const setEnginePitch = (poolId, targetFreq, dt) => {
+  const setEnginePitch = (poolId: string, targetFreq: number, dt: number): void => {
     const pool = pools.get(poolId)
     if (!pool) return
     const playingItem = pool.find(n => n.state === 'playing')

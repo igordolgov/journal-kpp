@@ -6,19 +6,24 @@
 -->
 
 <template lang="pug">
+//- Основной контейнер. [FIX] было h-[calc(100dvh-60px)] — расчёт под старую
+//- шапку layout, которая теперь только на журнале; высоту даёт main (h-screen).
 .reports-page.flex.flex-col.w-full.overflow-hidden.gap-0(
-  class="h-[calc(100dvh-60px)] bg-gradient-to-br from-base-200 to-base-300"
+  class="bg-linear-to-br from-base-200 to-base-300 h-full"
 )
-  //- ШАПКА: НАЗВАНИЕ И ПЕРИОД
-  header.flex.justify-between.items-end.p-4.pb-2.flex-none
-    h2.text-3xl.font-bold.tracking-tight.text-base-content
-      | 📊 Аналитика КПП
-    select.select.select-bordered.select-sm.bg-base-100.shadow(
-      v-model="period"
+  //- ШАПКА: название, описание и период
+  .px-4.pt-3.pb-1.flex-none
+    UiPageHeader(
+      title="Аналитика"
+      description="Сводка по журналу: кто на выезде, динамика дня, пиковые часы."
     )
-      option(value="day") Сегодня
-      option(value="week") Неделя
-      option(value="month") Месяц
+      template(#actions)
+        select.select.select-bordered.select-sm.bg-base-100.shadow(
+          v-model="period"
+        )
+          option(value="day") Сегодня
+          option(value="week") Неделя
+          option(value="month") Месяц
 
   //- КАРТОЧКИ СТАТИСТИКИ (Компактные, в один ряд)
   .grid.grid-cols-5.gap-3.px-4.pb-3.flex-none
@@ -26,22 +31,22 @@
       .stat-title.text-xs.opacity-60
         | 📝 Записей
       .stat-value.text-2xl.font-bold.text-primary {{ stats.totalEntries }}
-    
+
     .stat.shadow-xl.bg-base-100.p-3.rounded-xl.border.border-base-300
       .stat-title.text-xs.opacity-60
         | 🚶 На выезде
       .stat-value.text-2xl.font-bold.text-warning {{ stats.residentsOut }}
-    
+
     .stat.shadow-xl.bg-base-100.p-3.rounded-xl.border.border-base-300
       .stat-title.text-xs.opacity-60
         | 🤝 Гостей
       .stat-value.text-2xl.font-bold.text-success {{ stats.guestsIn }}
-    
+
     .stat.shadow-xl.bg-base-100.p-3.rounded-xl.border.border-base-300
       .stat-title.text-xs.opacity-60
         | ⏱ В среднем
       .stat-value.text-2xl.font-bold.text-accent {{ stats.avgDuration }}
-    
+
     .stat.shadow-xl.bg-base-100.p-3.rounded-xl.border.border-base-300
       .stat-title.text-xs.opacity-60
         | 🔥 Пик
@@ -55,7 +60,7 @@
         class="md:col-span-3"
       )
         .card.shadow-xl.bg-base-100.min-h-0.border.border-base-300(
-          class="flex-[2]"
+          class="flex-2"
         )
           .card-body.p-3.gap-2
             h4.text-xs.font-bold.text-base-content.opacity-70.uppercase.tracking-wider
@@ -65,19 +70,18 @@
                 :data="audienceChartData"
                 :options="doughnutOptions"
               )
-        
+
         .card.shadow-xl.bg-base-100.min-h-0.border.border-base-300(
-          class="flex-[1]"
+          class="flex-1"
         )
           .card-body.p-3.gap-2.overflow-hidden
             h4.text-xs.font-bold.text-base-content.opacity-70.uppercase.tracking-wider
               | 🚶 Отсутствуют
             .flex.flex-col.gap-1.overflow-y-auto.custom-scrollbar
-              //- ИСПРАВЛЕНО: p-1.5 перенесено в class="", так как точка ломает Pug
               .flex.justify-between.items-center.rounded-lg(
                 v-for="p in topAbsentPeople"
                 :key="p.id"
-                class="p-1.5 hover:bg-base-200 transition-colors"
+                class="hover:bg-base-200 p-1.5 transition-colors"
               )
                 span.text-sm.font-medium.truncate {{ p.fio }}
                 span.text-xs.opacity-50.flex-none {{ formatTime(p.timestamp_out) }}
@@ -105,7 +109,7 @@
         class="md:col-span-3"
       )
         .card.shadow-xl.bg-base-100.min-h-0.border.border-base-300(
-          class="flex-[2]"
+          class="flex-2"
         )
           .card-body.p-3.gap-2.h-full.flex.flex-col
             h4.text-xs.font-bold.text-base-content.opacity-70.uppercase.tracking-wider
@@ -115,9 +119,9 @@
                 :data="peakHoursChartData"
                 :options="peakHoursOptions"
               )
-        
+
         .card.shadow-xl.bg-base-100.min-h-0.border.border-base-300(
-          class="flex-[1]"
+          class="flex-1"
         )
           .card-body.p-3.gap-2.overflow-hidden
             h4.text-xs.font-bold.text-base-content.opacity-70.uppercase.tracking-wider
@@ -126,7 +130,7 @@
               .flex.justify-between.items-center(
                 v-for="v in activeVehicles"
                 :key="v.id"
-                class="p-1 rounded hover:bg-base-200 transition-colors"
+                class="hover:bg-base-200 p-1 rounded transition-colors"
               )
                 span.font-mono.text-xs.font-bold.text-error {{ v.plate }}
                 span.opacity-60.truncate {{ v.ownerFio }}
@@ -136,7 +140,7 @@
               .flex.justify-between.items-center(
                 v-for="d in topDestinations"
                 :key="d.label"
-                class="p-1 rounded hover:bg-base-200 transition-colors"
+                class="hover:bg-base-200 p-1 rounded transition-colors"
               )
                 span.truncate 📍{{ d.label }}
                 span.text-xs.opacity-50 {{ d.total }} раз
@@ -151,15 +155,16 @@
 </template>
 
 <script setup lang="ts">
-// app/pages/reports.vue
-// Логика расчетов оптимизирована. Добавлен Map для поиска людей.
-// Настройки Chart.js изменены для максимальной плотности графики (убраны лишние отступы).
-
+// app/pages/reports.vue — script
+// Аналитика КПП: статистика, графики Chart.js, компактные списки.
 import { ref, computed, onMounted } from 'vue'
 import { Line as LineChart, Bar as BarChart, Doughnut as DoughnutChart } from 'vue-chartjs'
 import {
   Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, ArcElement, Title, Tooltip, Legend, Filler
 } from 'chart.js'
+// [ИСПРАВЛЕНО] аннотирование опций литеральным типом — строковые поля
+// (position/mode) иначе не проходят контравариантную проверку
+import type { ChartOptions } from 'chart.js'
 import { useJournal } from '~/composables/useJournal'
 import { useShift } from '~/composables/useShift'
 import { useDatabase } from '~/composables/useDatabase'
@@ -212,9 +217,13 @@ const formatDuration = (ms: number) => {
   return `${mins}м`
 }
 
-// Проверка: является ли человек жителем
+// Проверка: является ли человек жителем.
+// БАГ БЫЛ: сравнение со строками 'вне территории'/'outside', которых нет в
+// проекте (реальные значения — 'На территории'/'В городе'/'Город')
 const isResidentCheck = (person: any) => {
-  return person?.location?.trim().toLowerCase() !== 'вне территории' && person?.location !== 'outside'
+  const loc = (person?.location || '').trim().toLowerCase()
+  if (!loc) return true
+  return !(loc.includes('город') || loc === 'outside' || loc === 'вне территории')
 }
 
 // --- Базовый фильтр ---
@@ -239,7 +248,7 @@ const stats = computed(() => {
     const person = peopleMap.value.get(String(entry.person_id))
     if (!person) return
     const isRes = isResidentCheck(person)
-    
+
     if (entry.timestamp_out && !entry.timestamp_in && isRes) residentsOut++
     if (entry.timestamp_in && !entry.timestamp_out && !isRes) guestsIn++
 
@@ -314,14 +323,14 @@ const timelineChartData = computed(() => {
   }
 
   const labels: string[] = []
-  const dataResidents: number[] = [] 
-  const dataGuests: number[] = []    
+  const dataResidents: number[] = []
+  const dataGuests: number[] = []
   const dataShiftsCount: number[] = []
   const shiftNamesMap: string[][] = []
-  
+
   let currentResOut = 0
   let currentGuestsIn = 0
-  let eventIndex = 0 
+  let eventIndex = 0
 
   for (let t = startTime; t <= loopEndTime; t += MS_IN_HOUR) {
     labels.push(new Date(t).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }))
@@ -338,7 +347,7 @@ const timelineChartData = computed(() => {
     }
     dataResidents.push(currentResOut)
     dataGuests.push(currentGuestsIn)
-    
+
     const activeGuards = new Set<string>()
     allIntervals.forEach(interval => {
       if (t < interval.end && (t + MS_IN_HOUR) > interval.start) {
@@ -348,7 +357,7 @@ const timelineChartData = computed(() => {
     dataShiftsCount.push(activeGuards.size || 0)
     shiftNamesMap.push(Array.from(activeGuards))
   }
-  
+
   return {
     labels,
     datasets: [
@@ -359,9 +368,11 @@ const timelineChartData = computed(() => {
   }
 })
 
-const timelineChartOptions = {
-  responsive: true, 
-  maintainAspectRatio: false, 
+// [ИСПРАВЛЕНО] ChartOptions<'line'>: 'index'/'top'/'left'/'right' теперь
+// литеральные типы через контекстную типизацию
+const timelineChartOptions: ChartOptions<'line'> = {
+  responsive: true,
+  maintainAspectRatio: false,
   interaction: { mode: 'index', intersect: false },
   layout: { padding: { top: 5, bottom: 0, left: 0, right: 0 } },
   scales: {
@@ -373,7 +384,7 @@ const timelineChartOptions = {
     legend: { position: 'top', labels: { boxWidth: 10, padding: 15, font: { size: 11 } } },
     tooltip: {
       callbacks: {
-        label: function(context: any) {
+        label: function (context: any) {
           if (context.dataset.label === 'Охрана') {
             const names = context.dataset.names[context.dataIndex] || []
             return names.length ? names.map((n: string) => `👮 ${n}`) : ['❌ Нет охраны']
@@ -409,7 +420,8 @@ const audienceChartData = computed(() => {
   }
 })
 
-const doughnutOptions = {
+// [ИСПРАВЛЕНО] ChartOptions<'doughnut'>
+const doughnutOptions: ChartOptions<'doughnut'> = {
   responsive: true,
   maintainAspectRatio: false,
   cutout: '70%',
@@ -437,7 +449,9 @@ const peakHoursChartData = computed(() => {
   }
 })
 
-const peakHoursOptions = {
+// [ИСПРАВЛЕНО] ChartOptions<'bar'> — для единообразия (ошибок тут не было,
+// но аннотация защитит от будущих строковых литералов)
+const peakHoursOptions: ChartOptions<'bar'> = {
   responsive: true,
   maintainAspectRatio: false,
   layout: { padding: { top: 5, bottom: 0, left: 0, right: 0 } },
@@ -445,8 +459,8 @@ const peakHoursOptions = {
     x: { stacked: true, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 12, font: { size: 9 } }, grid: { display: false } },
     y: { stacked: true, beginAtZero: true, ticks: { stepSize: 1, font: { size: 9 } }, grid: { color: 'rgba(0,0,0,0.05)' } }
   },
-  plugins: { 
-    legend: { display: false } 
+  plugins: {
+    legend: { display: false }
   }
 }
 
@@ -506,4 +520,3 @@ const topDestinations = computed(() => {
   border-radius: 2px;
 }
 </style>
-```

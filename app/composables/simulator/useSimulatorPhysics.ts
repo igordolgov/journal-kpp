@@ -64,7 +64,7 @@ export function useSimulatorPhysics(
       const nextMember = groupMembers.find(m => (m.groupIndex ?? 0) === nextIndex)
       if (nextMember && nextMember.state === 'waiting_before') {
         nextMember.state = 'crossing'
-        nextMember.target = { ...nextMember.exitPoint, width: 0, height: 0 }
+        nextMember.target = { ...(nextMember.exitPoint ?? { x: 0, y: 0 }), width: 0, height: 0 }
       }
     }
 
@@ -98,7 +98,7 @@ export function useSimulatorPhysics(
         if (agent.isLeader) {
           if (gateCloseTimers.has(gateId)) clearTimeout(gateCloseTimers.get(gateId)!)
           agent.state = 'crossing'
-          agent.target = { ...agent.exitPoint, width: 0, height: 0 }
+          agent.target = { ...(agent.exitPoint ?? { x: 0, y: 0 }), width: 0, height: 0 }
           continue
         }
 
@@ -106,7 +106,7 @@ export function useSimulatorPhysics(
         if (!prevMember || prevMember.state === 'moving_away' || prevMember.state === 'done') {
           if (gateCloseTimers.has(gateId)) clearTimeout(gateCloseTimers.get(gateId)!)
           agent.state = 'crossing'
-          agent.target = { ...agent.exitPoint, width: 0, height: 0 }
+          agent.target = { ...(agent.exitPoint ?? { x: 0, y: 0 }), width: 0, height: 0 }
         }
         continue
       }

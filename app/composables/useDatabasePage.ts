@@ -9,6 +9,12 @@ import { useDatabase } from './useDatabase'
 import { useFamily } from './useFamily'
 import { useCompanions } from './useCompanions'
 
+// [ДОБАВЛЕНО] Локальные типы записей БД. Индексная подпись покрывает
+// динамические поля IndexedDB. Если в types/index.ts появятся экспорты
+// IPerson/IVehicle — заменить на import type.
+type IPerson = { id: number; fio?: string; main_family_id?: number | null; [key: string]: any }
+type IVehicle = { id: number; owner_id?: number | null; [key: string]: any }
+
 export const useDatabasePage = () => {
   const { getAllItems } = useDatabase()
   const { getFullFamily } = useFamily()

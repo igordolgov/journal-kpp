@@ -127,10 +127,11 @@ dialog.modal(
           span.text-xl 👨‍👩‍👧‍👦
           | Семья ({{ familyMembers.length }})
         .flex.flex-wrap.gap-2
-          .badge.p-2.rounded-lg.badge-lg(
+          .badge.p-2.rounded-lg.badge-lg.cursor-pointer(
             v-for="f in familyMembers"
             :key="f.id"
             :class="isChild(f) ? 'bg-yellow-400 text-yellow-950 border border-yellow-300' : 'badge-primary'"
+            @click="$emit('open-person', f.id)"
           )
             | {{ f.fio }}
             span.opacity-60
@@ -175,15 +176,41 @@ dialog.modal(
       form.form-control.gap-3(
         @submit.prevent="saveNewRelative"
       )
+        //- ВЫБОР РЕЖИМА
         .form-control
+          label.label
+            | Кто проходит?
+          select.select.select-bordered(
+            v-model="newRelative.mode"
+            @change="onRelativeModeChange"
+          )
+            option(value="existing") Выбрать существующего (без семьи)
+            option(value="new") Создать нового человека
+
+        //- ЕСЛИ ВЫБРАЛИ "СОЗДАТЬ НОВОГО"
+        .form-control.mt-2(v-if="newRelative.mode === 'new'")
           label.label
             | ФИО
           input.input.input-bordered(
             v-model="newRelative.fio"
-            required
+            placeholder="Иванов Иван Иванович"
           )
 
-        .form-control
+        //- ЕСЛИ ВЫБРАЛИ "СУЩЕСТВУЮЩЕГО"
+        .form-control.mt-2(v-else)
+          label.label
+            | Выберите из списка
+          select.select.select-bordered(
+            v-model="newRelative.existingId"
+          )
+            option(:value="null" disabled) -- Выберите человека --
+            option(
+              v-for="p in orphanAdults"
+              :key="p.id"
+              :value="p.id"
+            ) {{ p.fio }}
+
+        .form-control.mt-2
           label.label
             | Кем приходится?
           select.select.select-bordered(
@@ -228,38 +255,51 @@ dialog.modal(
 </template>
 
 <script setup lang="ts">
+// app/components/database/PersonDetailModal.vue — script
+// Детальная карточка человека: аватар, статусы, ТС, семья, дизайнер внешности.
+// [UI/UX] alert() заменены на тосты. Нативные confirm() пока не трогаем
+// (их заменит ConfirmDialog отдельным шагом).
 import { computed, ref, reactive } from 'vue'
 import { useCompanions } from '~/composables/useCompanions'
 import { useFamilyActions } from '~/composables/useFamilyActions'
 import { useFamily } from '~/composables/useFamily'
 import { useDatabase } from '~/composables/useDatabase'
+import { useToast } from '~/composables/useToast'
 
 import PersonAvatar from '~/components/simulator/PersonAvatar.vue'
 import DesignerModal from '~/components/designer/DesignerModal.vue'
 
 // --- Props ---
-const props = defineProps({
-  isOpen: Boolean,
-  person: Object,
-  vehicles: Array,
-  peopleList: {
-    type: Array,
-    default: () => []
-  }
+const props = withDefaults(defineProps<{
+  isOpen?: boolean
+  person?: any
+  vehicles?: any[]
+  peopleList?: any[]
+}>(), {
+  isOpen: false,
+  vehicles: () => [],
+  peopleList: () => []
 })
 
 // --- Emits ---
-const emit = defineEmits(['close', 'edit', 'delete', 'assign', 'edit-vehicle', 'update'])
+const emit = defineEmits(['close', 'edit', 'delete', 'assign', 'edit-vehicle', 'update', 'open-person'])
 
 // --- Composables ---
 const { isChild } = useCompanions()
 const { addRelative } = useFamilyActions()
 const { getFullFamily } = useFamily()
 const { updateItem } = useDatabase()
+const toast = useToast()
 
 // --- State ---
 const showAddRelative = ref(false)
-const newRelative = reactive({ fio: '', type: 'Сын' })
+// Режимы и ID для существующих людей
+const newRelative = reactive({
+  mode: 'existing' as 'existing' | 'new',
+  fio: '',
+  existingId: null as number | null,
+  type: 'Сын'
+})
 const isDesignerOpen = ref(false)
 
 // --- Computed ---
@@ -281,8 +321,19 @@ const familyMembers = computed(() => {
   return getFullFamily(props.person, props.peopleList)
 })
 
-const ownedVehicles = computed(() => props.vehicles?.filter(v => v.owner_id === props.person.id) || [])
-const allowedVehicles = computed(() => props.vehicles?.filter(v => v.allowed_driver_ids?.includes(props.person.id) && v.owner_id !== props.person.id) || [])
+const ownedVehicles = computed(() => props.vehicles?.filter(v => v.owner_id === props.person?.id) || [])
+const allowedVehicles = computed(() => props.vehicles?.filter(v => v.allowed_driver_ids?.includes(props.person?.id) && v.owner_id !== props.person?.id) || [])
+
+// Список взрослых людей, не привязанных ни к какой семье
+const orphanAdults = computed(() => {
+  if (!props.peopleList) return []
+  return props.peopleList.filter((p: any) => {
+    if (p.main_family_id) return false // Уже в семье
+    if (p.ageGroup === 'child' || p.exit_category === 'small' || p.is_child) return false // Это ребенок
+    if (p.id === props.person?.id) return false // Это сам человек
+    return true
+  })
+})
 
 // --- Methods ---
 const getVehicleTypeBadgeClass = (type: string) => {
@@ -296,39 +347,70 @@ const getVehicleTypeBadgeClass = (type: string) => {
 // БЫСТРОЕ ПЕРЕКЛЮЧЕНИЕ СТАТУСА
 const setQuickStatus = async (newStatus: string | null) => {
   if (!props.person?.id) return
-  
-  // Ручной безопасный сериализатор: отсекает Proxy, функции и невалидные для IndexedDB типы
+
+  // Клон без функций (в записях могут оказаться методы из реактивных обёрток)
   const safeClone = JSON.parse(JSON.stringify(props.person, (key, value) => {
     if (typeof value === 'function') return undefined
     return value
   }))
-  
-  // Меняем статус у чистого объекта
+
   safeClone.status = newStatus
-  
-  // Сохраняем в базу
   await updateItem('people', safeClone)
-  
-  // Подаем сигнал на обновление таблицы
   emit('update')
 }
 
+// Очистка полей при смене режима
+const onRelativeModeChange = () => {
+  newRelative.fio = ''
+  newRelative.existingId = null
+}
+
+// Сохранение с учетом существующих людей.
+// [UI/UX] alert() -> тосты (warning для валидации, error для сбоев).
 const saveNewRelative = async () => {
-  if (!newRelative.fio) return
   try {
-    await addRelative(props.person, newRelative.type, { fio: newRelative.fio })
+    if (newRelative.mode === 'existing') {
+      if (!newRelative.existingId) {
+        toast.warning('Выберите человека из списка')
+        return
+      }
+
+      // Полная запись человека — включая внешность для симулятора
+      const existingPerson = props.peopleList.find((p: any) => p.id === newRelative.existingId)
+      if (!existingPerson) {
+        toast.error('Человек не найден в базе')
+        return
+      }
+
+      // Флаги для useFamilyActions: обновить существующего, а не создать с нуля
+      await addRelative(props.person, newRelative.type, {
+        ...existingPerson,
+        _isExisting: true,
+        _existingId: newRelative.existingId
+      })
+    } else {
+      if (!newRelative.fio) {
+        toast.warning('Введите ФИО')
+        return
+      }
+      // Новый человек (useFamilyActions назначит дефолтную внешность)
+      await addRelative(props.person, newRelative.type, { fio: newRelative.fio })
+    }
+
     showAddRelative.value = false
     newRelative.fio = ''
+    newRelative.existingId = null
+    toast.success('Родственник добавлен')
     emit('update')
   } catch (e: any) {
-    alert('Ошибка: ' + e.message)
+    console.error('[PersonDetailModal] addRelative error:', e)
+    toast.error('Ошибка: ' + (e?.message || 'не удалось добавить родственника'))
   }
 }
 
 // Сохранение данных после закрытия Дизайнера
 const handleDesignerSave = async (updatedPersonData: any) => {
   try {
-    // Тот же безопасный сериализатор
     const safeClone = JSON.parse(JSON.stringify(updatedPersonData, (key, value) => {
       if (typeof value === 'function') return undefined
       return value
@@ -336,10 +418,11 @@ const handleDesignerSave = async (updatedPersonData: any) => {
 
     await updateItem('people', safeClone)
     isDesignerOpen.value = false
+    toast.success('Внешность сохранена')
     emit('update')
   } catch (e: any) {
     console.error('[PersonDetailModal] Ошибка сохранения дизайнера:', e)
-    alert('Ошибка сохранения внешности: ' + e.message)
+    toast.error('Ошибка сохранения внешности: ' + (e?.message || 'неизвестная ошибка'))
   }
 }
 </script>

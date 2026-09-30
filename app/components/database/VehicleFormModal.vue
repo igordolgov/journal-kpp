@@ -103,7 +103,7 @@ dialog.modal(
       .form-control.relative
         label.label.mr-2
           span.label-text(
-            class="text-xs opacity-70"
+            class="opacity-70 text-xs"
           )
             | Добавить водителя
         input.input.w-full.pr-8.input-sm.input-bordered(
@@ -156,27 +156,38 @@ dialog.modal(
 </template>
 
 <script setup lang="ts">
-// app/components/database/VehicleFormModal.vue
+// app/components/database/VehicleFormModal.vue — script
+// Создание/редактирование ТС: номер, тип, владелец, допущенные водители.
+// [UI/UX] alert() заменены на тосты. Нативный confirm() удаления — в template
+// ($emit('delete')), заменит ConfirmDialog отдельным шагом.
+// [FIX] поле id в типе form — шаблон использует form.id для emit('delete').
 import { ref, computed, watch } from 'vue'
+import { useToast } from '~/composables/useToast'
 
 // --- Props ---
-const props = defineProps({
-  isOpen: Boolean,
-  vehicle: Object,
-  allPeople: { type: Array, default: () => [] },
-  adultPeople: { type: Array, default: () => [] }
+const props = withDefaults(defineProps<{
+  isOpen?: boolean
+  vehicle?: any
+  allPeople?: any[]
+  adultPeople?: any[]
+}>(), {
+  isOpen: false,
+  allPeople: () => [],
+  adultPeople: () => []
 })
 
 // --- Emits ---
 const emit = defineEmits(['close', 'save', 'delete'])
 
+const toast = useToast()
+
 // --- State ---
-const form = ref({
+const form = ref<{ id?: number | null; plate: string; model: string; type: string; owner_id: number | null; allowed_driver_ids: number[] }>({
   plate: '',
   model: '',
   type: 'Личный',
-  owner_id: null as number | null,
-  allowed_driver_ids: [] as number[]
+  owner_id: null,
+  allowed_driver_ids: []
 })
 
 const driverSearch = ref('')
@@ -219,17 +230,18 @@ const removeDriver = (id: number) => {
   form.value.allowed_driver_ids = form.value.allowed_driver_ids.filter(d => d !== id)
 }
 
-// Сохранение: вызывается напрямую по клику
+// Сохранение: вызывается напрямую по клику.
+// [UI/UX] alert() -> warning-тосты (валидация не блокирует поток).
 const onSave = () => {
   if (!form.value.plate) {
-    alert('Введите гос. номер')
+    toast.warning('Введите гос. номер')
     return
   }
   if (!form.value.owner_id) {
-    alert('Выберите владельца')
+    toast.warning('Выберите владельца')
     return
   }
-  
+
   emit('save', { ...form.value })
 }
 </script>

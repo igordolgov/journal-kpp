@@ -1,7 +1,6 @@
-<!-- app/components/JournalSidebar.vue -->
 <template lang="pug">
 .sidebar.flex.flex-col.flex-shrink-0.w-full(
-  class="bg-base-200 rounded-box lg:w-80 lg:sticky lg:top-0 lg:h-fit"
+  class="lg:top-0 lg:sticky bg-base-200 rounded-box lg:w-80 lg:h-fit"
 )
   //- ==========================================
   //- 1. ПОИСК
@@ -12,7 +11,7 @@
         ref="globalSearchInput"
         v-model="globalSearch"
         placeholder="Поиск: ФИО, Гос. номер..."
-        class="input-bordered input-sm bg-base-100"
+        class="bg-base-100 input-bordered input-sm"
         :class="dropdownResults.length > 0 && isSearchFocused ? 'rounded-b-none border-primary border-b-0 shadow-none z-40 relative' : ''"
         @focus="onSearchFocus"
         @blur="onSearchBlur"
@@ -22,7 +21,7 @@
         @keydown.enter.prevent="handleEnterKey"
       )
       button.absolute.z-50.right-2.transition-colors.duration-200(
-        class="top-1/2 -translate-y-1/2 hover:text-primary"
+        class="top-1/2 hover:text-primary -translate-y-1/2"
         v-if="globalSearch"
         type="button"
         @click="clearSearch"
@@ -36,14 +35,14 @@
         v-if="dropdownResults.length > 0 && isSearchFocused"
         class="bg-base-100 border border-primary border-t-0 rounded-b-xl"
       )
-        .max-h-80.overflow-y-auto.mt13(ref="dropdownListRef")
+        .max-h-80.overflow-y-auto.mt-3(ref="dropdownListRef")
           .flex.items-center.gap-3.p-1.mb-1.cursor-pointer.transition-all(
             v-for="(item, index) in dropdownResults"
             :key="item.id + item.type"
             :data-index="index"
-            class="rounded-lg hover:bg-base-200 active:scale-99"
+            class="hover:bg-base-200 rounded-lg active:scale-99"
             :class="{ 'bg-primary/20': activeDropdownIndex === index }"
-            @click="selectItem(item)"
+            @mousedown.prevent="selectItem(item)" 
             @mouseenter="activeDropdownIndex = index"
             :title="item.type === 'person' ? item.fio : 'Владелец: ' + (item.owner_name || 'неизвестен')"
           )
@@ -76,8 +75,8 @@
           .flex.items-center.gap-3.p-3.mb-1.cursor-pointer.transition-all(
             v-for="p in potentialDrivers"
             :key="p.id"
-            class="rounded-lg hover:bg-base-200"
-            @click="selectDriver(p)"
+            class="hover:bg-base-200 rounded-lg"
+            @mousedown.prevent="selectDriver(p)"
           )
             .flex.items-center.justify-center.flex-shrink-0.w-10.h-10.rounded-full(
               class="bg-base-200"
@@ -100,7 +99,7 @@
         
         //- Заголовок карточки
         .flex.justify-between.items-center.gap-3.px-2.pt-2.border-b(
-          class="bg-gradient-to-r from-primary/5 to-base-100 border-base-200"
+          class="bg-linear-to-r from-primary/5 to-base-100 border-base-200"
         )
           .flex.items-center.gap-3
             .avatar.online(class="before:bg-success/80")
@@ -144,7 +143,7 @@
         //- Ограничения
         .p-3.pb-0(v-if="personRestrictions.length")
           .flex.flex-col.gap-1.p-2.shadow-sm(
-            class="alert-warning bg-warning/80 text-warning-content"
+            class="bg-warning/80 text-warning-content alert-warning"
           )
             .flex.items-center.gap-1.font-bold
               svg.h-4.w-4(fill="none" stroke="currentColor" viewBox="0 0 24 24")
@@ -159,7 +158,7 @@
         template(v-if="!canStartTrip")
           .p-4
             .p-2.text-xs.font-bold(
-              class="alert-warning bg-warning/10 text-warning-content"
+              class="bg-warning/10 text-warning-content alert-warning"
             )
               | {{ statusTitle }}
         
@@ -190,7 +189,7 @@
               template(v-for="dest in sortedDestinations" :key="dest.name")
                 .inline-flex.items-center.gap-0_5.px-3.py-1.text-xs.font-semibold.cursor-pointer.transition-all.rounded-full(
                   @click="tripDestination = dest.name"
-                  class="bg-base-200 border border-base-300 hover:shadow-md"
+                  class="bg-base-200 hover:shadow-md border border-base-300"
                   :class="tripDestination === dest.name ? 'ring-2 ring-primary ring-offset-1 bg-primary text-primary-content' : ''"
                 )
                   span {{ dest.name }}
@@ -219,7 +218,7 @@
                     @blur="handleNoteBlur"
                   )
                   button.absolute.top-2.right-2(
-                    class="text-base-content/50 hover:text-error"
+                    class="hover:text-error text-base-content/50"
                     v-if="tripNote"
                     type="button"
                     @click="clearNote"
@@ -241,7 +240,7 @@
                   .badge.gap-1.mr-1.p-1.cursor-pointer.transition-colors.font-semibold.border.border-gray-400.rounded-sm(
                     v-for="v in availableVehicles"
                     :key="v.id"
-                    class="bg-white text-black hover:border-primary"
+                    class="bg-white hover:border-primary text-black"
                     @click="selectVehicle(v)"
                   ) 
                     | {{ v.plate }}
@@ -311,7 +310,7 @@
                 .inline-flex.items-center.gap-1.p-0.pr-2.mb-1.mr-1.cursor-pointer.transition-all.bg-gradient-to-br(
                   v-if="selectedVehicle"
                   @click="deselectVehicle"
-                  class="from-base-100 to-base-200 border border-base-300 rounded-full shadow-sm hover:shadow-md"
+                  class="from-base-100 to-base-200 shadow-sm hover:shadow-md border border-base-300 rounded-full"
                 )
                   span.px-1.font-semibold.border.border-gray-400.rounded-md(
                     class="bg-white text-black"
@@ -329,7 +328,7 @@
                   v-for="p in tripPassengers"
                   :key="p.id"
                   @click="removePassenger(p)"
-                  class="bg-primary border border-base-300 rounded-lg shadow-sm hover:shadow-md"
+                  class="bg-primary shadow-sm hover:shadow-md border border-base-300 rounded-lg"
                 )
                   span.p-1.font-semibold {{ formatShortFio(p.fio) }}
                   span.text-xs(
@@ -346,7 +345,7 @@
             //- ПРЕДУПРЕЖДЕНИЯ
             .mt-2(v-if="needsEscortConfirmation")
               .flex.flex-col.w-full.p-2.text-xs.shadow-sm(
-                class="alert-error bg-error/10 text-error-content"
+                class="bg-error/10 text-error-content alert-error"
               )
                 span.font-bold ⚠️ Требуется сопровождение!
                 span.text-xs.opacity-80 Этот человек не может выходить один.
@@ -375,7 +374,7 @@
 
             .mt-2(v-if="needsChildSoloExitConfirmation")
               .flex.flex-col.w-full.p-2.shadow-sm(
-                class="alert-info bg-info/10 text-info-content"
+                class="bg-info/10 text-info-content alert-info"
               )
                 span.text-sm.text-warning.font-bold.text-center ℹ️ Ребенок выходит один?
               label.label.justify-start.gap-2.p-2.rounded.cursor-pointer(
@@ -389,7 +388,7 @@
 
             .mt-2(v-if="needsChildArrivalConfirmation")
               .flex.flex-col.w-full.p-2.shadow-sm(
-                class="alert-info bg-info/10 text-info-content"
+                class="bg-info/10 text-info-content alert-info"
               )
                 span.text-sm.font-bold.text-center.text-base-content ℹ️ Ребенок приехал один?
               label.label.justify-start.gap-2.p-2.rounded.cursor-pointer(
@@ -408,7 +407,7 @@
               template(v-if="selectedVehicle")
                 button.btn.btn-block.btn-sm.text-base.font-normal.rounded-xl.shadow-lg(
                   :disabled="!isTripValid"
-                  class="bg-green-700 text-white disabled:bg-gray-400"
+                  class="bg-green-700 disabled:bg-gray-400 text-white"
                   @click="handleGroupTrip"
                 )
                   | 🚗 {{ actionButtonLabel }} 
@@ -430,22 +429,37 @@
 </template>
 
 <script setup lang="ts">
+// app/components/JournalSidebar.vue — script
+// Конструктор поездки: поиск, выбор, валидация, действия.
+// [UI/UX] alert() заменены на тосты; confirm() в removeDest — на ConfirmDialog.
 import { ref, computed, watch, toRaw, onMounted, nextTick } from 'vue'
 import { useState } from 'nuxt/app'
 import { useConfig } from '~/composables/useConfig'
 import { useFamily } from '~/composables/useFamily'
 import { useCompanions } from '~/composables/useCompanions'
+import { useToast } from '~/composables/useToast'
+// [ДОБАВЛЕНО] ConfirmDialog — используется в removeDest
+import { useConfirm } from '~/composables/useConfirm'
 import Fuse from 'fuse.js'
 
-const props = defineProps({
-  selectedItem: { type: Object, default: null },
-  peopleList: { type: Array, default: () => [] },
-  vehiclesList: { type: Array, default: () => [] },
-  processedJournal: { type: Array, default: () => [] }
+// --- Props ---
+const props = withDefaults(defineProps<{
+  selectedItem?: any
+  peopleList?: any[]
+  vehiclesList?: any[]
+  processedJournal?: any[]
+}>(), {
+  selectedItem: null,
+  peopleList: () => [],
+  vehiclesList: () => [],
+  processedJournal: () => []
 })
 
 const emit = defineEmits(['update:selectedItem', 'action', 'group-action'])
 const configStore = useConfig()
+const toast = useToast()
+// [ДОБАВЛЕНО] confirmDialog для removeDest
+const { confirmDialog } = useConfirm()
 
 const { getFamilyRoot, getFullFamily } = useFamily()
 const { getPersonLocationStatus, getPersonStatusText, isValidGuardianFor, isChild, canPhysicallyJoin, getEligibleCompanions, validateTrip } = useCompanions()
@@ -475,7 +489,6 @@ const potentialDrivers = ref<any[]>([])
 const pendingPassengerToAdd = ref<any>(null)
 
 // --- ФИЛЬТРАЦИЯ И ПОИСК ---
-// Базовый список: только люди со статусом "Доступен" (или пустым)
 const availablePeople = computed(() => {
   return (props.peopleList || []).filter(p => !p.status || p.status === 'Доступен')
 })
@@ -491,17 +504,15 @@ const layoutMap: Record<string, string> = {
 
 const switchLayout = (str: string) => str.split('').map(char => layoutMap[char.toLowerCase()] || char).join('')
 const fusePeopleOptions = { includeScore: true, threshold: 0.4, ignoreLocation: true, minMatchCharLength: 2, keys: [{ name: 'fio', weight: 2 }, { name: 'fio_short', weight: 1.5 }, 'phone'] }
-const fuseVehicleOptions = { includeScore: true, threshold: 0.0, ignoreLocation: true, keys: [{ name: 'plate', weight: 2 }, { name: 'model', weight: 1 }] }
+const fuseVehicleOptions = { includeScore: true, threshold: 0.4, ignoreLocation: true, keys: [{ name: 'plate', weight: 2 }, { name: 'model', weight: 1 }] }
 
-// Инициализируем Fuse ТОЛЬКО по доступным людям
 const fusePeople = computed(() => new Fuse(toRaw(availablePeople.value) || [], fusePeopleOptions))
 const fuseVehicles = computed(() => new Fuse(toRaw(props.vehiclesList) || [], fuseVehicleOptions))
 
-// Единое вычисляемое свойство для дропдауна
+// ---- dropdownResults ----
 const dropdownResults = computed(() => {
   const query = globalSearch.value.trim()
-  
-  // Если пусто - возвращаем всех доступных людей (без машин)
+
   if (query.length < 1) {
     return availablePeople.value.map(p => ({
       ...p,
@@ -511,15 +522,14 @@ const dropdownResults = computed(() => {
     }))
   }
 
-  // Если есть текст - ищем через Fuse (людей только из доступных, машины из всех)
   const queryVariants = new Set([query])
   const converted = switchLayout(query)
   if (converted !== query) queryVariants.add(converted)
-  
+
   const foundPeople: any[] = []
   const foundVehicles: any[] = []
   const addedIds = new Set()
-  
+
   queryVariants.forEach(q => {
     fusePeople.value.search(q).forEach(r => {
       if (!addedIds.has(`p_${r.item.id}`)) {
@@ -539,13 +549,15 @@ const dropdownResults = computed(() => {
   if (hasDigits) return [...foundVehicles, ...foundPeople]
   else return [...foundPeople, ...foundVehicles]
 })
+// ---- КОНЕЦ dropdownResults ----
 
 const formatShortFio = (fio: string) => {
   if (!fio) return ''
   const parts = fio.trim().split(/\s+/)
-  if (parts.length === 0) return ''
-  if (parts.length === 1) return parts[0]
-  return `${parts[0]} ${parts.slice(1).map(n => n[0].toUpperCase() + '.').join(' ')}`
+  const first = parts[0]
+  if (!first) return ''
+  if (parts.length === 1) return first
+  return `${first} ${parts.slice(1).map(n => n.charAt(0).toUpperCase() + '.').join(' ')}`
 }
 
 // --- ОБРАБОТЧИКИ ВЗАИМОДЕЙСТВИЯ С ДРОПДАУНОМ ---
@@ -555,7 +567,6 @@ const onSearchFocus = () => {
 }
 
 const onSearchBlur = () => {
-  // Задержка нужна, чтобы клик по элементу списка успел обработаться до закрытия
   setTimeout(() => {
     isSearchFocused.value = false
     activeDropdownIndex.value = -1
@@ -591,10 +602,13 @@ const handleArrowUp = () => {
 }
 
 const handleEnterKey = () => {
-  if (activeDropdownIndex.value >= 0 && dropdownResults.value[activeDropdownIndex.value]) {
-    selectItem(dropdownResults.value[activeDropdownIndex.value])
+  // индекс массива даёт элемент | undefined — guard
+  const active = activeDropdownIndex.value >= 0 ? dropdownResults.value[activeDropdownIndex.value] : undefined
+  if (active) {
+    selectItem(active)
   } else if (dropdownResults.value.length === 1) {
-    selectItem(dropdownResults.value[0])
+    const single = dropdownResults.value[0]
+    if (single) selectItem(single)
   }
 }
 
@@ -606,34 +620,79 @@ const scrollDropdownItemIntoView = () => {
   })
 }
 
+// --- ПОПУЛЯРНЫЕ НАПРАВЛЕНИЯ ---
 const popularDestinations = computed(() => configStore.config.value?.destinations || [])
 const sortedDestinations = computed(() => {
-  if (!props.selectedItem) return popularDestinations.value.map((name: string) => ({ name, type: 'global' }))
+  if (!props.selectedItem) return popularDestinations.value.map((name: string) => ({ name, type: 'global' as const }))
   const history = props.processedJournal.filter((e: any) => String(e.person_id) === String(props.selectedItem.id) && e.destination).map((e: any) => e.destination)
   const counts: Record<string, number> = {}
   history.forEach(d => { counts[d] = (counts[d] || 0) + 1 })
-  const sortedHistory = Object.keys(counts).sort((a, b) => counts[b] - counts[a])
+  const sortedHistory = Object.keys(counts).sort((a, b) => counts[b]! - counts[a]!)
   const result: { name: string; type: 'history' | 'global' }[] = []
   sortedHistory.forEach(name => result.push({ name, type: 'history' }))
   popularDestinations.value.forEach((name: string) => { if (!counts[name]) result.push({ name, type: 'global' }) })
   return result
 })
-const isNewDestination = computed(() => { const val = tripDestination.value.trim(); return val.length >= 2 && !sortedDestinations.value.some((d: any) => d.name.toLowerCase() === val.toLowerCase()) })
-const saveNewDestination = async () => { if (tripDestination.value.trim()) await configStore.addDestination(tripDestination.value.trim()) }
-const removeDest = async (dest: string) => { if (confirm(`Удалить "${dest}"?`)) { await configStore.removeDestination(dest); if (tripDestination.value === dest) tripDestination.value = '' } }
 
-// --- STATUS ---
+const isNewDestination = computed(() => {
+  const val = tripDestination.value.trim()
+  return val.length >= 2 && !sortedDestinations.value.some((d: any) => d.name.toLowerCase() === val.toLowerCase())
+})
+
+const saveNewDestination = async () => {
+  if (tripDestination.value.trim()) await configStore.addDestination(tripDestination.value.trim())
+}
+
+const removeDest = async (dest: string) => {
+  // [UI/UX] нативный confirm -> ConfirmDialog
+  const ok = await confirmDialog({
+    title: `Удалить «${dest}»?`,
+    message: 'Место исчезнет из подсказок для всех сотрудников.',
+    confirmLabel: 'Удалить',
+    danger: true
+  })
+  if (!ok) return
+  await configStore.removeDestination(dest)
+  if (tripDestination.value === dest) tripDestination.value = ''
+}
+
+// --- СТАТУСЫ ---
+const activeTripRecord = computed(() => {
+  if (!props.selectedItem || props.selectedItem.type !== 'person') return null
+  const personId = String(props.selectedItem.id)
+  return props.processedJournal.find((e: any) =>
+    String(e.person_id) === personId && e.timestamp_out && !e.timestamp_in
+  ) || null
+})
+
 const mainPersonStatus = computed(() => getPersonLocationStatus(props.selectedItem, props.processedJournal))
-const isResident = computed(() => props.selectedItem?.location?.trim().toLowerCase() !== 'вне территории')
-const isResidentInside = computed(() => isResident.value && mainPersonStatus.value === 'inside')
-const isResidentOutside = computed(() => isResident.value && mainPersonStatus.value === 'outside')
-const isGuestOutside = computed(() => !isResident.value && mainPersonStatus.value === 'outside')
-const isGuestInside = computed(() => !isResident.value && mainPersonStatus.value === 'inside')
+
+const actualStatus = computed(() => {
+  if (activeTripRecord.value) return 'outside'
+  return mainPersonStatus.value
+})
+
+const isResident = computed(() => {
+  const loc = props.selectedItem?.location?.trim().toLowerCase() || ''
+  if (!loc) return true
+  return !(loc.includes('город') || loc === 'outside' || loc === 'вне территории')
+})
+
+const isResidentInside = computed(() => isResident.value && actualStatus.value === 'inside')
+const isResidentOutside = computed(() => isResident.value && actualStatus.value === 'outside')
+const isGuestOutside = computed(() => !isResident.value && actualStatus.value === 'outside')
+const isGuestInside = computed(() => !isResident.value && actualStatus.value === 'inside')
+
 const canStartTrip = computed(() => isResidentInside.value || isGuestOutside.value || isResidentOutside.value || isGuestInside.value)
-const statusTitle = computed(() => { if (!props.selectedItem) return ''; if (!canStartTrip.value) return 'Недоступно (уже в пути?)'; return '' })
+const statusTitle = computed(() => {
+  if (!props.selectedItem) return ''
+  if (!canStartTrip.value) return 'Недоступно (уже в пути?)'
+  return ''
+})
+
 const personCategory = computed(() => props.selectedItem?.exit_category || (isChild(props.selectedItem) ? 'small' : 'adult'))
 const personRestrictions = computed(() => {
-  const r = []
+  const r: string[] = []
   if (!props.selectedItem) return []
   if (props.selectedItem.exit_category === 'small') r.push('Только со взрослым')
   if (props.selectedItem.exit_category === 'independent') r.push('До 21:00')
@@ -641,20 +700,9 @@ const personRestrictions = computed(() => {
   if (props.selectedItem.exit_category === 'escort') r.push('Требует сопровождения')
   return r
 })
-const activeTripRecord = computed(() => {
-  if (!props.selectedItem || props.selectedItem.type !== 'person') return null
-  const personId = String(props.selectedItem.id)
-  return props.processedJournal.find((e: any) => String(e.person_id) === personId && e.timestamp_out && !e.timestamp_in)
-})
 const activeTripNote = computed(() => activeTripRecord.value?.note || null)
 
-// --- НОВАЯ ЛОГИКА АВТО ---
-const getVehicleLocationStatus = (plate: string) => {
-  const openExit = props.processedJournal.find((e: any) => (e.vehicle_out === plate || e.vehicle_in === plate) && e.timestamp_out && !e.timestamp_in)
-  if (openExit) return 'outside'
-  return 'inside'
-}
-
+// --- АВТОМОБИЛИ ---
 const suggestedVehicles = computed(() => {
   if (!props.selectedItem || props.selectedItem.type !== 'person') return []
   const personId = props.selectedItem.id
@@ -670,7 +718,7 @@ const availableVehicles = computed(() => {
   })
 })
 
-// --- COMPANIONS ---
+// --- ПОПУТЧИКИ ---
 const eligibleCompanions = computed(() => {
   if (!props.selectedItem || !canStartTrip.value) return []
   return getEligibleCompanions(props.selectedItem, tripPassengers.value, props.peopleList, props.processedJournal)
@@ -687,10 +735,16 @@ const availableRelatives = computed(() => {
 })
 
 const selectedItemFamilyMap = computed(() => {
-  if (!props.selectedItem || props.selectedItem.type !== 'person') return new Map<string, string>()
-  const family = getFullFamily(props.selectedItem, props.peopleList)
   const map = new Map<string, string>()
-  family.forEach(f => map.set(String(f.id), f.relation || 'Родств.'))
+  if (!props.selectedItem || props.selectedItem.type !== 'person') return map
+  const familyMembers = getFullFamily(props.selectedItem, props.peopleList)
+  if (familyMembers && Array.isArray(familyMembers)) {
+    familyMembers.forEach((member: any) => {
+      if (member.id && member.relation) {
+        map.set(String(member.id), member.relation)
+      }
+    })
+  }
   return map
 })
 
@@ -701,10 +755,10 @@ const getRelationLabel = (person: any) => {
 
 const allowedCompanions = computed(() => eligibleCompanions.value.map(p => ({ item: p })))
 const showAddSection = computed(() => availableVehicles.value.length > 0 || availableRelatives.value.length > 0)
-const canJoinTrip = (person: any) => canPhysicallyJoin(getPersonLocationStatus(person, props.processedJournal), mainPersonStatus.value)
+const canJoinTrip = (person: any) => canPhysicallyJoin(getPersonLocationStatus(person, props.processedJournal), actualStatus.value)
 const getPersonStatusTextLocal = (person: any) => getPersonStatusText(getPersonLocationStatus(person, props.processedJournal))
 
-// --- VALIDATION ---
+// --- ВАЛИДАЦИЯ ---
 const hasAdultCompanion = computed(() => tripPassengers.value.some(p => isValidGuardianFor(props.selectedItem, p, props.peopleList)))
 const hasAnyCompanion = computed(() => tripPassengers.value.length > 0)
 const needsPermissionConfirmation = computed(() => personCategory.value === 'permission' && !hasAdultCompanion.value)
@@ -718,8 +772,12 @@ const validationError = computed(() => {
   if (!coreValidation.isValid) return coreValidation.error
   if (!canStartTrip.value) return 'Действие недоступно'
   if (personCategory.value === 'small') {
-    if (isResidentInside.value || isGuestInside.value) { if (!hasAdultCompanion.value && !childSoloExitConfirmed.value) return 'Ребёнок может выехать только с родственниками' }
-    if (isResidentOutside.value || isGuestOutside.value) { if (!hasAnyCompanion.value && !childSoloArrivalConfirmed.value) return 'Подтвердите прибытие' }
+    if (isResidentInside.value || isGuestInside.value) {
+      if (!hasAdultCompanion.value && !childSoloExitConfirmed.value) return 'Ребёнок может выехать только с родственниками'
+    }
+    if (isResidentOutside.value || isGuestOutside.value) {
+      if (!hasAnyCompanion.value && !childSoloArrivalConfirmed.value) return 'Подтвердите прибытие'
+    }
   }
   if (needsPermissionConfirmation.value && !permissionConfirmed.value) return 'Подтвердите разрешение'
   if (needsEscortConfirmation.value && !escortSoloAllowed.value) return 'Разрешите выход одному или добавьте сопровождающего'
@@ -727,22 +785,54 @@ const validationError = computed(() => {
 })
 
 const isTripValid = computed(() => validationError.value === null)
-const actionButtonLabel = computed(() => { if (isResidentInside.value || isGuestInside.value) return 'Выезд'; if (isResidentOutside.value || isGuestOutside.value) return 'Въезд'; return 'Действие' })
-const totalPeopleCount = computed(() => 1 + tripPassengers.value.length)
-const walkingButtonLabel = computed(() => {
-  const action = actionButtonLabel.value
-  const verb = action === 'Выезд' ? (totalPeopleCount.value > 1 ? 'Вышли' : 'Вышел') : (totalPeopleCount.value > 1 ? 'Вошли' : 'Вошел')
-  return `${verb} (${totalPeopleCount.value})`
+
+const actionButtonLabel = computed(() => {
+  if (isResidentInside.value || isGuestInside.value) return 'Выезд'
+  if (isResidentOutside.value || isGuestOutside.value) return 'Въезд'
+  return 'Действие'
 })
 
-// --- ACTIONS ---
+const totalPeopleCount = computed(() => 1 + tripPassengers.value.length)
+
+const walkingButtonLabel = computed(() => {
+  const isExit = isResidentInside.value || isGuestInside.value
+  const isEnter = isResidentOutside.value || isGuestOutside.value
+  const isGuest = !isResident.value
+
+  if (isExit) {
+    const base = isGuest
+      ? (totalPeopleCount.value > 1 ? 'Уехали' : 'Уехал')
+      : (totalPeopleCount.value > 1 ? 'Вышли' : 'Вышел')
+    return `${base} (${totalPeopleCount.value})`
+  } else if (isEnter) {
+    const base = isGuest
+      ? (totalPeopleCount.value > 1 ? 'Пришли' : 'Пришёл')
+      : (totalPeopleCount.value > 1 ? 'Вошли' : 'Вошел')
+    return `${base} (${totalPeopleCount.value})`
+  }
+  return `Действие (${totalPeopleCount.value})`
+})
+
+// --- ДЕЙСТВИЯ ---
 const getPassengerClass = (p: any) => (canJoinTrip(p.item || p) ? 'cursor-pointer hover:badge-primary' : 'opacity-50 cursor-not-allowed')
-const tryAddPassenger = (p: any) => { const person = p.item || p; if (!canJoinTrip(person)) { alert(`Нельзя добавить ${person.fio}`); return } tripPassengers.value.push(person); passengerSearchQuery.value = ''; foundPassengers.value = [] };
-const selectVehicle = (v: any) => { selectedVehicle.value = v; };
-const deselectVehicle = () => { selectedVehicle.value = null; };
-const removePassenger = (p: any) => { tripPassengers.value = tripPassengers.value.filter(item => item.id !== p.id); };
-const clearNote = () => { tripNote.value = ''; };
-const handleNoteBlur = () => { if (!tripNote.value) isEditingNote.value = false; };
+
+// [UI/UX] alert -> warning-тост с именем
+const tryAddPassenger = (p: any) => {
+  const person = p.item || p
+  if (!canJoinTrip(person)) {
+    toast.warning(`Нельзя добавить: ${person.fio} — не в той локации`)
+    return
+  }
+  tripPassengers.value.push(person)
+  passengerSearchQuery.value = ''
+  foundPassengers.value = []
+}
+
+const selectVehicle = (v: any) => { selectedVehicle.value = v }
+const deselectVehicle = () => { selectedVehicle.value = null }
+const removePassenger = (p: any) => { tripPassengers.value = tripPassengers.value.filter(item => item.id !== p.id) }
+const clearNote = () => { tripNote.value = '' }
+const handleNoteBlur = () => { if (!tripNote.value) isEditingNote.value = false }
 
 const clearSearch = () => {
   globalSearch.value = ''
@@ -751,31 +841,53 @@ const clearSearch = () => {
   selectingDriverForVehicle.value = null
   potentialDrivers.value = []
   pendingPassengerToAdd.value = null
-  selectedVehicle.value = null; tripPassengers.value = []; tripDestination.value = 'Город'; isEditingNote.value = false; passengerSearchQuery.value = ''; foundPassengers.value = []; permissionConfirmed.value = false; escortSoloAllowed.value = false; childSoloArrivalConfirmed.value = false; childSoloExitConfirmed.value = false
+  selectedVehicle.value = null
+  tripPassengers.value = []
+  tripDestination.value = 'Город'
+  isEditingNote.value = false
+  passengerSearchQuery.value = ''
+  foundPassengers.value = []
+  permissionConfirmed.value = false
+  escortSoloAllowed.value = false
+  childSoloArrivalConfirmed.value = false
+  childSoloExitConfirmed.value = false
 }
 
-const handleDeselect = () => { 
-  emit('update:selectedItem', null); 
-  globalSearch.value = ''; 
-  isSearchFocused.value = false 
+const handleDeselect = () => {
+  emit('update:selectedItem', null)
+  globalSearch.value = ''
+  isSearchFocused.value = false
 }
 
 const handlePassengerBlur = () => { setTimeout(() => { foundPassengers.value = [] }, 200) }
 const handlePassengerFocus = () => { if (!passengerSearchQuery.value) foundPassengers.value = allowedCompanions.value }
-const handlePassengerSearch = () => { if (passengerSearchQuery.value.length < 2) { foundPassengers.value = allowedCompanions.value; return } const addedIds = tripPassengers.value.map(p => p.id); foundPassengers.value = fusePeople.value.search(passengerSearchQuery.value).filter(r => r.item.id !== props.selectedItem?.id && !addedIds.includes(r.item.id)) }
-const handlePassengerWheel = (e: WheelEvent) => { if (!foundPassengers.value.length || !passengerListEl.value) return; e.preventDefault(); passengerListEl.value.scrollTop += e.deltaY > 0 ? 30 : -30 }
+const handlePassengerSearch = () => {
+  if (passengerSearchQuery.value.length < 2) {
+    foundPassengers.value = allowedCompanions.value
+    return
+  }
+  const addedIds = tripPassengers.value.map(p => p.id)
+  foundPassengers.value = fusePeople.value.search(passengerSearchQuery.value).filter((r: any) => r.item.id !== props.selectedItem?.id && !addedIds.includes(r.item.id))
+}
+
+const handlePassengerWheel = (e: WheelEvent) => {
+  if (!foundPassengers.value.length || !passengerListEl.value) return
+  e.preventDefault()
+  passengerListEl.value.scrollTop += e.deltaY > 0 ? 30 : -30
+}
 
 // --- ЛОГИКА ВЫБОРА ---
 const selectItem = async (item: any) => {
-  isSearchFocused.value = false // Закрываем список сразу при выборе
+  isSearchFocused.value = false
   isSelecting.value = true
 
   if (item.type === 'vehicle') {
     const drivers = (item.allowed_driver_ids && item.allowed_driver_ids.length > 0) ? item.allowed_driver_ids : (item.owner_id ? [item.owner_id] : [])
-    const driverPeople = props.peopleList.filter(p => drivers.includes(p.id))
+    const driverPeople = props.peopleList.filter((p: any) => drivers.includes(p.id))
 
     if (driverPeople.length === 0) {
-      alert('У этого автомобиля нет зарегистрированных водителей!')
+      // [UI/UX] alert -> error-тост
+      toast.error('У этого автомобиля нет зарегистрированных водителей')
       clearSearch()
       return
     }
@@ -791,7 +903,8 @@ const selectItem = async (item: any) => {
     }
 
     if (driverPeople.length === 1) {
-      finalizeSelection(driverPeople[0], item)
+      const single = driverPeople[0]
+      if (single) finalizeSelection(single, item)
     } else {
       selectingDriverForVehicle.value = item
       potentialDrivers.value = driverPeople
@@ -814,7 +927,8 @@ const finalizeSelection = (person: any, vehicle: any | null) => {
   if (vehicle) {
     const allowedIds = vehicle.allowed_driver_ids || (vehicle.owner_id ? [vehicle.owner_id] : [])
     if (!allowedIds.includes(finalPerson.id)) {
-      alert(`⛔ ${finalPerson.fio} не допущен к управлению данным автомобилем!`)
+      // [UI/UX] alert -> error-тост
+      toast.error(`⛔ ${finalPerson.fio} не допущен к управлению данным автомобилем`)
       selectedVehicle.value = null
       emit('update:selectedItem', finalPerson)
       globalSearch.value = finalPerson.display
@@ -840,7 +954,7 @@ const finalizeSelection = (person: any, vehicle: any | null) => {
   if (vehicle) selectedVehicle.value = vehicle
 
   if (pendingPassengerToAdd.value && pendingPassengerToAdd.value.id !== finalPerson.id) {
-    if (!tripPassengers.value.find(p => p.id === pendingPassengerToAdd.value.id)) {
+    if (!tripPassengers.value.find((p: any) => p.id === pendingPassengerToAdd.value.id)) {
       tripPassengers.value.push(pendingPassengerToAdd.value)
     }
     pendingPassengerToAdd.value = null
@@ -858,45 +972,90 @@ const selectDriver = (person: any) => {
 
 // --- ОБРАБОТЧИКИ КНОПОК ---
 const handleWalkingTrip = () => {
-  if (!isTripValid.value) return
+  if (!isTripValid.value) {
+    // [UI/UX] вместо console.warn — warning-тост с текстом валидации
+    toast.warning(validationError.value || 'Действие недоступно')
+    return
+  }
   if (!props.selectedItem || !props.selectedItem.id) {
-    alert('Критическая ошибка: Не выбран человек или отсутствует ID.')
+    toast.error('Критическая ошибка: не выбран человек или отсутствует ID')
     return
   }
 
   const approvedSolo = (needsEscortConfirmation.value && escortSoloAllowed.value) || (needsChildSoloExitConfirmation.value && childSoloExitConfirmed.value)
-  const payloadBase = { destination: tripDestination.value, note: tripNote.value, permissionConfirmed: permissionConfirmed.value, approvedSolo, childSoloArrival: childSoloArrivalConfirmed.value }
+  const payloadBase = {
+    destination: tripDestination.value,
+    note: tripNote.value,
+    permissionConfirmed: permissionConfirmed.value,
+    approvedSolo,
+    childSoloArrival: childSoloArrivalConfirmed.value
+  }
   const actionKey = (isResidentInside.value || isGuestInside.value) ? 'exit' : 'enter'
-  
-  if (tripPassengers.value.length > 0) { emit('group-action', { type: 'group', actionKey, vehicle: null, passengers: tripPassengers.value, mainPerson: props.selectedItem, ...payloadBase }) }
-  else { emit('action', { type: 'single', actionKey, transportType: 'foot', person: props.selectedItem, ...payloadBase }) }
+
+  if (tripPassengers.value.length > 0) {
+    emit('group-action', {
+      type: 'group',
+      actionKey,
+      vehicle: null,
+      passengers: tripPassengers.value,
+      mainPerson: props.selectedItem,
+      ...payloadBase
+    })
+  } else {
+    emit('action', {
+      type: 'single',
+      actionKey,
+      transportType: 'foot',
+      person: props.selectedItem,
+      ...payloadBase
+    })
+  }
   clearSearch()
 }
 
 const handleGroupTrip = () => {
-  if (!selectedVehicle.value || !isTripValid.value) return
-  if (!props.selectedItem || !props.selectedItem.id) {
-    alert('Критическая ошибка: Не выбран человек или отсутствует ID.')
+  if (!selectedVehicle.value || !isTripValid.value) {
+    // [UI/UX] вместо молчаливого return — объяснение
+    toast.warning(validationError.value || 'Выберите автомобиль')
     return
   }
+  if (!props.selectedItem || !props.selectedItem.id) return
 
   const approvedSolo = (needsEscortConfirmation.value && escortSoloAllowed.value) || (needsChildSoloExitConfirmation.value && childSoloExitConfirmed.value)
   const actionKey = (isResidentInside.value || isGuestInside.value) ? 'exit' : 'enter'
-  
-  emit('group-action', { type: 'group', actionKey, vehicle: selectedVehicle.value, passengers: tripPassengers.value, destination: tripDestination.value, note: tripNote.value, mainPerson: props.selectedItem, approvedSolo })
+
+  emit('group-action', {
+    type: 'group',
+    actionKey,
+    vehicle: selectedVehicle.value,
+    passengers: tripPassengers.value,
+    destination: tripDestination.value,
+    note: tripNote.value,
+    mainPerson: props.selectedItem,
+    approvedSolo
+  })
   clearSearch()
 }
 
 watch(globalSearch, (newVal) => {
   if (isSelecting.value) { isSelecting.value = false; return }
-  activeDropdownIndex.value = -1 // Сбрасываем подсветку стрелок при вводе текста
-  // dropdownResults вычисляемое свойство само обновит список
+  activeDropdownIndex.value = -1
 })
 
-watch(() => props.selectedItem, (newVal) => { 
-  if (!newVal) { 
-    isSearchFocused.value = false 
-  } 
+watch(() => props.selectedItem, (newVal) => {
+  if (!newVal) {
+    isSearchFocused.value = false
+  }
+  selectedVehicle.value = null
+  tripPassengers.value = []
+  tripDestination.value = 'Город'
+  isEditingNote.value = false
+  passengerSearchQuery.value = ''
+  foundPassengers.value = []
+  permissionConfirmed.value = false
+  escortSoloAllowed.value = false
+  childSoloArrivalConfirmed.value = false
+  childSoloExitConfirmed.value = false
 })
 
 onMounted(() => {

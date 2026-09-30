@@ -234,7 +234,22 @@ export interface LibraryItem {
   updateSVG?: (width: number, height: number, params?: any) => string
 }
 
-export const LAYER_CONFIG: Record<string, LayerConfig> = {
+// [ИСПРАВЛЕНО] Карта с известными литеральными ключами: обращение
+// LAYER_CONFIG.BACKGROUND теперь даёт LayerConfig (без undefined),
+// а динамический доступ по строке (useSimulatorCore) — LayerConfig | undefined,
+// что корректно: там уже стоят guard'ы (layerConfig && ...).
+export interface LayerConfigMap {
+  BACKGROUND: LayerConfig
+  GROUND: LayerConfig
+  DECORATION: LayerConfig
+  GATE: LayerConfig
+  ACTOR: LayerConfig
+  ZONE: LayerConfig
+  // Динамический доступ по строке остаётся валидным
+  [key: string]: LayerConfig | undefined
+}
+
+export const LAYER_CONFIG: LayerConfigMap = {
   BACKGROUND: { zIndex: 0, isObstacle: false, layer: 'background', selectable: false },
   GROUND: { zIndex: 10, isObstacle: false, layer: 'ground', selectable: true },
   DECORATION: { zIndex: 15, isObstacle: true, layer: 'objects', selectable: true, collidable: true },

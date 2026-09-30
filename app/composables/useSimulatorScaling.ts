@@ -1,7 +1,9 @@
-// composables/useSimulatorScaling.ts
-// Управление масштабированием сцены и ResizeObserver
+// app/composables/useSimulatorScaling.ts
+// Назначение: управление масштабированием сцены через ResizeObserver.
 
-import { ref, onMounted, onUnmounted, nextTick, Ref } from 'vue'
+// [ИСПРАВЛЕНО] verbatimModuleSyntax: Ref — тип, импортируется через import type
+import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import type { Ref } from 'vue'
 
 export function useSimulatorScaling(
   containerRef: Ref<HTMLElement | null>,
@@ -27,6 +29,7 @@ export function useSimulatorScaling(
     })
   }
 
+  // Обязательно вызывать при размонтировании — иначе наблюдатель держит узел
   const cleanupScaling = () => {
     if (resizeObserver) {
       resizeObserver.disconnect()

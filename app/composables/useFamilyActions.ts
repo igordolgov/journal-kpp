@@ -1,30 +1,31 @@
 // composables/useFamilyActions.ts
-// Назначение: Действия по управлению составом семьи (добавление родственников).
-// Содержит логику вычисления отношения нового члена семьи к Главе семейства 
-// на основе его отношения к выбранному целевому человеку.
+// Назначение: действия по управлению составом семьи (добавление родственников).
+// [ИСПРАВЛЕНО v2]: id в IPerson опционален (запись создаётся ДО addItem);
+// fio/gender больше не дублируются явными полями перед spread (TS2783/TS2741):
+// порядок — дефолты, затем ...cleanData, затем вычисленный gender последним.
 
 import { useDatabase } from './useDatabase'
 import { useFamily } from './useFamily'
+
+// Локальный тип записи человека (динамические поля IndexedDB).
+// id опционален: новая запись получает его от addItem после вставки.
+type IPerson = { id?: number | string; location?: string; relation?: string; [key: string]: any }
 
 // Интерфейс входящих данных
 interface IAddRelativeData {
   fio: string
   gender?: 'male' | 'female'
-  // Можно добавить другие поля, если нужно (phone, document и т.д.)
   [key: string]: any
 }
 
 export const useFamilyActions = () => {
-  const { addItem, getAllItems } = useDatabase()
+  // updateItem — для привязки существующих людей
+  const { addItem, updateItem, getAllItems } = useDatabase()
   const { getFamilyRoot } = useFamily()
 
   /**
    * Матрица транзитивности отношений.
-   * Определяет, кем является НОВЫЙ человек для ГЛАВЫ, если мы знаем:
-   * 1. Кем ЦЕЛЬ является для ГЛАВЫ (TargetRelation).
-   * 2. Кем НОВЫЙ является для ЦЕЛИ (NewRelationToTarget).
-   * 
-   * Структура: MAP[TargetRelation][NewRelationToTarget] = NewRelationToHead
+   * MAP[TargetRelation][NewRelationToTarget] = NewRelationToHead
    */
   const RELATION_TRANSIVITY_MAP: Record<string, Record<string, string>> = {
     // Цель: Супруга Главы
@@ -39,13 +40,13 @@ export const useFamilyActions = () => {
     'Внук': { 'Сын': 'Правнук', 'Дочь': 'Правнучка' },
     'Внучка': { 'Сын': 'Правнук', 'Дочь': 'Правнучка' },
 
-    // Цель: Брат/Сестра Главы (Дядя/Тётя для детей Главы)
+    // Цель: Брат/Сестра Главы
     'Брат': { 'Сын': 'Племянник', 'Дочь': 'Племянница', 'Жена': 'Невестка' },
     'Сестра': { 'Сын': 'Племянник', 'Дочь': 'Племянница', 'Муж': 'Зять' },
 
     // Цель: Родители Главы
-    'Отец': { 'Сын': 'Брат', 'Дочь': 'Сестра' }, // Сын отца = Брат
-    'Мать': { 'Сын': 'Брат', 'Дочь': 'Сестра' }, // Сын матери = Брат
+    'Отец': { 'Сын': 'Брат', 'Дочь': 'Сестра' },
+    'Мать': { 'Сын': 'Брат', 'Дочь': 'Сестра' },
   }
 
   /**
@@ -53,8 +54,8 @@ export const useFamilyActions = () => {
    * Автоматически вычисляет отношение к Главе семьи и пол.
    */
   const addRelative = async (
-    targetPerson: IPerson, 
-    relationType: string, 
+    targetPerson: IPerson,
+    relationType: string,
     data: IAddRelativeData
   ): Promise<IPerson> => {
     if (!targetPerson) throw new Error('Целевой человек не выбран')
@@ -68,21 +69,22 @@ export const useFamilyActions = () => {
     // Если цель не является главой, вычисляем отношение через матрицу
     if (String(targetPerson.id) !== String(head.id)) {
       const targetRelation = targetPerson.relation || ''
-      
-      // Ищем в матрице
-      if (RELATION_TRANSIVITY_MAP[targetRelation]?.[relationType]) {
-        relationToHead = RELATION_TRANSIVITY_MAP[targetRelation][relationType]
+
+      // guard: индексация Record -> string | undefined
+      const mapped = RELATION_TRANSIVITY_MAP[targetRelation]?.[relationType]
+      if (mapped) {
+        relationToHead = mapped
       } else {
-        // Фолбэк: если комбинация редкая, оставляем как есть (потребует ручной правки)
+        // Фолбэк: редкая комбинация — оставляем как есть (потребует ручной правки)
         console.warn(`Unknown relation transitivity: ${targetRelation} -> ${relationType}`)
-        relationToHead = relationType 
+        relationToHead = relationType
       }
     }
 
     // Определение пола на основе отношения
     const maleRelations = ['Сын', 'Муж', 'Отец', 'Брат', 'Дядя', 'Внук', 'Племянник', 'Зять']
     const femaleRelations = ['Дочь', 'Жена', 'Мать', 'Сестра', 'Тётя', 'Внучка', 'Племянница', 'Невестка']
-    
+
     let gender = data.gender
     if (!gender) {
       if (maleRelations.includes(relationToHead)) gender = 'male'
@@ -90,20 +92,62 @@ export const useFamilyActions = () => {
       else gender = 'male' // Дефолт
     }
 
-    // Формирование записи
+    // ====================================================================
+    // Привязка СУЩЕСТВУЮЩЕГО взрослого человека
+    // ====================================================================
+    if (data._isExisting && data._existingId) {
+      const existingId = data._existingId
+
+      // Обновляем только семейные поля, не трогая внешность и данные
+      await updateItem('people', {
+        id: existingId,
+        main_family_id: head.id,
+        relation: relationToHead,
+        location: head.location || '' // Синхронизируем проживание с главой
+      })
+
+      return {
+        ...data,
+        id: existingId,
+        main_family_id: head.id,
+        relation: relationToHead,
+        gender
+      } as IPerson
+    }
+    // ====================================================================
+
+    // Очищаем данные от служебных флагов модалки
+    const { _isExisting, _existingId, ...cleanData } = data
+
+    // Формирование записи для НОВОГО человека.
+    // [ИСПРАВЛЕНО v2] порядок: вычисленные дефолты -> ...cleanData (пользовательские
+    // поля, включая fio) -> gender ПОСЛЕДНИМ (вычисленный пол побеждает).
+    // Явное дублирование fio убрано — оно перезаписывалось spread'ом (TS2783).
     const payload: IPerson = {
-      fio: data.fio,
-      gender: gender,
       category: 'Член семьи',
-      location: head.location || '', // Наследуем локацию главы
-      main_family_id: head.id, // Привязка к семье
+      location: head.location || '',
+      main_family_id: head.id,
       relation: relationToHead,
-      // Копируем дополнительные поля из data
-      ...data 
+
+      // --- Базовая внешность для симулятора (если не передали свою) ---
+      skinTone: cleanData.skinTone || '#FDE8D0',
+      hairColor: cleanData.hairColor || (gender === 'female' ? '#5A3825' : '#3D2314'),
+      topColor: cleanData.topColor || '#3b82f6',
+      bottomColor: cleanData.bottomColor || '#1e3a8a',
+      hairStyleId: cleanData.hairStyleId || (gender === 'female' ? 'long' : 'short'),
+      glasses: cleanData.glasses || 'none',
+      animation: cleanData.animation || { speed: 1, swingAmplitude: 5, bounceAmplitude: 3, armSwing: 15 },
+      // ------------------------------------------------------
+
+      // Пользовательские поля (fio и остальное)
+      ...cleanData,
+
+      // Вычисленный пол — строго после spread
+      gender
     }
 
     const newId = await addItem('people', payload)
-    
+
     // Возвращаем созданного человека с ID
     return { ...payload, id: newId }
   }

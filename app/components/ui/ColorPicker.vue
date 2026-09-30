@@ -1,3 +1,4 @@
+// app/components/ui/ColorPicker.vue
 <template lang="pug">
 .div
   .flex.flex-wrap.gap-2.mb-2(v-if="palette && palette.length")
@@ -11,13 +12,16 @@
     label.relative.cursor-pointer.w-6.h-6.rounded-md.border-2.border-dashed.border-gray-500.flex.items-center.justify-center.text-gray-400.transition-colors(class="hover:border-blue-400 hover:text-blue-400")
       span.text-xs.font-bold +
       input.absolute.opacity-0.w-0.h-0(
-        type="color" 
+        type="color"
         :value="modelValue || defaultColor"
-        @input="updateColor($event.target.value)"
+        @input="onNativeInput"
       )
 </template>
 
 <script setup lang="ts">
+// [ИСПРАВЛЕНО] $event.target.value в шаблоне давал 2 ошибки
+// (target — EventTarget | null, без .value) — чтение перенесено
+// в обработчик с приведением типа
 const props = defineProps<{
   modelValue: string
   palette?: string[]
@@ -28,5 +32,11 @@ const emit = defineEmits(['update:modelValue'])
 
 const updateColor = (color: string) => {
   emit('update:modelValue', color)
+}
+
+// Обработчик нативного input[type=color]
+const onNativeInput = (e: Event) => {
+  const target = e.target as HTMLInputElement | null
+  if (target?.value) updateColor(target.value)
 }
 </script>

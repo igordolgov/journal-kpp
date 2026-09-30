@@ -46,7 +46,7 @@
                 | {{ sortOrder === 1 ? '▲' : '▼' }}
             
             .resize-handle.absolute.top-0.bottom-0.w-2.cursor-col-resize(
-              class="hover:bg-primary opacity-0 hover:opacity-100 transition-opacity z-20"
+              class="z-20 hover:bg-primary opacity-0 hover:opacity-100 transition-opacity"
               style="right: 0;"
               @mousedown.stop="$emit('resize', $event, col.key)"
             )
@@ -129,7 +129,7 @@
             td.p-1
               .flex.items-center.gap-1.justify-center.relative
                 button.btn.btn-ghost.btn-xs.text-gray-400(
-                  class="hover:text-primary opacity-0 group-hover:opacity-100"
+                  class="opacity-0 group-hover:opacity-100 hover:text-primary"
                   @click="$emit('edit', item.data)"
                   title="Редактировать запись"
                 )
@@ -160,18 +160,29 @@
 </template>
 
 <script setup lang="ts">
+// app/components/JournalTable.vue — script
+// [ИСПРАВЛЕНО] type-only props (runtime Object/Array давали unknown) и guard'ы
+// строковых индексов в formatPlateHtml/formatVehicleEntry/getShortFio.
 import { computed, ref, unref } from 'vue'
 import { useState } from 'nuxt/app'
 import { useJournal } from '../composables/useJournal'
 
-const props = defineProps({
-  processedJournal: { type: Array, default: () => [] },
-  visibleColumns: { type: Array, default: () => [] },
-  sortField: { type: String, default: 'date' },
-  sortOrder: { type: Number, default: 1 },
-  tableClasses: { type: String, default: '' },
-  tableFontStyle: { type: Object, default: () => ({}) },
-  columnWidths: { type: Object, default: () => ({}) }
+const props = withDefaults(defineProps<{
+  processedJournal?: any[]
+  visibleColumns?: any[]
+  sortField?: string
+  sortOrder?: number
+  tableClasses?: string
+  tableFontStyle?: Record<string, any>
+  columnWidths?: Record<string, any>
+}>(), {
+  processedJournal: () => [],
+  visibleColumns: () => [],
+  sortField: 'date',
+  sortOrder: 1,
+  tableClasses: '',
+  tableFontStyle: () => ({}),
+  columnWidths: () => ({})
 })
 
 const emit = defineEmits(['sort', 'resize', 'person', 'edit', 'return', 'exit'])
@@ -184,7 +195,7 @@ const keepActiveOnTop = ref(true)
 
 const getLabel = (key: string) => {
   const labels: Record<string, string> = {
-    fio: 'ФИО', time_out: 'Вышел', time_in: 'Вернулся', destination: 'Куда', vehicle: 'Транспорт', status: 'Статус'
+    fio: 'ФИО', time_out: 'Снаружи', time_in: 'Внутри', destination: 'Куда', vehicle: 'Транспорт', status: 'Статус'
   }
   return labels[key] || key
 }
@@ -210,9 +221,7 @@ const formatGroupDate = (date: Date) => {
   return `${dateStr} ${weekdayStr}`
 }
 
-/**
- * Вычисляемое свойство: Сортировка.
- */
+// Сортировка строк
 const sortedRows = computed(() => {
   let list = props.processedJournal
 
@@ -221,7 +230,7 @@ const sortedRows = computed(() => {
   }
 
   const sortFn = (a: any, b: any) => {
-    let field = mapKeyToField(props.sortField)
+    const field = mapKeyToField(props.sortField)
     let valA = a[field]
     let valB = b[field]
 
@@ -229,18 +238,18 @@ const sortedRows = computed(() => {
     if (valB === null || valB === undefined) valB = ''
 
     const isDateField = field === 'timestamp_out' || field === 'timestamp_in' || field === 'created_at'
-    
+
     if (isDateField) {
       const timeA = valA ? new Date(valA).getTime() : 0
       const timeB = valB ? new Date(valB).getTime() : 0
       const numA = isNaN(timeA) ? 0 : timeA
       const numB = isNaN(timeB) ? 0 : timeB
-      
+
       if (numA < numB) return -1 * props.sortOrder
       if (numA > numB) return 1 * props.sortOrder
       return 0
-    } 
-    
+    }
+
     if (typeof valA === 'string' && typeof valB === 'string') {
       valA = valA.toLowerCase()
       valB = valB.toLowerCase()
@@ -254,7 +263,7 @@ const sortedRows = computed(() => {
   if (keepActiveOnTop.value && showClosed.value) {
     const active = [] as any[]
     const closed = [] as any[]
-    
+
     list.forEach((row: any) => {
       if (row.timestamp_out && row.timestamp_in) closed.push(row)
       else active.push(row)
@@ -264,15 +273,12 @@ const sortedRows = computed(() => {
     closed.sort(sortFn)
 
     return [...active, ...closed]
-  } 
-  
+  }
+
   return [...list].sort(sortFn)
 })
 
-/**
- * ИСПРАВЛЕНО: Группировка строк.
- * Используем счетчик headerIndex для гарантии уникальности ключей.
- */
+// Группировка строк по дням (счётчик гарантирует уникальность ключей заголовков)
 const groupedRows = computed(() => {
   const result: any[] = []
   let lastDayStr = ''
@@ -284,13 +290,12 @@ const groupedRows = computed(() => {
 
     const dateObj = new Date(dateVal)
     const dayStr = dateObj.toDateString()
-    
-    // Вставляем заголовок ТОЛЬКО если изменилась дата
+
     if (dayStr !== lastDayStr) {
       result.push({
         type: 'header',
         dateLabel: formatGroupDate(dateObj),
-        uniqueId: `header-${headerIndex++}` 
+        uniqueId: `header-${headerIndex++}`
       })
       lastDayStr = dayStr
     }
@@ -316,31 +321,33 @@ const getShortFio = (fio: string) => {
   }
 
   const parts = str.split(/\s+/).filter(p => p.length > 0)
-  if (parts.length === 0) return '—'
-  
-  const surname = parts[0]
+  const surnamePart = parts[0]
+  if (!surnamePart) return '—'
+
+  const surname = surnamePart
   let initials = ''
-  
+
   if (parts.length > 1) {
-    initials = parts.slice(1).map(n => n[0] ? n[0].toUpperCase() + '.' : '').join(' ')
+    // [ИСПРАВЛЕНО] charAt(0) вместо индексов строк
+    initials = parts.slice(1).map(n => n.charAt(0) ? n.charAt(0).toUpperCase() + '.' : '').join(' ')
   }
-  
+
   return `${prefix}${surname} ${initials}`.trim()
 }
 
 const highlightText = (text: string, query: any) => {
-  const q = query.value || ''
+  const q = query?.value || ''
   if (!q || !text) return text
-  
+
   const searchTerm = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   const regex = new RegExp(`(${searchTerm})`, 'gi')
-  
-  return String(text).replace(regex, '<span class="bg-yellow-200 text-black rounded px-0.5">$1</span>')
+
+  return String(text).replace(regex, '<span class="bg-yellow-200 px-0.5 rounded text-black">$1</span>')
 }
 
 const isChild = (entry: any) => {
   const isChildCategory = entry.person_category === 'Ребенок'
-  const fioHasPlus = String(entry.person_fio).startsWith('+')
+  const fioHasPlus = String(entry.person_fio || '').startsWith('+')
   const isChildFlag = entry.is_child === true || entry.is_child === 'true'
   return isChildFlag || isChildCategory || fioHasPlus
 }
@@ -363,7 +370,7 @@ const applyHighlight = (text: string, queryVal: string) => {
   if (!queryVal || !text) return text
   const searchTerm = queryVal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   const regex = new RegExp(`(${searchTerm})`, 'gi')
-  return text.replace(regex, '<span class="bg-yellow-200 text-black rounded px-0.5">$1</span>')
+  return text.replace(regex, '<span class="bg-yellow-200 px-0.5 rounded text-black">$1</span>')
 }
 
 const formatPlateHtml = (plateStr: string, queryVal: string) => {
@@ -373,16 +380,17 @@ const formatPlateHtml = (plateStr: string, queryVal: string) => {
   }
 
   const parts = plateStr.split(' ')
-  const region = parts.length > 1 ? parts.pop() : ''
+  // [ИСПРАВЛЕНО] pop() может вернуть undefined — fallback ''
+  const region = parts.length > 1 ? (parts.pop() ?? '') : ''
   const main = parts.join(' ')
-  
+
   const highlightedMain = applyHighlight(main, queryVal)
   const highlightedRegion = applyHighlight(region, queryVal)
-  
+
   return `
-    <span class="plate-badge inline-flex items-center h-6 px-1 bg-neutral-200 border-2 border-gray-400 rounded-sm text-xs font-mono">
+    <span class="inline-flex items-center bg-neutral-200 px-1 border-2 border-gray-400 rounded-sm h-6 font-mono text-xs plate-badge">
       <span class="text-black text-lg">${highlightedMain}</span>
-      <sup class="text-black font-bold ml-0.5">${highlightedRegion}</sup>
+      <sup class="ml-0.5 font-bold text-black">${highlightedRegion}</sup>
     </span>
   `
 }
@@ -403,12 +411,15 @@ const getVehicleDisplay = (entry: any) => {
 const formatVehicleEntry = (entry: any, queryRef: any) => {
   const text = getVehicleDisplay(entry)
   const q = unref(queryRef) || ''
-  
+
   if (text.includes('/')) {
-    const [p1, p2] = text.split('/')
+    // [ИСПРАВЛЕНО] деструктуризация split даёт string | undefined — fallback
+    const chunks = text.split('/')
+    const p1 = chunks[0] ?? ''
+    const p2 = chunks[1] ?? ''
     return `${formatPlateHtml(p1.trim(), q)} <span class="mx-1 text-gray-400">/</span> ${formatPlateHtml(p2.trim(), q)}`
   }
-  
+
   return formatPlateHtml(text, q)
 }
 
@@ -430,8 +441,8 @@ const formatMetaDate = (date: string) => {
 }
 
 const getAuthorName = (entry: any) => {
-  const author = entry.created_by || entry.author || entry.user_name || 
-                entry.guard_name || entry.shift_name || entry.created_by_name || 
+  const author = entry.created_by || entry.author || entry.user_name ||
+                entry.guard_name || entry.shift_name || entry.created_by_name ||
                 entry.username
   return author || 'Нет данных'
 }

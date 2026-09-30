@@ -1,6 +1,16 @@
 // app/composables/useSeeder.ts
+// Назначение: генератор тестовой популяции (семьи + транспорт) в IndexedDB.
+// [ИСПРАВЛЕНО v3]:
+//  1. generatePopulation возвращает Promise<{ success: boolean; count: number }> —
+//     раньше возвращался Promise<unknown>, из-за чего потребители
+//     (GeneratorControl.vue, SettingsGenerator.vue) получали 'result' of type 'unknown'.
+//  2. getRandomItem / shuffledLastNames[f] — non-null assertion: справочники
+//     константные и непустые, элемент гарантирован while-циклом.
+//  3. settings типизирован как Partial<ISederConfig>.
+
 import { useDatabase } from './useDatabase'
 import { useConfig } from './useConfig'
+import type { ISederConfig } from './useConfig'
 
 export const useSeeder = () => {
   
@@ -23,7 +33,7 @@ export const useSeeder = () => {
 
   const KID_ROLES = ['Сын', 'Дочь', 'Внук', 'Внучка', 'Племянник', 'Племянница'];
 
-  const getRandomItem = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+  const getRandomItem = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)]!;
   const getRandomDate = (start: Date, end: Date) => new Date(start.getTime() + Math.random() * (end.getTime() - start.getTime()));
   const chance = (probability: number) => Math.random() < probability;
   
@@ -178,7 +188,8 @@ export const useSeeder = () => {
     return { person: personObj, vehicle: vehicleObj };
   };
 
-  const generatePopulation = async (familiesCount: number = 1, clearBefore: boolean = true) => {
+  // [ИСПРАВЛЕНО] явный тип возврата — потребители больше не видят 'unknown'
+  const generatePopulation = async (familiesCount: number = 1, clearBefore: boolean = true): Promise<{ success: boolean; count: number }> => {
     console.log(`[Seeder] Запуск генерации. Семей: ${familiesCount}`);
     
     let db: IDBDatabase;
@@ -189,7 +200,8 @@ export const useSeeder = () => {
       return { success: false, count: 0 };
     }
 
-    const settings = configStore.config.value.seeder || {};
+    // [ИСПРАВЛЕНО] типизированные настройки генератора
+    const settings: Partial<ISederConfig> = configStore.config.value.seeder ?? {};
     
     const allPeople: any[] = [];
     const allVehicles: any[] = [];
@@ -214,7 +226,8 @@ export const useSeeder = () => {
 
     for (let f = 0; f < familiesCount; f++) {
       const familyMembers: any[] = [];
-      const familyLastName = shuffledLastNames[f];
+      // [ИСПРАВЛЕНО] while выше гарантирует длину; f < familiesCount — элемент существует
+      const familyLastName = shuffledLastNames[f]!;
       
       // Общее проживание для всей семьи
       const familyLocation = getRandomItem(BASE_LOCATIONS);
@@ -247,7 +260,7 @@ export const useSeeder = () => {
         // Извлекаем 100% точное имя отца из отчества главы
         const deducedFatherName = extractFatherNameFromPatronymic(headData.person.patronymic);
         
-        // Если по какой-то причине словарь не сработал (неизвестное отчество), берем рандомное
+        // Если словарь не сработал (неизвестное отчество), берем рандомное
         const safeFatherName = deducedFatherName || getRandomItem(MALE_NAMES);
 
         const fatherData = generatePersonData(currentId++, 'Отец', headData.person.id, 'male', familyLastName, null, settings, familyLocation, getRandomStatus(false), safeFatherName);
@@ -296,7 +309,8 @@ export const useSeeder = () => {
     }
 
     // Запись
-    return new Promise((resolve) => {
+    // [ИСПРАВЛЕНО] тип-параметр промиса — без него весь возврат был unknown
+    return new Promise<{ success: boolean; count: number }>((resolve) => {
       try {
         const storeNames = ['people', 'vehicles'];
         const transaction = db.transaction(storeNames, 'readwrite');

@@ -1,1 +1,23 @@
 node_modules
+dump-*.txt
+27.09.26.tar.gz
+3001
+test.svg
+dump-*.txt
+27.09.26.tar.gz
+3001
+test.svg
+dump-*.txt
+27.09.26.tar.gz
+3001
+test.svg
+.nuxt/
+.output/
+dist-electron/
+node_modules/
+3001/
+*.tar.gz
+*.rar
+# File Tree: journal-kpp.md
+dump-*.txt
+test.svg

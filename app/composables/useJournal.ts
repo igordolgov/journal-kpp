@@ -22,6 +22,16 @@ export const useJournal = () => {
     return map
   })
 
+  // Определение "проживает на территории" по полю location.
+  // БАГ БЫЛ: сравнение со строками 'вне территории' / 'outside', которых в проекте не существует
+  // (реальные значения — 'На территории' / 'В городе' / 'Город', см. PersonFormModal.vue,
+  // GeneratorModal.vue) — из-за этого residentsOut/outsidersIn считались неверно.
+  const isResidentLocation = (location?: string | null): boolean => {
+    const loc = (location || '').trim().toLowerCase()
+    if (!loc) return true // нет данных — считаем местным/на территории
+    return !(loc.includes('город') || loc === 'outside' || loc === 'вне территории')
+  }
+
   const stats = computed(() => {
     let residentsOut = 0
     let outsidersIn = 0
@@ -30,10 +40,7 @@ export const useJournal = () => {
       const person = peopleMap.value.get(String(entry.person_id))
       if (!person) continue
 
-      const isResident =
-        person.location &&
-        person.location.trim().toLowerCase() !== 'вне территории' &&
-        person.location !== 'outside'
+      const isResident = isResidentLocation(person.location)
 
       if (entry.timestamp_out && !entry.timestamp_in) {
         if (isResident) residentsOut++

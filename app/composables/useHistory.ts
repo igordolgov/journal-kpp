@@ -1,6 +1,9 @@
 // composables/useHistory.ts
-import { ref, watch } from 'vue'
-import { debounce } from 'lodash-es' // Если нет lodash, можно написать простой debounce
+// Назначение: универсальная история состояний (undo/redo) для произвольного объекта.
+// [ИСПРАВЛЕНО] удалён импорт debounce из lodash-es — функция нигде не
+// использовалась (режим ручного push), а зависимость тянула целый пакет.
+// computed импортирован явно, неиспользуемый watch убран.
+import { ref, computed } from 'vue'
 
 export const useHistory = <T extends object>(state: T, limit = 50) => {
   const history = ref<string[]>([])
@@ -55,9 +58,9 @@ export const useHistory = <T extends object>(state: T, limit = 50) => {
     }
   }
 
-  // Автоматическое сохранение при изменении (с дебаунсом, чтобы не спамить на каждое нажатие клавиши)
-  // Но для простоты мы будем вызывать push() вручную при структурных изменениях (drag, add, delete),
-  // а для инпутов - на change/blur. Здесь оставим ручной режим для гибкости.
+  // Автосохранение при изменении (с дебаунсом) сознательно не включено:
+  // push() вызывается вручную при структурных изменениях (drag, add, delete),
+  // для инпутов — на change/blur. Ручной режим оставлен для гибкости.
 
   return {
     history,

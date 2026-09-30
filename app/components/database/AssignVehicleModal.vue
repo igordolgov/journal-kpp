@@ -41,15 +41,17 @@ dialog.modal(
 </template>
 
 <script setup lang="ts">
-// app/components/database/AssignVehicleModal.vue
-// Простой компонент для выбора ТС из списка.
-
-// --- Props ---
-// Важно: сохраняем результат defineProps в переменную props
-const props = defineProps({
-  isOpen: Boolean,
-  person: Object,
-  vehicles: Array
+// app/components/database/AssignVehicleModal.vue — script
+// [ИСПРАВЛЕНО] type-only props: runtime-типы (Object/Array) давали
+// props.person: Object — обращение props.person?.id было ошибкой.
+const props = withDefaults(defineProps<{
+  isOpen?: boolean
+  person?: any
+  vehicles?: any[]
+}>(), {
+  isOpen: false,
+  person: null,
+  vehicles: () => []
 })
 
 // --- Emits ---
@@ -58,7 +60,6 @@ defineEmits(['close', 'assign'])
 // --- Methods ---
 // Проверка, допущен ли человек к управлению данным ТС
 const isAssigned = (vehicle: any) => {
-  // Используем optional chaining для безопасности
   return vehicle.allowed_driver_ids?.includes(props.person?.id)
 }
 </script>

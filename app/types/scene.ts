@@ -1,4 +1,7 @@
-// types/scene.ts
+// app/types/scene.ts
+// Назначение: типы редактора сцен — конфиг сцены, панели, скрипты, переменные.
+import type { TrafficConfig, Direction, TravelMode } from './simulator'
+
 export interface SceneConfig {
   id: string
   name: string
@@ -8,22 +11,49 @@ export interface SceneConfig {
   variables: Variable[]
   trafficConfig: any
   lifeConfig: any
+  // Пульты управления сцены. ⚠️ Сцены, сохранённые ДО введения panels, не
+  // содержат это поле — normalizeScene() в useEditorLogic проставляет дефолты.
+  panels: Panel[]
+  // Метки времени — проставляются в useSceneBuilder при сохранении
+  createdAt?: number
+  updatedAt?: number
 }
 
 export interface SceneSettings {
   width: number
   height: number
   bgColor: string
+  // Цвет рамки холста — пишется в defaultScene (useEditorLogic)
+  borderColor?: string
+  // Отображение сетки на холсте (EditorCanvas)
+  showGrid?: boolean
+  // Настройки трафика/симулятора сцены, перекрывающие глобальные из useConfig.
+  // Record<string, any> — simOpts (ACCEL, REACTION_TIME и т.п.) шире TrafficConfig.
+  traffic?: Partial<TrafficConfig> & Record<string, any>
 }
 
+// Полный набор полей редактора. Полное слияние с SceneElement из simulator.ts —
+// отдельным шагом после ревизии потребителей.
 export interface SceneElement {
   id: string
   name: string
-  type: string // 'actor' | 'gate' | 'zone'
+  type: string // 'actor' | 'gate' | 'zone' | 'element'
   x: number
   y: number
   rotation?: number
   zoneType?: string
+  category?: string
+  width?: number
+  height?: number
+  asset?: any
+  settings?: any
+  velocity?: number
+  zIndex?: number
+  personId?: number
+  direction?: Direction
+  travelMode?: TravelMode
+  // Прозрачность — используется сценариями (эффект fade в useScenarioRunner)
+  opacity?: number
 }
 
 export interface Script {
@@ -55,15 +85,22 @@ export interface Panel {
   width?: number
   height?: number
   controls: Control[]
+  // Поля, которые пишет редактор и читают инспектор/PanelUI
+  zIndex?: number
+  bgColor?: string
+  borderColor?: string
+  /** Режим docks панели ('none' | 'top' | ... — управляет PanelUI) */
+  dock?: string
 }
 
 export interface LogicBlock {
   id: string
-  kind: string // 'action' | 'actor' | 'target' | 'param'
+  kind: string // 'action' | 'logic' | 'actor' | 'target' | 'param'
   type: string
   label: string
   meta?: any
-  // ВАЖНО: Это поле нужно, чтобы редактор не ругался
+  // [РАСШИРЕНО v5] elementId — ссылка на элемент сцены в блоках actor/target
+  // (используется useScenarioRunner и ScenarioEditor)
   valueConfig?: {
     mode: 'exact' | 'random'
     exact: any
@@ -72,6 +109,12 @@ export interface LogicBlock {
     appearance?: string
     easingStart?: string
     easingEnd?: string
+    speed?: number      // блок move
+    delay?: number      // блок wait
+    effect?: string     // блок despawn ('fade')
+    operator?: string   // блок check_distance
+    value?: number      // блок check_distance
+    elementId?: string  // блоки actor/target — id элемента сцены
   }
 }
 
@@ -80,4 +123,5 @@ export interface Variable {
   value: string
 }
 
-export type BlockKind = 'action' | 'actor' | 'target' | 'param'
+// 'logic' — реальные логические блоки сценария (wait_until, check_distance)
+export type BlockKind = 'action' | 'logic' | 'actor' | 'target' | 'param'

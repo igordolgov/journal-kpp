@@ -1,5 +1,7 @@
-// app\composables\useConfig.ts
-// Назначение: Управление глобальной конфигурацией приложения.
+// app/composables/useConfig.ts
+// Назначение: управление глобальной конфигурацией приложения (IndexedDB 'settings').
+// [ИСПРАВЛЕНО v4]: moveItem принимает 'up' | 'down' | -1 | 1 — шаблоны
+// SettingsButtons/SettingsColumns передают числа; нормализация внутри.
 
 import { useState, computed } from '#imports'
 import { useDatabase } from './useDatabase'
@@ -39,8 +41,30 @@ export interface IActionButtonConfig {
   order: number
 }
 
-// Настройки симулятора
+// Настройки симулятора: трафик + спрайты + физика (полный набор)
 export interface ISimulatorConfig {
+  // --- Трафик / спавн ---
+  enabled: boolean
+  maxAgents: number
+  spawnIntervalMin: number
+  spawnIntervalMax: number
+  carSpawnIntervalMin: number
+  carSpawnIntervalMax: number
+  // --- Люди ---
+  personSpeed: number
+  personWidth: number
+  personHeight: number
+  locationWeightInside: number
+  // --- Машины ---
+  carSpeed: number
+  carWidth: number
+  carHeight: number
+  // --- Ворота ---
+  gateCloseDelay: number
+  wicketCloseDelay: number
+  autoOpenGates: boolean
+  autoOpenWicket: boolean
+  // --- Физика движения ---
   ACCEL: number
   DECEL: number
   ARRIVE_THRESHOLD: number
@@ -55,27 +79,27 @@ export interface ISimulatorConfig {
   SPRITE_ORIENTATION_OFFSET: number
 }
 
-// НОВОЕ: Настройки генератора
+// Настройки генератора
 export interface ISederConfig {
   familiesCount: number
   minKids: number
   maxKids: number
-  
+
   // Глава семьи
-  headIsMaleChance: number     // Вероятность что глава мужчина
-  headIsSeniorChance: number   // Вероятность что глава пенсионер (Дед/Бабка)
-  
+  headIsMaleChance: number
+  headIsSeniorChance: number
+
   // Члены семьи (вероятности)
-  spouseChance: number         // Супруг(а)
-  siblingChance: number        // Братья/Сестры главы
-  siblingSpouseChance: number  // Супруги братьев/сестер
-  nephewChance: number         // Племянники (дети братьев/сестер)
-  parentsChance: number        // Родители главы (если глава молод)
-  
+  spouseChance: number
+  siblingChance: number
+  siblingSpouseChance: number
+  nephewChance: number
+  parentsChance: number
+
   // Транспорт
   vehicleChanceAdult: number
   vehicleChanceSenior: number
-  vehicleRegionCode: string    // Код региона (например, "77")
+  vehicleRegionCode: string
 }
 
 export interface IConfig {
@@ -87,7 +111,7 @@ export interface IConfig {
   journalColumns: IColumnConfig[]
   actionButtons: IActionButtonConfig[]
   simulator: ISimulatorConfig
-  seeder: ISederConfig // НОВОЕ
+  seeder: ISederConfig
 }
 
 // --- Конфиг по умолчанию ---
@@ -105,7 +129,7 @@ const defaultConfig: IConfig = {
     time_out: 'Вышел', time_in: 'Вошел', plate: 'Гос. номер', model: 'Модель',
     type: 'Тип', owner: 'Владелец', family: 'Родственники', written_off: 'Списано'
   },
-  
+
   categories: [
     { id: 'resident', name: 'Житель' },
     { id: 'guest', name: 'Гость' },
@@ -128,7 +152,7 @@ const defaultConfig: IConfig = {
   ],
 
   destinations: ['Город', 'Магазин', 'Аптека', 'Школа', 'Больница'],
-  
+
   journalColumns: [
     { key: 'time_out', visible: true, order: 2 },
     { key: 'vehicle', visible: true, order: 3 },
@@ -137,7 +161,7 @@ const defaultConfig: IConfig = {
     { key: 'destination', visible: true, order: 6 },
     { key: 'status', visible: true, order: 7 },
   ],
-  
+
   actionButtons: [
     { key: 'exit', label: '🚶 Вышел', visible: true, order: 0 },
     { key: 'enter', label: '🏠 Вошел', visible: true, order: 1 },
@@ -175,21 +199,20 @@ const defaultConfig: IConfig = {
     SPRITE_ORIENTATION_OFFSET: 0
   },
 
-  // НОВОЕ: Дефолтные настройки генератора
   seeder: {
     familiesCount: 10,
     minKids: 1,
     maxKids: 3,
-    
-    headIsMaleChance: 0.7,      // 70% глав - мужчины
-    headIsSeniorChance: 0.3,    // 30% глав - старики
-    
-    spouseChance: 0.8,          // 80% в браке
-    siblingChance: 0.4,         // 40% есть братья/сестры
-    siblingSpouseChance: 0.5,   // 50% братья/сестры в браке
-    nephewChance: 0.5,          // 50% у братьев/сестер есть дети
-    parentsChance: 0.2,         // 20% живут родители (если глава не старик)
-    
+
+    headIsMaleChance: 0.7,
+    headIsSeniorChance: 0.3,
+
+    spouseChance: 0.8,
+    siblingChance: 0.4,
+    siblingSpouseChance: 0.5,
+    nephewChance: 0.5,
+    parentsChance: 0.2,
+
     vehicleChanceAdult: 0.7,
     vehicleChanceSenior: 0.3,
     vehicleRegionCode: '77'
@@ -201,10 +224,13 @@ export const useConfig = () => {
 
   const config = useState<IConfig>('kpp-config', () => JSON.parse(JSON.stringify(defaultConfig)))
 
-  const mergeArrays = <T extends { id: string }>(saved: T[], defaults: T[]): T[] => {
-    const savedMap = new Map(saved.map(item => [item.id, item]))
+  // Универсальный ключ слияния: у journalColumns/actionButtons нет id —
+  // только key. Ключ = id ?? key (раньше Map строился с undefined-ключами
+  // и дефолты дублировались при каждой загрузке).
+  const mergeArrays = <T extends Record<string, any>>(saved: T[], defaults: T[]): T[] => {
+    const savedMap = new Map(saved.map(item => [String(item.id ?? item.key), item]))
     defaults.forEach(defItem => {
-      if (!savedMap.has(defItem.id)) {
+      if (!savedMap.has(String(defItem.id ?? defItem.key))) {
         saved.push(defItem)
       }
     })
@@ -215,7 +241,7 @@ export const useConfig = () => {
     await initSettings()
     const settings = await getAllItems('settings')
     const savedConfig = settings.find((s: any) => s.id === 'app_config')
-    
+
     if (savedConfig && savedConfig.values) {
       const values = savedConfig.values
 
@@ -253,21 +279,20 @@ export const useConfig = () => {
         Object.assign(config.value.simulator, values.simulator)
       }
 
-      // НОВОЕ: Загрузка настроек генератора
       if (values.seeder) {
         Object.assign(config.value.seeder, values.seeder)
       }
-      
+
     } else {
       config.value = JSON.parse(JSON.stringify(defaultConfig))
     }
   }
 
   const saveConfig = async () => {
-    const payload = { 
-      id: 'app_config', 
-      name: 'Конфигурация', 
-      values: JSON.parse(JSON.stringify(config.value)) 
+    const payload = {
+      id: 'app_config',
+      name: 'Конфигурация',
+      values: JSON.parse(JSON.stringify(config.value))
     }
     await updateItem('settings', payload)
   }
@@ -281,7 +306,7 @@ export const useConfig = () => {
     const exists = config.value.destinations.some(
       (d: string) => d.toLowerCase() === trimmed.toLowerCase()
     )
-    
+
     if (!exists) {
       config.value.destinations.push(trimmed)
       await saveConfig()
@@ -298,13 +323,13 @@ export const useConfig = () => {
   }
 
   const getLabel = (key: string): string => config.value.labels[key] || key
-  
-  const getVisibleColumns = () => 
+
+  const getVisibleColumns = () =>
     [...config.value.journalColumns]
       .filter(c => c.visible)
       .sort((a, b) => a.order - b.order)
 
-  const getVisibleButtons = () => 
+  const getVisibleButtons = () =>
     [...config.value.actionButtons]
       .filter(b => b.visible)
       .sort((a, b) => a.order - b.order)
@@ -316,7 +341,7 @@ export const useConfig = () => {
       normal: 'density-normal',
       compact: 'density-compact leading-tight'
     }
-    return map[density] || map.compact
+    return map[density] || map.compact || ''
   })
 
   const getTableFontStyle = computed(() => {
@@ -324,28 +349,49 @@ export const useConfig = () => {
     return { fontSize: `${size}px` }
   })
 
-  const moveItem = (listKey: 'journalColumns' | 'actionButtons', index: number, direction: 'up' | 'down') => {
-    const arr = config.value[listKey]
+  // Перестановка order соседних элементов (мутация на месте, guard'ы индексов)
+  const moveInArray = (arr: Array<{ order: number }>, index: number, direction: 'up' | 'down') => {
     const newIndex = direction === 'up' ? index - 1 : index + 1
     if (newIndex < 0 || newIndex >= arr.length) return
-    
-    const temp = arr[index].order
-    arr[index].order = arr[newIndex].order
-    arr[newIndex].order = temp
-    
-    config.value[listKey] = arr.sort((a,b) => a.order - b.order)
+    const current = arr[index]
+    const target = arr[newIndex]
+    if (!current || !target) return
+    const temp = current.order
+    current.order = target.order
+    target.order = temp
   }
 
-  return { 
-    config, 
-    loadConfig, 
-    saveConfig, 
-    getLabel, 
-    getVisibleColumns, 
-    getVisibleButtons, 
+  // [ИСПРАВЛЕНО v4] направление принимается и строкой ('up'/'down'), и числом
+  // (-1/1) — шаблоны SettingsButtons/SettingsColumns передают числа.
+  // Чистый вариант — поправить шаблоны на 'up'/'down', но это требует файлов.
+  const moveItem = (
+    listKey: 'journalColumns' | 'actionButtons',
+    index: number,
+    direction: 'up' | 'down' | -1 | 1
+  ) => {
+    const dir: 'up' | 'down' = direction === -1 ? 'up' : direction === 1 ? 'down' : direction
+
+    // Раздельные ветки: присваивание union-массива обратно в union-поле
+    // не проходит контравариантную проверку
+    if (listKey === 'journalColumns') {
+      moveInArray(config.value.journalColumns, index, dir)
+      config.value.journalColumns = [...config.value.journalColumns].sort((a, b) => a.order - b.order)
+    } else {
+      moveInArray(config.value.actionButtons, index, dir)
+      config.value.actionButtons = [...config.value.actionButtons].sort((a, b) => a.order - b.order)
+    }
+  }
+
+  return {
+    config,
+    loadConfig,
+    saveConfig,
+    getLabel,
+    getVisibleColumns,
+    getVisibleButtons,
     moveItem,
-    getTableClasses, 
-    getTableFontStyle, 
+    getTableClasses,
+    getTableFontStyle,
     addDestination,
     removeDestination
   }

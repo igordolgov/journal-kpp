@@ -1,29 +1,37 @@
 <!-- app/components/simulator/PersonAvatar.vue -->
+<!-- Назначение: SVG-аватар персонажа (вид спереди/сзади) с анимацией ходьбы.
+     Логическая сетка 50x100; вся геометрия считается от appearance.
+     [РЕФАКТОРИНГ] Все шаблонные литералы вынесены из Pug-атрибутов в script:
+     Pug не интерполирует ${...} внутри строковых атрибутов — из-за этого пути
+     одежды были невалидны, а стили конечностей/волос/тела не применялись. -->
 <template lang="pug">
 //- Главный холст (логическая сетка 50x100)
+//- [ИСПРАВЛЕНО] viewBox был шаблонным литералом без интерполяции —
+//- заменён на обычный статичный атрибут
 svg(
-  :viewBox='`0 0 50 100`'
+  viewBox="0 0 50 100"
   :width="width"
   :height="height"
   xmlns="http://www.w3.org/2000/svg"
   style="overflow: visible;"
 )
   //- Группа всего персонажа (отвечает за покачивание и подскоки при ходьбе)
-  g(
-    :style='{ transform: mainTransform, transition: isMoving ? "none" : "transform 0.3s ease-out" }'
-  )
+  //- [ИСПРАВЛЕНО] объектный биндинг вместо строки: раньше Vue получал
+  //- невалидный CSS, и покачивание/подскоки не применялись
+  g(:style="{ transform: mainTransform, transition: isMoving ? 'none' : 'transform 0.3s ease-out' }")
     //- === 1. ЗАДНЯЯ РУКА (рисуется первой, чтобы быть ПОЗАДИ тела) ===
-    g(:style='{ transformOrigin: `${backArmX}px 38px`, transform: `rotate(${backArmAngle}deg)` }')
+    //- [ИСПРАВЛЕНО] стиль вынесен в computed backArmStyle — рука раньше не качалась
+    g(:style="backArmStyle")
       line(:x1="backArmX" y1="38" :x2="backArmX - 5" y2="56" :stroke="appearance.skinTone || '#fbbf24'" stroke-width="5" stroke-linecap="round")
 
     //- === 2. НОГИ ===
-    //- Передняя нога (ближе к зрителю)
-    g(:style='{ transformOrigin: `${frontLegX}px 64px`, transform: `rotate(${frontLegAngle}deg)` }')
+    //- Передняя нога (ближе к зрителю) — [ИСПРАВЛЕНО] стиль в computed
+    g(:style="frontLegStyle")
       line(:x1="frontLegX" y1="64" :x2="frontLegX" y2="92" :stroke="legStrokeColor" :stroke-width="legStroke" stroke-linecap="round")
       ellipse(:cx="frontLegX" cy="95" rx="4" ry="2" :fill="appearance.shoeColor || '#1f2937'")
-      
-    //- Задняя нога (дальше от зрителя)
-    g(:style='{ transformOrigin: `${backLegX}px 64px`, transform: `rotate(${backLegAngle}deg)` }')
+
+    //- Задняя нога (дальше от зрителя) — [ИСПРАВЛЕНО] стиль в computed
+    g(:style="backLegStyle")
       line(:x1="backLegX" y1="64" :x2="backLegX" y2="92" :stroke="legStrokeColor" :stroke-width="legStroke" stroke-linecap="round")
       ellipse(:cx="backLegX" cy="95" rx="4" ry="2" :fill="appearance.shoeColor || '#1f2937'")
 
@@ -33,39 +41,42 @@ svg(
     //- Женское тело (сложная кривая с талией, путь собирается в скрипте)
     path(:d="femaleTorsoPath" :fill="appearance.topColor || '#3b82f6'" v-else)
 
-    //- === ОДЕЖДА НИЗА (накладывается поверх базового торса) ===
+    //- === ОДЕЖДА (накладывается поверх базового торса) ===
     //- Капюшон
     template(v-if="clothingStyle === 'hoodie'")
       path(d="M18 28 Q25 12 32 28 L30 38 L20 38 Z" :fill="darkenColor(appearance.topColor || '#3b82f6', 20)")
-      
-    //- Юбка
+
+    //- Юбка — [ИСПРАВЛЕНО] путь вынесен в computed skirtPathD (раньше не рисовалась)
     template(v-if="clothingStyle === 'skirt'")
-      path(:d='\`M${wL} 50 L${hipL - 2} 78 L${hipR + 2} 78 L${wR} 50 Z\`' :fill="appearance.skirtColor || '#64748b'")
-      
-    //- Платье
+      path(:d="skirtPathD" :fill="appearance.skirtColor || '#64748b'")
+
+    //- Платье — [ИСПРАВЛЕНО] путь вынесен в computed dressPathD (раньше не рисовалось)
     template(v-if="clothingStyle === 'dress'")
-      path(:d='\`M${wL - 1} 48 L${hipL - 3} 84 L${hipR + 3} 84 L${wR + 1} 48 Z\`' :fill="appearance.topColor || '#3b82f6'")
-      
-    //- Пиджак (спинка и полочки)
+      path(:d="dressPathD" :fill="appearance.topColor || '#3b82f6'")
+
+    //- Пиджак (спинка и полочки) — [ИСПРАВЛЕНО] пути вынесены в computeds
     template(v-if="clothingStyle === 'suit'")
       g(v-if="view === 'back'")
-        path(:d='\`M${torsoL} 32 L25 38 ${torsoR} 32 ${torsoR} 66 ${torsoL} 66 Z\`' :fill="suitColor")
+        path(:d="suitBackPathD" :fill="suitColor")
         line(x1="25" y1="38" x2="25" y2="66" stroke="black" stroke-width="1" opacity="0.3")
       g(v-if="view === 'front'")
-        path(:d='\`M${torsoL} 32 ${torsoL+10} 52 ${torsoL} 52 Z\`' :fill="suitColor")
-        path(:d='\`M${torsoR} 32 ${torsoR-10} 52 ${torsoR} 52 Z\`' :fill="suitColor")
+        path(:d="suitFrontLeftPathD" :fill="suitColor")
+        path(:d="suitFrontRightPathD" :fill="suitColor")
         path(d="M24 36 L25 56 L26 36 Z" :fill="appearance.bottomColor || '#1e293b'")
 
     //- === 3. ПЕРЕДНЯЯ РУКА (рисуется после тела, чтобы перекрывать его) ===
-    g(:style='{ transformOrigin: `${frontArmX}px 38px`, transform: `rotate(${frontArmAngle}deg)` }')
+    //- [ИСПРАВЛЕНО] стиль вынесен в computed frontArmStyle
+    g(:style="frontArmStyle")
       line(:x1="frontArmX" y1="38" :x2="frontArmX + 5" y2="56" :stroke="appearance.skinTone || '#fbbf24'" stroke-width="5" stroke-linecap="round")
 
     //- === 4. ГОЛОВА ===
     ellipse(cx="25" cy="18" :rx="headRx" ry="13" :fill="appearance.skinTone || '#fbbf24'")
 
     //- === 5. ВОЛОСЫ ===
-    g(:style='{ transformOrigin: "25px 18px", transform: hairTransform }')
-      
+    //- [ИСПРАВЛЕНО] объектный биндинг вместо строки: масштабирование волос
+    //- по faceWidth раньше не работало
+    g(:style="{ transformOrigin: '25px 18px', transform: hairTransform }")
+
       //- --- ВИД СЗАДИ ---
       template(v-if="view === 'back'")
         template(v-if="safeRecedingHairline")
@@ -95,27 +106,27 @@ svg(
         template(v-if="safeRecedingHairline")
           path(d="M12 16 Q13 10 16 12 L16 16 Z" :fill="appearance.hairColor || '#000'")
           path(d="M38 16 Q37 10 34 12 L34 16 Z" :fill="appearance.hairColor || '#000'")
-        
+
         template(v-else-if="safeHairStyle !== 'bald' && !hasHat")
           template(v-if="safeHairStyle === 'mohawk'")
             path(d="M22 10 L23 0 L25 8 L27 -2 L29 10" :fill="appearance.hairColor || '#000'")
-            
+
           path(d="M14 11 Q15 4 25 5 Q35 4 36 11" :fill="appearance.hairColor || '#000'" v-if="safeHairStyle === 'short'")
-          
+
           path(d="M13 12 Q19 4 25 5 Q31 4 37 12" :fill="appearance.hairColor || '#000'" v-if="safeHairStyle === 'curly'")
-          
+
           template(v-if="safeHairStyle === 'long'")
             path(d="M14 11 Q15 4 25 5 Q35 4 36 11" :fill="appearance.hairColor || '#000'")
             path(d="M14 11 Q12 18 15 38" :stroke="appearance.hairColor || '#000'" stroke-width="4" fill="none" stroke-linecap="round")
             path(d="M36 11 Q38 18 35 38" :stroke="appearance.hairColor || '#000'" stroke-width="4" fill="none" stroke-linecap="round")
-          
+
           template(v-if="safeHairStyle === 'braid'")
             path(d="M14 11 Q15 4 25 5 Q35 4 36 11" :fill="appearance.hairColor || '#000'")
             path(d="M34 11 Q38 22 36 44" :stroke="appearance.hairColor || '#000'" stroke-width="4" fill="none" stroke-linecap="round")
-          
+
           template(v-if="safeHairStyle === 'ponytail'")
             path(d="M14 11 Q15 4 25 5 Q35 4 36 11" :fill="appearance.hairColor || '#000'")
-          
+
           template(v-if="safeHairStyle === 'bun'")
             path(d="M14 11 Q15 4 25 5 Q35 4 36 11" :fill="appearance.hairColor || '#000'")
             circle(cx="25" cy="7" r="6" :fill="appearance.hairColor || '#000'")
@@ -124,12 +135,12 @@ svg(
           path(d="M15 11 Q16 8 25 9 Q34 8 35 11" :fill="appearance.hairColor || '#000'" v-if="['short', 'long', 'braid', 'ponytail', 'sides'].includes(safeHairStyle)")
           path(d="M15 12 Q19 8 25 9 Q31 8 35 12" :fill="appearance.hairColor || '#000'" v-if="safeHairStyle === 'curly'")
           path(d="M20 11 Q19 8 25 9 Q31 8 30 11" :fill="appearance.hairColor || '#000'" v-if="safeHairStyle === 'bun'")
-          
+
           //- Боковые пряди для длинных волос под шляпой
           template(v-if="safeHairStyle === 'long'")
             path(d="M15 11 Q13 18 16 38" :stroke="appearance.hairColor || '#000'" stroke-width="4" fill="none" stroke-linecap="round")
             path(d="M35 11 Q37 18 34 38" :stroke="appearance.hairColor || '#000'" stroke-width="4" fill="none" stroke-linecap="round")
-          
+
           //- Коса под шляпой
           template(v-if="safeHairStyle === 'braid'")
             path(d="M34 11 Q38 22 36 44" :stroke="appearance.hairColor || '#000'" stroke-width="4" fill="none" stroke-linecap="round")
@@ -138,7 +149,7 @@ svg(
     template(v-if="view === 'front'")
       circle(cx="21" cy="15" r="1.2" :fill="appearance.eyeColor || '#1e293b'")
       circle(cx="29" cy="15" r="1.2" :fill="appearance.eyeColor || '#1e293b'")
-      
+
       //- Очки
       template(v-if="appearance.glasses === 'glasses'")
         rect(x="17.5" y="12" width="7" height="6" rx="1.5" stroke="#222" stroke-width="0.8" fill="none")
@@ -161,7 +172,7 @@ svg(
       //- Рот
       path(d="M22 20 Q25 23 28 20" stroke="#1e293b" stroke-width="1" fill="none" stroke-linecap="round" v-if="isFemale")
       line(x1="22" y1="21" x2="28" y2="21" stroke="#1e293b" stroke-width="1" stroke-linecap="round" v-else)
-      
+
       //- Ресницы (только у женщин)
       template(v-if="isFemale")
         line(x1="19" y1="13.5" x2="20.5" y2="12.5" stroke="#1e293b" stroke-width="0.8" stroke-linecap="round")
@@ -193,6 +204,9 @@ svg(
 </template>
 
 <script setup lang="ts">
+// app/components/simulator/PersonAvatar.vue — script
+// Вся математика путей и поворотов собирается здесь (computed),
+// шаблон получает только готовые строки/объекты.
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 
 const props = defineProps<{
@@ -203,6 +217,7 @@ const props = defineProps<{
   isMoving?: boolean
 }>()
 
+// --- Цикл анимации ходьбы (фаза синусоиды) ---
 const phase = ref(0)
 let lastTime = performance.now()
 let animFrame: number | null = null
@@ -211,6 +226,7 @@ const animate = (currentTime: number) => {
   const dt = (currentTime - lastTime) / 1000
   lastTime = currentTime
   if (props.isMoving) {
+    // [НАСТРОЙКА] 4 — базовая частота шагов; speed берётся из appearance.animation
     const speed = props.appearance?.animation?.speed ?? 1
     phase.value += dt * 4 * speed
   }
@@ -220,6 +236,7 @@ const animate = (currentTime: number) => {
 onMounted(() => { animFrame = requestAnimationFrame(animate) })
 onUnmounted(() => { if (animFrame) cancelAnimationFrame(animFrame) })
 
+// --- Базовые признаки внешности ---
 const isChild = computed(() => props.appearance?.ageGroup === 'child')
 const isFemale = computed(() => props.appearance?.gender === 'female')
 const hasHat = computed(() => props.appearance?.headwear && props.appearance?.headwear !== 'none')
@@ -227,6 +244,7 @@ const hatColor = computed(() => props.appearance?.headwearColor || '#1e293b')
 const clothingStyle = computed(() => props.appearance?.clothingStyle || 'standard')
 const suitColor = computed(() => props.appearance?.topColor ? darkenColor(props.appearance.topColor, 40) : '#000000')
 
+// --- Геометрия: голова и торс ---
 const headRx = computed(() => 11 * (props.appearance?.faceWidth || 1))
 
 const bodyScaleX = computed(() => props.appearance?.bodyWidth || 1)
@@ -240,13 +258,38 @@ const wL = computed(() => 25 - (torsoW.value * 0.65))
 const wR = computed(() => 25 + (torsoW.value * 0.65))
 
 const femaleTorsoPath = computed(() => {
-  const sW = torsoW.value * 0.85 
+  const sW = torsoW.value * 0.85
   const sL = 25 - sW, sR = 25 + sW;
-  const bottomL = hipL.value + 4; 
+  const bottomL = hipL.value + 4;
   const bottomR = hipR.value - 4;
   return `M${sL} 32 C${sL} 40 ${wL.value} 45 ${wL.value} 50 L${bottomL} 66 L${bottomR} 66 L${wR.value} 50 C${wR.value} 45 ${sR} 40 ${sR} 32 Z`;
 })
 
+// --- Пути одежды ---
+// [ИСПРАВЛЕНО] Раньше пути собирались шаблонными литералами ПРЯМО в Pug-атрибутах
+// (с экранированными бэктиками \`...\`) — Pug отдавал литеральную строку,
+// SVG-путь был невалиден, и одежда не рисовалась вовсе.
+// [НАСТРОЙКА] Юбка: 50 — линия талии, 78 — длина юбки
+const skirtPathD = computed(() =>
+  `M${wL.value} 50 L${hipL.value - 2} 78 L${hipR.value + 2} 78 L${wR.value} 50 Z`
+)
+// [НАСТРОЙКА] Платье: 48 — линия талии, 84 — длина платья
+const dressPathD = computed(() =>
+  `M${wL.value - 1} 48 L${hipL.value - 3} 84 L${hipR.value + 3} 84 L${wR.value + 1} 48 Z`
+)
+// Пиджак: спинка (вид сзади)
+const suitBackPathD = computed(() =>
+  `M${torsoL.value} 32 L25 38 ${torsoR.value} 32 ${torsoR.value} 66 ${torsoL.value} 66 Z`
+)
+// Пиджак: полочки (вид спереди). [НАСТРОЙКА] 10 — глубина лацкана, 52 — низ полочек
+const suitFrontLeftPathD = computed(() =>
+  `M${torsoL.value} 32 ${torsoL.value + 10} 52 ${torsoL.value} 52 Z`
+)
+const suitFrontRightPathD = computed(() =>
+  `M${torsoR.value} 32 ${torsoR.value - 10} 52 ${torsoR.value} 52 Z`
+)
+
+// --- Ноги: толщина и цвет ---
 const legStroke = computed(() => {
   if (isFemale.value && (clothingStyle.value === 'skirt' || clothingStyle.value === 'dress')) return 5;
   return isFemale.value ? 6 : 7;
@@ -259,8 +302,10 @@ const legStrokeColor = computed(() => {
   return props.appearance?.bottomColor || '#1e293b'
 })
 
+// --- Масштаб волос по ширине лица ---
 const hairTransform = computed(() => `scale(${props.appearance?.faceWidth || 1}, 1)`)
 
+// --- Разброс конечностей ---
 const legBaseOffset = computed(() => isFemale.value ? 4 : 7)
 const legSpread = computed(() => legBaseOffset.value + (bodyScaleX.value - 1) * 3)
 const frontLegX = computed(() => 25 + legSpread.value)
@@ -271,6 +316,7 @@ const armSpread = computed(() => armBaseOffset.value + (bodyScaleX.value - 1) * 
 const frontArmX = computed(() => 25 + armSpread.value)
 const backArmX = computed(() => 25 - armSpread.value)
 
+// Затемнение HEX-цвета (для капюшона/пиджака)
 const darkenColor = (hex: string, amount: number) => {
   hex = hex.replace('#', '')
   let r = Math.max(0, parseInt(hex.substring(0, 2), 16) - amount)
@@ -279,6 +325,7 @@ const darkenColor = (hex: string, amount: number) => {
   return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`
 }
 
+// --- Углы поворота конечностей (фаза ходьбы) ---
 const frontLegAngle = computed(() => Math.sin(phase.value) * ((props.appearance?.animation?.swingAmplitude ?? 3) / 10) * 25)
 const backLegAngle = computed(() => -Math.sin(phase.value) * ((props.appearance?.animation?.swingAmplitude ?? 3) / 10) * 25)
 const frontArmAngle = computed(() => -Math.sin(phase.value) * (props.appearance?.animation?.armSwing ?? 20))
@@ -291,11 +338,32 @@ const mainTransform = computed(() => {
   return isChild.value ? `scale(0.8) ${sway}` : sway
 })
 
+// --- Стили конечностей ---
+// [ИСПРАВЛЕНО] Раньше эти стили собирались шаблонными литералами ПРЯМО в
+// Pug-атрибутах — Vue получал невалидный CSS, и конечности не анимировались.
+// [НАСТРОЙКА] 38px — ось плеча, 64px — ось таза
+const backArmStyle = computed(() => ({
+  transformOrigin: `${backArmX.value}px 38px`,
+  transform: `rotate(${backArmAngle.value}deg)`
+}))
+const frontArmStyle = computed(() => ({
+  transformOrigin: `${frontArmX.value}px 38px`,
+  transform: `rotate(${frontArmAngle.value}deg)`
+}))
+const frontLegStyle = computed(() => ({
+  transformOrigin: `${frontLegX.value}px 64px`,
+  transform: `rotate(${frontLegAngle.value}deg)`
+}))
+const backLegStyle = computed(() => ({
+  transformOrigin: `${backLegX.value}px 64px`,
+  transform: `rotate(${backLegAngle.value}deg)`
+}))
+
 // ЗАЩИТА: мужчины не могут иметь женские прически, даже если в базе данных ошибка
 const safeHairStyle = computed(() => {
   const id = props.appearance?.hairStyleId;
   if (props.appearance?.gender === 'male' && ['long', 'ponytail', 'bun', 'braid'].includes(id)) {
-    return 'short'; 
+    return 'short';
   }
   // Женщины не могут иметь ирокез (кроме детей)
   if (props.appearance?.gender === 'female' && id === 'mohawk' && props.appearance?.ageGroup !== 'child') {

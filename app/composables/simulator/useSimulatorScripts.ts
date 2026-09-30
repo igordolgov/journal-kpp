@@ -1,11 +1,23 @@
-// composables/useSimulatorScripts.ts
-// Выполнение скриптов (move, wait_until) для активных команд
+// app/composables/simulator/useSimulatorScripts.ts
+// Назначение: выполнение скриптовых команд сценария (move, wait_until) для актёров.
+//
+// РЕФАКТОРИНГ (анти-утечка памяти):
+//  1. [ИСПРАВЛЕНО] Дедупликация ошибочных move-команд. Раньше команда-ошибка
+//     пушалась с id `err-<blockId>`, а искалась как `cmd-<blockId>` — проверка
+//     никогда не срабатывала, и activeCommands рос каждый кадр.
+//     Теперь id единый.
+//  2. [ИСПРАВЛЕНО] activeCommands больше не растёт без предела: выполненные
+//     (done:true) команды вычищаются в начале каждого кадра, а факт "выполнено"
+//     хранится в легковесном Set строк finishedCommandIds
+//     (рост ограничен числом блоков сценария).
+//  3. [ДОБАВЛЕНО] При остановке симуляции (isRunning → false) команды и latch'и
+//     сбрасываются — повторный запуск начинается с чистого состояния.
+//  4. [УДАЛЕНО] Мёртвый импорт audioService (дубль аудио-системы).
 
-import { Ref } from 'vue'
+import { watch, type Ref } from 'vue'
 import { TRAFFIC_CONFIG, SPRITE_ORIENTATION_OFFSET, ARRIVE_THRESHOLD } from '~/utils/simulatorConstants'
-import { normalizeAngle } from '~/utils/simulatorMath'
+import { dot, cross, normalizeAngle } from '~/utils/simulatorMath'
 import type { SceneElement, ScriptCommand } from '~/types/simulator'
-import { audioService } from '~/services/audioService'
 
 export function useSimulatorScripts(
   simElements: Ref<SceneElement[]>,
@@ -13,9 +25,56 @@ export function useSimulatorScripts(
   isRunning: Ref<boolean>,
   scripts?: any[]
 ) {
+  // --- Реестр выполненных команд (анти-утечка) ---
+  // Хранит только id (строки), а не объекты команд.
+  // Наполняется в purgeFinishedCommands, очищается при остановке симуляции.
+  const finishedCommandIds = new Set<string>()
+
+  // --- Сброс при остановке симуляции ---
+  watch(isRunning, (running) => {
+    if (!running) {
+      activeCommands.value = []
+      finishedCommandIds.clear()
+    }
+  })
+
+  // Вычищает выполненные команды из activeCommands, переводя их id в реестр.
+  // Вызывается в начале каждого кадра — массив держит только команды "в полёте".
+  const purgeFinishedCommands = () => {
+    if (activeCommands.value.length === 0) return
+
+    const inFlight = activeCommands.value.filter((cmd) => {
+      if (cmd.done) {
+        finishedCommandIds.add(cmd.id)
+        return false
+      }
+      return true
+    })
+
+    // Присваиваем только при изменениях — лишний триггер реактивности не нужен
+    if (inFlight.length !== activeCommands.value.length) {
+      activeCommands.value = inFlight
+    }
+  }
+
+  // Поиск актёра для блока: идём назад по треку до ближайшего блока actor
+  const findActorForBlock = (blocks: any[], fromIndex: number): SceneElement | null => {
+    for (let j = fromIndex; j >= 0; j--) {
+      if (blocks[j].kind === 'actor') {
+        return simElements.value.find(el => String(el.id) === blocks[j].type) || null
+      }
+    }
+    return null
+  }
+
+  // --- Обработка скриптовой логики: какие команды запустить в этом кадре ---
   const processScriptLogic = (dt: number) => {
+    // 1) Чистим выполненные команды ВСЕГДА — даже если сценарии не заданы
+    purgeFinishedCommands()
+
     if (!isRunning.value || !scripts) return
 
+    // Актёры, занятые активными командами — новые move на них не вешаем
     const busyActorIds = new Set(
       activeCommands.value.filter(c => !c.done && c.actor).map(c => String(c.actor!.id))
     )
@@ -23,29 +82,29 @@ export function useSimulatorScripts(
     scripts.forEach(script => {
       ;(script.tracks || []).forEach((track: any) => {
         const blocks = track.sequence || []
+
         for (let i = 0; i < blocks.length; i++) {
           const block = blocks[i]
 
-          // Обработка команды move
+          // =====================================================
+          // КОМАНДА MOVE
+          // =====================================================
           if (block.kind === 'action' && block.type === 'move') {
+            // ИСПРАВЛЕНО: единый id для команды И для варианта "ошибка"
             const cmdId = `cmd-${block.id}`
-            const existingCommand = activeCommands.value.find(c => c.id === cmdId)
-            if (existingCommand && existingCommand.done) continue
+
+            // Уже выполнена (latch) или прямо сейчас выполняется — пропускаем
+            if (finishedCommandIds.has(cmdId)) continue
+            if (activeCommands.value.some(c => c.id === cmdId)) continue
 
             // Поиск актёра (предыдущий блок actor)
-            let actor: SceneElement | null = null
-            for (let j = i - 1; j >= 0; j--) {
-              if (blocks[j].kind === 'actor') {
-                actor = simElements.value.find(el => String(el.id) === blocks[j].type) || null
-                break
-              }
-            }
+            const actor = findActorForBlock(blocks, i - 1)
             if (!actor || busyActorIds.has(String(actor.id))) continue
 
-            // Поиск цели (target, point_coords, direction+distance)
+            // Поиск цели: target | point_coords | direction+distance
             let targetObject: any = null
-            let dirBlock = null
-            let distBlock = null
+            let dirBlock: any = null
+            let distBlock: any = null
             for (let j = i + 1; j < blocks.length; j++) {
               const b = blocks[j]
               if (b.kind === 'actor') continue
@@ -53,6 +112,7 @@ export function useSimulatorScripts(
               if (b.type === 'distance') { distBlock = b; continue }
               if (b.kind === 'target' || (b.kind === 'param' && b.type === 'point_coords')) {
                 if (b.type === 'point_coords') {
+                  // Виртуальная точка по координатам "x,y"
                   const p = String(b.valueConfig?.exact || '0,0').split(',')
                   targetObject = { id: 'virt', x: Number(p[0]), y: Number(p[1]), width: 0, height: 0 }
                 } else {
@@ -62,9 +122,9 @@ export function useSimulatorScripts(
               }
             }
 
-            // Если нет явной цели, используем направление и расстояние
+            // Нет явной цели — строим виртуальную из direction + distance
             if (!targetObject && dirBlock && distBlock) {
-              const dist = Number(distBlock.valueConfig?.exact) || 100
+              const dist = Number(distBlock.valueConfig?.exact) || 100 // [НАСТРОЙКА] дефолт дистанции
               const dir = dirBlock.valueConfig?.exact
               let tx = actor.x + actor.width / 2
               let ty = actor.y + actor.height / 2
@@ -81,8 +141,10 @@ export function useSimulatorScripts(
               }
             }
 
+            // Цели нет вовсе — фиксируем ошибку ОДИН раз тем же id.
+            // На следующем кадре purge уберёт её, а finishedCommandIds не даст создать заново.
             if (!targetObject) {
-              activeCommands.value.push({ id: `err-${block.id}`, actor, target: null, speed: 0, done: true })
+              activeCommands.value.push({ id: cmdId, actor, target: null, speed: 0, done: true })
               continue
             }
 
@@ -90,18 +152,30 @@ export function useSimulatorScripts(
               id: cmdId,
               actor,
               target: targetObject,
-              speed: Number(block.valueConfig?.speed) || 100,
+              speed: Number(block.valueConfig?.speed) || 100, // [НАСТРОЙКА] скорость по умолчанию
               done: false,
               type: 'move'
             })
+            // Один move на трек за кадр (как в исходной логике)
             break
           }
 
-          // Обработка wait_until
+          // =====================================================
+          // ЛОГИКА WAIT_UNTIL
+          // =====================================================
           if (block.kind === 'logic' && block.type === 'wait_until') {
             const cmdId = `wait-${block.id}`
+
+            // Уже выполнено — больше не обрабатываем
+            if (finishedCommandIds.has(cmdId)) continue
+
             const existingWait = activeCommands.value.find(c => c.id === cmdId)
-            if (existingWait && !existingWait.done) {
+
+            // Защита (после purge в начале кадра недостижимо)
+            if (existingWait && existingWait.done) continue
+
+            if (existingWait) {
+              // wait активен — ищем цель и проверяем условие
               let target: SceneElement | null = null
               for (let j = i + 1; j < blocks.length; j++) {
                 if (blocks[j].kind === 'target' || blocks[j].kind === 'actor') {
@@ -110,24 +184,21 @@ export function useSimulatorScripts(
                 }
               }
               if (!target) {
+                // Цели нет — помечаем выполненным, purge уберёт в следующем кадре
                 existingWait.done = true
                 continue
               }
-              // Проверка условия: ворота открыты
+              // Условие: ворота/шлагбаум открыты
               if ((target.category === 'gate' || target.category === 'barrier') && target.settings?.isOpen) {
                 existingWait.done = true
                 continue
-              } else break
-            }
-            if (existingWait && existingWait.done) continue
-
-            let waitActor: SceneElement | null = null
-            for (let j = i - 1; j >= 0; j--) {
-              if (blocks[j].kind === 'actor') {
-                waitActor = simElements.value.find(el => String(el.id) === blocks[j].type) || null
-                break
               }
+              // Условие не выполнено — ждём следующего кадра
+              break
             }
+
+            // Команды ещё нет — создаём
+            const waitActor = findActorForBlock(blocks, i - 1)
             activeCommands.value.push({ id: cmdId, actor: waitActor, type: 'wait', target: null, done: false })
             break
           }
@@ -136,7 +207,9 @@ export function useSimulatorScripts(
     })
   }
 
+  // --- Движение актёров по активным командам ---
   const updateActiveCommands = (dt: number) => {
+    // Статические препятствия: закрытые ворота + здания/деревья/стены
     const obstacles = simElements.value.filter(ob => {
       if (['gate', 'barrier'].includes(ob.category || '')) return !ob.settings?.isOpen
       if (['building', 'tree', 'wall'].includes(ob.category || '')) return true
@@ -144,6 +217,7 @@ export function useSimulatorScripts(
     })
 
     activeCommands.value.forEach(cmd => {
+      // wait и невалидные команды не двигаются
       if (cmd.done || cmd.type === 'wait' || !cmd.actor || !cmd.target) return
 
       const actor = cmd.actor
@@ -156,6 +230,7 @@ export function useSimulatorScripts(
       const dy = ty - cy
       const dist = Math.sqrt(dx * dx + dy * dy)
 
+      // Пришли — фиксируем выполнение (purge уберёт команду в следующем кадре)
       if (dist < ARRIVE_THRESHOLD) {
         cmd.done = true
         actor.velocity = 0
@@ -164,11 +239,12 @@ export function useSimulatorScripts(
 
       const dirX = dx / dist
       const dirY = dy / dist
+      // Плавный доворот на цель
       actor.rotation = (actor.rotation || 0) + normalizeAngle(
         (Math.atan2(dirY, dirX) + SPRITE_ORIENTATION_OFFSET) - (actor.rotation || 0)
       ) * 0.15
 
-      // Обработка реверсирования при deadlock
+      // --- Реверс при deadlock ---
       if (cmd.isReversing) {
         cmd.reverseTimer = (cmd.reverseTimer || TRAFFIC_CONFIG.REVERSE_TIME) - dt
         if (cmd.reverseTimer <= 0) {
@@ -182,7 +258,7 @@ export function useSimulatorScripts(
         }
       }
 
-      // Проверка препятствий (статических и динамических)
+      // --- Проверка препятствий ---
       const myLen = Math.max(actor.width, actor.height)
       const myWid = Math.min(actor.width, actor.height)
       let isBlocked = false
@@ -228,6 +304,7 @@ export function useSimulatorScripts(
         }
       }
 
+      // --- Deadlock: стоим слишком долго — сдаём назад ---
       if (isBlocked) {
         cmd.stuckTime = (cmd.stuckTime || 0) + dt
         if (cmd.stuckTime > TRAFFIC_CONFIG.DEADLOCK_TIME) {
@@ -239,6 +316,7 @@ export function useSimulatorScripts(
         cmd.stuckTime = 0
       }
 
+      // --- Скорость: разгон/торможение, остановка перед целью ---
       let targetSpeed = cmd.speed || 100
       if (dist < ((actor.velocity || 0) * (actor.velocity || 0) / (2 * TRAFFIC_CONFIG.DECEL) + ARRIVE_THRESHOLD)) {
         targetSpeed = 0

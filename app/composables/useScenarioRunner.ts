@@ -1,15 +1,88 @@
-//- composables/useScenarioRunner.ts
-//- Выполнение сценариев: спавн, движение, команды.
+// composables/useScenarioRunner.ts
+// Назначение: выполнение сценариев — спавн, движение, команды (легаси-раннер,
+// сейчас вызывается только из scenario-editor; кандидат на сверку с knip).
+// [ИСПРАВЛЕНО v3]: parseFloat получает fallback (split даёт string | undefined);
+// rect — fallback размеров; elementId покрыт типом LogicBlock (types/scene v5).
 import { reactive } from 'vue'
 import type { SceneElement, LogicBlock } from '../types/scene'
-import { useSimulatorPhysics } from './useSimulatorPhysics'
 
-// 🔥 ИСПРАВЛЕНО: Константы определены здесь, так как используются в логике движения
+// Константы для физики движения
 const SAFETY_GAP = 40
 const DECELERATION = 400
 
+// ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
+
+/** Возвращает радиус объекта на основе его размеров */
+function getRadius(el: any): number {
+  return Math.min(el.width, el.height) / 2
+}
+
+/**
+ * Вычисляет расстояние до ближайшего препятствия на пути от (x,y) к (tx,ty).
+ * Возвращает Number.MAX_VALUE, если препятствий нет.
+ */
+function getDistanceToObstacle(
+  x: number, y: number,
+  tx: number, ty: number,
+  selfId: string,
+  elements: SceneElement[],
+  gateStates: Record<string, 'open' | 'closed'>,
+  ignoreId?: string
+): number {
+  let minDist = Number.MAX_VALUE
+  const dx = tx - x
+  const dy = ty - y
+  const pathLength = Math.sqrt(dx * dx + dy * dy)
+  if (pathLength === 0) return minDist
+
+  for (const el of elements) {
+    if (el.id === selfId || el.id === ignoreId) continue
+    // Учитываем только объекты, которые могут быть препятствиями
+    if (!['gate', 'barrier', 'building', 'decoration'].includes(el.category || '')) continue
+
+    // Если ворота открыты — не считаем препятствием
+    if ((el.category === 'gate' || el.category === 'barrier') && gateStates[el.id] === 'open') continue
+
+    // [ИСПРАВЛЕНО] width/height опциональны — fallback 0
+    const rect = { x: el.x, y: el.y, w: el.width ?? 0, h: el.height ?? 0 }
+    // Простейшая проверка пересечения луча с прямоугольником
+    const dist = distToRect(x, y, dx / pathLength, dy / pathLength, rect)
+    if (dist < minDist && dist >= 0) minDist = dist
+  }
+  return minDist
+}
+
+/** Расстояние от точки до прямоугольника вдоль луча */
+function distToRect(
+  px: number, py: number,
+  dx: number, dy: number,
+  rect: { x: number; y: number; w: number; h: number }
+): number {
+  let tMin = 0, tMax = Number.MAX_VALUE
+  // Проверка по оси X
+  if (Math.abs(dx) < 1e-9) {
+    if (px < rect.x || px > rect.x + rect.w) return -1
+  } else {
+    const t1 = (rect.x - px) / dx
+    const t2 = (rect.x + rect.w - px) / dx
+    tMin = Math.max(tMin, Math.min(t1, t2))
+    tMax = Math.min(tMax, Math.max(t1, t2))
+  }
+  // Проверка по оси Y
+  if (Math.abs(dy) < 1e-9) {
+    if (py < rect.y || py > rect.y + rect.h) return -1
+  } else {
+    const t1 = (rect.y - py) / dy
+    const t2 = (rect.y + rect.h - py) / dy
+    tMin = Math.max(tMin, Math.min(t1, t2))
+    tMax = Math.min(tMax, Math.max(t1, t2))
+  }
+  return tMin <= tMax ? tMin : -1
+}
+
+// ========== ОСНОВНОЙ КОМПОЗАБЛ ==========
+
 export const useScenarioRunner = () => {
-  const { getDistanceToObstacle, getRadius } = useSimulatorPhysics()
   const instanceMap = reactive<Record<string, string>>({})
 
   const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
@@ -197,8 +270,9 @@ export const useScenarioRunner = () => {
   const getTargetCoordsAndId = (block: any, elements: SceneElement[]) => {
     if (block.type === 'point_coords') {
       const parts = String(block.valueConfig?.exact || '0,0').split(/\s*,\s*/)
+      // [ИСПРАВЛЕНО] элементы массива — string | undefined, fallback '0'
       return {
-        coords: { x: parseFloat(parts[0]) || 1, y: parseFloat(parts[1]) || 1 },
+        coords: { x: parseFloat(parts[0] ?? '0') || 1, y: parseFloat(parts[1] ?? '0') || 1 },
         id: null
       }
     }

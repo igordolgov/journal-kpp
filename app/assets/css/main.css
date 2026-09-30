@@ -1,7 +1,15 @@
-/* app/assets/css/main.css */
-/* Основной файл стилей.
+/* app/assets/css/main.css
+ * Основной файл стилей.
  * Импорт Tailwind 4, настройка тем DaisyUI и глобальные утилиты.
- */
+ *
+ * [ЛЮКС-СЛОЙ v2] — дисциплина вместо украшательств:
+ *  - моушн-токены и плавные переходы интерактивных элементов (expo-out);
+ *  - табличные цифры: колонки времени/дат/номеров не «пляшут»;
+ *  - типографика: плотный трекинг заголовков, eyebrow-утилита;
+ *  - мягкая тень карточек, тонкие скроллбары, акцентное выделение;
+ *  - focus-visible кольца в цвет темы (клавиатурная доступность);
+ *  - уважение prefers-reduced-motion.
+ * Всё в @layer base: утилиты всегда побеждают базу. */
 
 /* 1. Импорт Tailwind CSS v4 */
 @import "tailwindcss";
@@ -27,4 +35,84 @@ button, .badge, input {
 
 .density-comfortable th, .density-comfortable td {
   padding: 0.75rem 1rem;
+}
+
+/* ==========================================================
+    5. ЛЮКС-СЛОЙ (базовый)
+   ========================================================== */
+@layer base {
+  /* --- 5.1 Моушн-токены --- */
+  :root {
+    --motion-fast: 120ms;
+    --motion-base: 180ms;
+    /* expo-out: быстрый старт, мягкая посадка */
+    --motion-ease: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  /* --- 5.2 Плавные переходы интерактивных элементов ---
+    База: при наличии классов Tailwind (transition-all и т.п.)
+    утилиты перекрывают эти значения. */
+  button, a, .btn, .badge, .card, .dropdown-content, .modal-box {
+    transition-property: color, background-color, border-color, box-shadow, transform, opacity;
+    transition-duration: var(--motion-base);
+    transition-timing-function: var(--motion-ease);
+  }
+
+  /* --- 5.3 Типографика: лёгкий отрицательный трекинг заголовков --- */
+  h1, h2, h3, h4 {
+    letter-spacing: -0.01em;
+  }
+
+  /* --- 5.4 Табличные цифры: одинаковая ширина цифр --- */
+  table {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* --- 5.5 Мягкая тень карточек --- */
+  .card {
+    box-shadow:
+      0 1px 2px rgb(0 0 0 / 0.04),
+      0 8px 24px -12px rgb(0 0 0 / 0.12);
+  }
+
+  /* --- 5.6 Тонкие скроллбары (в цвет темы) --- */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklab, var(--color-base-content) 20%, transparent) transparent;
+  }
+
+  /* --- 5.7 Акцентное выделение текста --- */
+  ::selection {
+    background: color-mix(in oklab, var(--color-primary) 25%, transparent);
+  }
+
+  /* --- 5.8 Фокус-кольцо в цвет темы (только клавиатурный фокус) --- */
+  :focus-visible {
+    outline: 2px solid color-mix(in oklab, var(--color-primary) 60%, transparent);
+    outline-offset: 2px;
+  }
+}
+
+/* ==========================================================
+    6. ПРОЕКТНЫЕ УТИЛИТЫ
+   ========================================================== */
+
+/* 6.1 Eyebrow-заголовок секции: единый паттерн мелких заголовков
+   (в редакторе он уже используется инлайн — теперь есть общий класс) */
+@utility heading-eyebrow {
+  font-size: 0.75rem;
+  line-height: 1rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
+}
+
+/* 6.2 Доступность: системная настройка «меньше анимации» */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

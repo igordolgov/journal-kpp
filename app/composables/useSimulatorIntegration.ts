@@ -13,6 +13,41 @@ import type { Direction, TravelMode, PersonInfo } from '~/types/simulator'
 // Временные статусы, при которых человек не может участвовать в симуляции
 const EXCLUDED_STATUSES = ['Командировка', 'Отпуск', 'Болен']
 
+// --- Определение "снаружи/внутри" по полю location ---
+// РЕАЛЬНЫЕ значения, которые приходят из базы (см. PersonFormModal.vue, GeneratorModal.vue):
+// 'На территории' -> внутри, 'В городе' / 'Город' -> снаружи.
+// Раньше тут сравнивалось со строками 'вне территории' / 'outside', которых НИГДЕ в проекте
+// нет, поэтому статус всегда считался "внутри" — отсюда спавн людей не с той стороны.
+const isOutsideLocation = (location?: string | null): boolean => {
+  const loc = (location || '').trim().toLowerCase()
+  if (!loc) return false // нет данных о локации — по умолчанию считаем, что человек "на территории"
+  return (
+    loc.includes('город') ||      // 'В городе', 'Город'
+    loc === 'outside' ||
+    loc === 'вне территории'
+  )
+}
+
+// --- Единая проверка "это ребёнок" ---
+// Раньше дублировалась в нескольких местах вразнобой — вынесена в одну функцию,
+// чтобы критерии "ребёнок" не расходились между фильтрами.
+const isChildPerson = (person: any): boolean => {
+  if (!person) return false
+  return (
+    person.ageGroup === 'child' ||
+    person.exit_category === 'small' ||
+    (Array.isArray(person.allowed_guardians) && person.allowed_guardians.length > 0) ||
+    (typeof person.category === 'string' && person.category.toLowerCase().includes('ребен')) ||
+    person.is_child === true
+  )
+}
+
+// --- Корень семьи (id главы) ---
+// У главы семьи main_family_id отсутствует (null/undefined), поэтому его "корнем" является он сам.
+const getFamilyRootId = (person: any): string => {
+  return String(person?.main_family_id ?? person?.id)
+}
+
 interface PersonStatus {
   isInside: boolean
   lastEventTime: number
@@ -113,8 +148,7 @@ export function useSimulatorIntegration() {
     }
     for (const person of dbPeople.value) {
       if (!map.has(person.id)) {
-        const location = (person.location || '').trim().toLowerCase()
-        const inside = !(location === 'вне территории' || location === 'outside')
+        const inside = !isOutsideLocation(person.location)
         map.set(person.id, { isInside: inside, lastEventTime: 0, vehicleOut: null })
       }
     }
@@ -149,11 +183,7 @@ export function useSimulatorIntegration() {
   // Все люди, подходящие для одиночного спавна (без учёта направления)
   const availablePeople = computed(() => {
     return dbPeople.value.filter((p: any) => {
-      if (p.ageGroup === 'child') return false
-      if (p.exit_category === 'small') return false
-      if (Array.isArray(p.allowed_guardians) && p.allowed_guardians.length > 0) return false
-      if (typeof p.category === 'string' && p.category.toLowerCase().includes('ребенок')) return false
-      if (p.is_child === true) return false
+      if (isChildPerson(p)) return false
       if (p.status && EXCLUDED_STATUSES.includes(p.status)) return false
       return true
     })
@@ -172,8 +202,8 @@ export function useSimulatorIntegration() {
       if (extraExcludeIds.has(p.id)) return false  
       const status = personStatusMap.value.get(p.id)
       if (!status) {
-        const location = (p.location || '').trim().toLowerCase()
-        return direction === 'enter' ? location === 'вне территории' || location === 'outside' : location !== 'вне территории' && location !== 'outside'
+        const outside = isOutsideLocation(p.location)
+        return direction === 'enter' ? outside : !outside
       }
       return direction === 'enter' ? !status.isInside : status.isInside
     })
@@ -252,12 +282,7 @@ export function useSimulatorIntegration() {
       const status = personStatusMap.value.get(p.id)
       const memberIsInside = status ? status.isInside : true
       if (memberIsInside !== leaderIsInside) return false
-      const isDependent =
-        p.ageGroup === 'child' ||
-        p.exit_category === 'small' ||
-        (Array.isArray(p.allowed_guardians) && p.allowed_guardians.length > 0) ||
-        (typeof p.category === 'string' && p.category.toLowerCase().includes('ребенок')) ||
-        p.is_child === true
+      const isDependent = isChildPerson(p)
       if (isDependent) return false
       return true
     })
@@ -298,7 +323,9 @@ export function useSimulatorIntegration() {
   const getVehicleColor = (vehicle: any): string => {
     if (vehicle?.color) return vehicle.color
     const CAR_COLORS = ['forestgreen', 'brown', 'blueviolet', 'darkkhaki', '#ef4444', '#3b82f6', '#22c55e', '#eab308', '#f8fafc', '#1e293b']
-    return CAR_COLORS[Math.floor(Math.random() * CAR_COLORS.length)]
+    // [ИСПРАВЛЕНО] обращение по индексу массива даёт string | undefined —
+    // fallback (та же правка, что в TrafficRoad и simulatorSvg)
+    return CAR_COLORS[Math.floor(Math.random() * CAR_COLORS.length)] ?? '#808080'
   }
 
   // Логирование события (оптимистичное обновление статуса)
@@ -398,21 +425,28 @@ export function useSimulatorIntegration() {
   const createPersonInfo = (person: any): PersonInfo => ({
     id: person.id,
     fio: formatDisplayName(person.fio),
-    isChild: person.ageGroup === 'child' || person.exit_category === 'small',
-    canGoAlone: person.exit_category !== 'small' && person.ageGroup !== 'child'
+    isChild: isChildPerson(person),
+    canGoAlone: !isChildPerson(person)
   })
 
+  // Может ли "person" находиться в одной группе/машине с "leader" (актуально для детей).
+  // БАГ БЫЛ: проверка опиралась ИСКЛЮЧИТЕЛЬНО на person.allowed_guardians, а это поле
+  // нигде не заполняется ни сидером (useSeeder.ts), ни формой добавления человека —
+  // оно всегда undefined. Поэтому для любого ребёнка canBeWith всегда возвращал false,
+  // и дети физически не могли попасть в группу/машину даже с собственными родителями.
+  // Теперь: если allowed_guardians явно заданы — используем их (ручная настройка опекунов).
+  // Если их нет — считаем опекуном любого взрослого члена той же семьи (общий main_family_id).
   const canBeWith = (leader: any, person: any): boolean => {
-    const isChild =
-      person.ageGroup === 'child' ||
-      person.exit_category === 'small' ||
-      (Array.isArray(person.allowed_guardians) && person.allowed_guardians.length > 0) ||
-      (typeof person.category === 'string' && person.category.toLowerCase().includes('ребенок')) ||
-      person.is_child === true
-    if (!isChild) return true
-    const guardians = person.allowed_guardians || []
-    if (!Array.isArray(guardians) || guardians.length === 0) return false
-    return guardians.some((g: any) => String(g) === String(leader.id))
+    if (!isChildPerson(person)) return true
+
+    const guardians = person.allowed_guardians
+    if (Array.isArray(guardians) && guardians.length > 0) {
+      return guardians.some((g: any) => String(g) === String(leader.id))
+    }
+
+    // Резерв: ребёнок и "лидер" принадлежат одной семье, и лидер сам не ребёнок
+    if (isChildPerson(leader)) return false
+    return getFamilyRootId(person) === getFamilyRootId(leader)
   }
 
   // Позволяет внешнему коду обновить журнал (вызывать из useJournal при изменении)

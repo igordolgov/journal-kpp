@@ -1,5 +1,5 @@
-// utils/simulatorSvg.ts
-// Генерация SVG для машин и людей
+// app/utils/simulatorSvg.ts
+// Назначение: генерация SVG для машин и людей.
 
 import { renderPersonSvg, type PersonAppearance } from './personSvgRenderer'
 
@@ -19,7 +19,8 @@ export const getCarSvg = (color: string): string => `
 `
 
 export const getRandomCarColor = (): string => {
-  return CAR_COLORS[Math.floor(Math.random() * CAR_COLORS.length)]
+  // [ИСПРАВЛЕНО] noUncheckedIndexedAccess: fallback на случай пустого справочника
+  return CAR_COLORS[Math.floor(Math.random() * CAR_COLORS.length)] ?? '#808080'
 }
 
 export const generateRealPersonSvg = (

@@ -1,35 +1,57 @@
 <!-- app/layouts/default.vue -->
+<!-- Назначение: главный layout — drawer-меню, шапка со сменой и статистикой
+    (ТОЛЬКО на странице журнала), плавающая кнопка и док-панель симулятора.
+    [UI/UX] Шапка с брендом — только на журнале; на остальных страницах —
+    плавающая круглая кнопка меню (экраны <lg).
+    [UI/UX] Волна 1 Lucide: навигация, шапка, FAB — вместо эмодзи/SVG. -->
 <template lang="pug">
 .drawer.h-screen.overflow-hidden(class="lg:drawer-open")
   input#main-drawer.drawer-toggle(type="checkbox")
 
   .drawer-content.flex.flex-col
-    header.flex-none.h-16.z-30.bg-base-200
-      .navbar.flex.h-full.max-w-7xl.gap-2.mx-auto
-        .flex-none(class="lg:hidden")
-          label.btn.btn-ghost.drawer-label(for="main-drawer")
-            svg.h-5.w-5(fill="none" stroke="currentColor" viewBox="0 0 24 24")
-              path(stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16")
+    //- === Шапка: бренд, смена, статистика — ТОЛЬКО на странице журнала ===
+    template(v-if="isJournalPage")
+      header.flex-none.h-16.z-30.bg-base-200
+        .navbar.flex.h-full.max-w-7xl.gap-2.mx-auto
+          .flex-none(class="lg:hidden")
+            label.btn.btn-ghost.drawer-label(for="main-drawer")
+              Menu.h-5.w-5
 
-        nuxt-link.navbar-brand.text-xl.font-bold(to="/") Журнал КПП
+          nuxt-link.navbar-brand.text-xl.font-bold(to="/") Журнал КПП
 
-        ClientOnly
-          ShiftManager
+          ClientOnly
+            ShiftManager
 
-        .flex-1
+          .flex-1
 
-        .hidden.gap-2(class="lg:flex")
-          nuxt-link.btn.btn-ghost.btn-sm.gap-1(to="/" class="hover:text-error" active-class="btn-active text-error")
-            | ⚠️ Отсутствуют
-            .badge.badge-outline.ml-1.rounded-md {{ stats.residentsOut }}
-          nuxt-link.btn.btn-ghost.btn-sm.gap-1(to="/" class="hover:text-success" active-class="btn-active text-success")
-            | ✅ В гостях
-            .badge.badge-outline.ml-1.rounded-md {{ stats.outsidersIn }}
+          .hidden.gap-2(class="lg:flex")
+            nuxt-link.btn.btn-ghost.btn-sm.gap-1(to="/" class="hover:text-error" active-class="btn-active text-error")
+              LogOut.h-4.w-4
+              | Отсутствуют
+              .badge.badge-outline.ml-1.rounded-md {{ stats.residentsOut }}
+            nuxt-link.btn.btn-ghost.btn-sm.gap-1(to="/" class="hover:text-success" active-class="btn-active text-success")
+              LogIn.h-4.w-4
+              | В гостях
+              .badge.badge-outline.ml-1.rounded-md {{ stats.outsidersIn }}
 
-    main.overflow-hidden.bg-base-300(class="h-[calc(100vh-64px)]")
+    //- === Плавающая кнопка меню на страницах БЕЗ шапки (экраны <lg) ===
+    ClientOnly
+      label.fixed.top-2.left-2.z-40.btn.btn-sm.btn-circle.btn-ghost.shadow.bg-base-200(
+        v-if="!isJournalPage"
+        class="lg:hidden"
+        for="main-drawer"
+        title="Меню"
+      )
+        Menu.h-5.w-5
+
+    //- Основной контент: на журнале минус высота шапки, на остальных — весь экран
+    main.overflow-hidden.bg-base-300(
+      :class="isJournalPage ? 'h-[calc(100vh-64px)]' : 'h-screen'"
+    )
       .container.mx-auto.h-full
         slot
 
+    //- Плавающая кнопка симулятора
     ClientOnly
       button.fixed.bottom-6.right-6.z-40.btn-lg.btn-circle.btn-primary.shadow-xl.transition-transform(
         class="hover:scale-105"
@@ -37,9 +59,9 @@
         @click="toggleSimulator"
         :title="isSimulatorOpen ? 'Скрыть симулятор' : 'Открыть симулятор'"
       )
-        svg.h-6.w-6(fill="none" stroke="currentColor" viewBox="0 0 24 24")
-          path(stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z")
+        Video.h-6.w-6
 
+    //- Док-панель симулятора (раскрывается по фокусу)
     ClientOnly
       transition(name="slide-up")
         .simulator-dock.fixed.bottom-0.left-0.right-0.z-50.border-t-2.border-gray-700.bg-gray-900.transition-all.duration-300.ease-in-out(
@@ -54,7 +76,7 @@
           SimulatorWidget.h-full(
             v-if="sceneConfig"
             :config="sceneConfig"
-            :sim-settings="simulatorSettings" 
+            :sim-settings="simulatorSettings"
             :scripts="sceneConfig?.scripts || []"
             :is-running="true"
             @close="toggleSimulator"
@@ -66,39 +88,41 @@
 
   .drawer-side.z-40
     label.drawer-overlay(for="main-drawer")
-    ul.menu.flex.min-h-full.w-40.flex-col.gap-2.p-4.bg-base-200.text-base-content
+    ul.menu.flex.min-h-full.w-44.flex-col.gap-2.p-4.bg-base-200.text-base-content
       li
-        nuxt-link(to="/" exact-active-class="bg-primary text-white rounded-md")
-          ClientOnly
-            span Журнал
+        nuxt-link.flex.items-center.gap-2(to="/" exact-active-class="bg-primary text-white rounded-md")
+          BookOpen.h-4.w-4.shrink-0
+          span Журнал
       li
-        nuxt-link(to="/database" active-class="bg-primary text-white rounded-md")
-          ClientOnly
-            span База данных
+        nuxt-link.flex.items-center.gap-2(to="/database" active-class="bg-primary text-white rounded-md")
+          Database.h-4.w-4.shrink-0
+          span База данных
       li
-        nuxt-link(to="/settings" active-class="bg-primary text-white rounded-md")
-          ClientOnly
-            span Настройки
+        nuxt-link.flex.items-center.gap-2(to="/settings" active-class="bg-primary text-white rounded-md")
+          Settings.h-4.w-4.shrink-0
+          span Настройки
       .divider
       li
-        nuxt-link(to="/editor" active-class="bg-primary text-white rounded-md")
-          ClientOnly
-            span Редактор
+        nuxt-link.flex.items-center.gap-2(to="/editor" active-class="bg-primary text-white rounded-md")
+          PencilRuler.h-4.w-4.shrink-0
+          span Редактор
       li
-        nuxt-link(to="/reports" active-class="bg-primary text-white rounded-md")
-          ClientOnly
-            span 📊 Аналитика
-      //- 🆕 Пункт меню "Звуковая лаборатория"
-      li
-        nuxt-link(to="/audio-lab" active-class="bg-primary text-white rounded-md")
-          ClientOnly
-            span 🔊 Звуковая лаборатория
+        nuxt-link.flex.items-center.gap-2(to="/reports" active-class="bg-primary text-white rounded-md")
+          ChartColumn.h-4.w-4.shrink-0
+          span Аналитика
 
   ShiftManagerModals
 </template>
 
 <script setup lang="ts">
+// app/layouts/default.vue — script
+// Глобальная инициализация: тема, конфиг, журнал, смена, БД, последняя сцена.
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+// Волна 1 Lucide: навигация, шапка, FAB
+import {
+  Menu, BookOpen, Database, Settings, PencilRuler,
+  ChartColumn, LogOut, LogIn, Video
+} from 'lucide-vue-next'
 import { useTheme } from '~/composables/useTheme'
 import { useConfig } from '~/composables/useConfig'
 import { useJournal } from '~/composables/useJournal'
@@ -107,12 +131,16 @@ import { useSceneBuilder } from '~/composables/useSceneBuilder'
 import { useDatabase } from '~/composables/useDatabase'
 import type { SceneConfig } from '~/types/scene'
 
+const route = useRoute()
 const themeStore = useTheme()
 const configStore = useConfig()
 const { stats, loadData } = useJournal()
 const { loadCurrentShift } = useShift()
-const { initSettings } = useDatabase() 
+const { initSettings } = useDatabase()
 const { loadScene, listScenes } = useSceneBuilder()
+
+// Шапка с брендом/сменой/статистикой — только на журнале
+const isJournalPage = computed(() => route.path === '/')
 
 const isSimulatorOpen = useState<boolean>('simulator-is-open', () => false)
 const sceneConfig = ref<SceneConfig | null>(null)
@@ -122,6 +150,7 @@ const simContainerRef = ref<HTMLElement | null>(null)
 const windowHeight = ref<number>(800)
 const handleWindowResize = () => { windowHeight.value = window.innerHeight }
 
+// Загрузка последней сохранённой сцены для док-панели симулятора
 const loadLatestScene = async () => {
   try {
     const scenes = await listScenes()
@@ -132,30 +161,30 @@ const loadLatestScene = async () => {
         const loadedConfig = await loadScene(lastScene.id)
         if (loadedConfig) sceneConfig.value = loadedConfig
       }
-    } else { 
-      sceneConfig.value = null 
+    } else {
+      sceneConfig.value = null
     }
-  } catch (e) { 
-    console.warn('[Layout] Failed to load last scene', e) 
+  } catch (e) {
+    console.warn('[Layout] Failed to load last scene', e)
   }
 }
 
-// ТОЧНАЯ КОПИЯ ЛОГИКИ ИЗ EDITOR.VUE
+// Настройки симулятора: глобальные дефолты перекрываются настройками сцены
 const simulatorSettings = computed(() => {
-  // configStore.config.value гарантирует, что мы читаем то же самое, что и редактор
   const globalDefaults = configStore.config.value?.simulator || {}
   const sceneTraffic = sceneConfig.value?.settings?.traffic || {}
   return { ...globalDefaults, ...sceneTraffic }
 })
 
+// При открытии симулятора — подгружаем сцену и забираем фокус (хоткеи)
 watch(isSimulatorOpen, (isOpen) => {
   if (isOpen) {
     setTimeout(() => {
       loadLatestScene()
       nextTick(() => focusSimulator())
     }, 100)
-  } else { 
-    isSimulatorFocused.value = false 
+  } else {
+    isSimulatorFocused.value = false
   }
 })
 
@@ -164,29 +193,26 @@ onMounted(async () => {
   handleWindowResize()
 
   await initSettings()
-  
-  // ПОСЛЕ загрузки БД обязательно даем Nuxt-у тик, чтобы обновились реактивные переменные
-  await Promise.all([ 
-    themeStore.loadTheme(), 
+
+  // После загрузки БД даём Nuxt тик, чтобы реактивные переменные обновились
+  await Promise.all([
+    themeStore.loadTheme(),
     configStore.loadConfig(),
-    loadData(), 
-    loadCurrentShift() 
+    loadData(),
+    loadCurrentShift()
   ])
-  
+
   await nextTick()
-  
-  // Загружаем сцену ТОЛЬКО после того, как стейт обновился
+
+  // Сцену грузим только после того, как стейт обновился
   await loadLatestScene()
 })
 
-onUnmounted(() => { 
-  window.removeEventListener('resize', handleWindowResize) 
+onUnmounted(() => {
+  window.removeEventListener('resize', handleWindowResize)
 })
 
-onUnmounted(() => { 
-  window.removeEventListener('resize', handleWindowResize) 
-})
-
+// [НАСТРОЙКА] Высота дока: свёрнутый = 11vh, развёрнутый = высота сцены (макс. 50% окна)
 const WIDGET_HEADER_HEIGHT = 32
 const simulatorDockStyle = computed(() => {
   if (!isSimulatorFocused.value) return { height: '11vh' }
@@ -196,18 +222,10 @@ const simulatorDockStyle = computed(() => {
   return { height: `${Math.min(neededHeight, maxAllowed)}px` }
 })
 
-const toggleSimulator = () => { 
-  isSimulatorOpen.value = !isSimulatorOpen.value 
-}
-const handleFocusIn = () => { 
-  isSimulatorFocused.value = true 
-}
-const handleFocusOut = () => { 
-  isSimulatorFocused.value = false 
-}
-const focusSimulator = () => { 
-  simContainerRef.value?.focus() 
-}
+const toggleSimulator = () => { isSimulatorOpen.value = !isSimulatorOpen.value }
+const handleFocusIn = () => { isSimulatorFocused.value = true }
+const handleFocusOut = () => { isSimulatorFocused.value = false }
+const focusSimulator = () => { simContainerRef.value?.focus() }
 </script>
 
 <style scoped>

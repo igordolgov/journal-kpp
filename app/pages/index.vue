@@ -7,7 +7,7 @@
   class="lg:flex-row"
   :style="isSimulatorOpen ? { paddingBottom: simulatorDockStyle.height } : {}"
 )
-  
+
   //- 1. БОКОВАЯ ПАНЕЛЬ (Фильтры и поиск)
   ClientOnly
     JournalSidebar.h-full.min-h-0(
@@ -25,29 +25,33 @@
       class="bg-base-100"
     )
       .card-body.flex.flex-col.h-full.p-0
-        
+
         //- ЗАГОЛОВОК с вкладками
         .flex-none.p-4(
-          class="border-b border-base-300"
+          class="border-base-300 border-b"
         )
           .flex.justify-between.items-center
-            h3.card-title Журнал событий
+            //- [UI/UX] подсказка-онбординг: назначение экрана и первый шаг
+            div
+              h3.card-title Журнал событий
+              p.mt-1.text-xs(class="text-base-content/50")
+                | Все въезды и выезды. Оформите поездку слева: выберите человека или автомобиль.
             .tabs.tabs-boxed.p-1(
               class="bg-base-200"
             )
               button.tab.text-xs(
-                class="tab-active bg-base-100"
+                class="bg-base-100 tab-active"
                 :class="displayMode === 'group' ? '' : 'bg-transparent'"
                 @click="handleGroupClick"
               )
                 | По дням
               button.tab.text-xs(
-                class="tab-active bg-base-100"
+                class="bg-base-100 tab-active"
                 :class="displayMode === 'timeline' ? '' : 'bg-transparent'"
                 @click="displayMode = 'timeline'"
               )
                 | Лента
-        
+
         //- Область таблицы с прокруткой
         .flex-1.min-h-0.overflow-y-auto(
           ref="scrollContainer"
@@ -78,13 +82,12 @@
 dialog.modal.modal-open(
   v-if="isPersonDetailOpen"
 )
-  //- Уменьшена ширина и отступы
   .modal-box.max-w-lg.p-0.overflow-hidden(
-    class="bg-base-100 rounded-xl shadow-2xl border border-base-200/50"
+    class="bg-base-100 shadow-2xl border border-base-200/50 rounded-xl"
   )
     //- Header
     .flex.justify-between.items-center.p-4(
-      class="bg-base-200/50 border-b border-base-200"
+      class="bg-base-200/50 border-base-200 border-b"
     )
       .flex.items-center.gap-3
         .avatar.placeholder
@@ -95,22 +98,11 @@ dialog.modal.modal-open(
           p.text-xs(
             class="text-base-content/60"
           ) Карточка сотрудника
-      
+
       button.btn.btn-ghost.btn-circle.btn-sm(
         @click="isPersonDetailOpen = false"
       )
-        svg.h-5.w-5(
-          xmlns="http://www.w3.org/2000/svg"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-        )
-          path(
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-            d="M6 18L18 6M6 6l12 12"
-          )
+        X.h-5.w-5
 
     //- Body: Реальные данные
     .p-4.text-sm
@@ -121,7 +113,7 @@ dialog.modal.modal-open(
             class="text-base-content/50"
           ) Должность
           span.font-medium {{ detailPerson.position || '—' }}
-        
+
         //- Строка: Отдел
         .flex.flex-col
           span.text-xs.font-medium.uppercase.tracking-wider(
@@ -135,18 +127,7 @@ dialog.modal.modal-open(
             class="text-base-content/50"
           ) Транспорт
           span.font-medium.flex.items-center.gap-1
-            svg.h-4.w-4(
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            )
-              path(
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"
-              )
+            ArrowLeftRight.h-4.w-4.shrink-0.opacity-60
             | {{ formatVehicleDisplay(detailPerson) }}
 
         //- Строка: Телефон
@@ -157,33 +138,24 @@ dialog.modal.modal-open(
             class="text-base-content/50"
           ) Контакты
           span.font-medium.flex.items-center.gap-1
-            svg.h-4.w-4(
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            )
-              path(
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"
-              )
+            Phone.h-4.w-4.shrink-0.opacity-60
             | {{ detailPerson.phone }}
 
         //- Строка: Статус
+        //- [FIX] раньше detailPerson.isInside — поля не существует, бейдж
+        //- всегда показывал «За территорией»; теперь computed по поездке/локации
         .flex.flex-col.col-span-2.mt-2
           span.text-xs.font-medium.uppercase.tracking-wider(
             class="text-base-content/50"
           ) Статус
           .badge.mt-1(
-            :class="detailPerson.isInside ? 'badge-success badge-outline' : 'badge-warning badge-outline'"
+            :class="detailPersonInside ? 'badge-success badge-outline' : 'badge-warning badge-outline'"
           )
-            | {{ detailPerson.isInside ? 'На объекте' : 'За территорией' }}
+            | {{ detailPersonInside ? 'На объекте' : 'За территорией' }}
 
     //- Footer
     .modal-action.p-3(
-      class="bg-base-100 border-t border-base-200"
+      class="bg-base-100 border-base-200 border-t"
     )
       button.btn.btn-primary.btn-sm.btn-block(
         @click="isPersonDetailOpen = false"
@@ -201,15 +173,14 @@ dialog.modal.modal-open(
   v-if="isExitModalOpen"
 )
   .modal-box.max-w-xs.p-0.overflow-hidden(
-    class="bg-base-100 rounded-xl shadow-2xl border border-base-200/50"
+    class="bg-base-100 shadow-2xl border border-base-200/50 rounded-xl"
   )
-    //- ИСПРАВЛЕНО: form обертывает весь контент и кнопки
     form.form-control.gap-3(
       @submit.prevent="handleSaveExit"
     )
       .p-4
         h3.text-lg.font-bold.mb-3 Фиксация выезда
-        
+
         .form-control
           label.label.py-1
             span.label-text.text-xs Место назначения
@@ -226,16 +197,16 @@ dialog.modal.modal-open(
               span.text-xs.font-bold Попутчики:
             button.btn.btn-xs.btn-ghost.btn-sm.py-0.h-4(
               type="button"
-              @click="selectAllExitCandidates" 
+              @click="selectAllExitCandidates"
             )
               | Все
-          
+
           .flex.flex-col.gap-1.max-h-32.overflow-y-auto
             label.label.cursor-pointer.justify-between.p-2.rounded-lg(
               class="hover:bg-base-200/50 border border-transparent"
               v-for="c in exitForm.groupCandidates"
               :key="c.id"
-              :class="exitForm.selectedGroupIds.includes(c.id) ? 'bg-primary/5 !border-primary/20' : 'bg-base-50'"
+              :class="exitForm.selectedGroupIds.includes(c.id) ? 'bg-primary/5 border-primary/20!' : 'bg-base-50'"
             )
               .flex.items-center.gap-2
                 input.checkbox.checkbox-xs(
@@ -247,7 +218,7 @@ dialog.modal.modal-open(
                 span.text-sm {{ c.fio }}
 
       .modal-action.p-3(
-        class="bg-base-200/30 border-t border-base-200"
+        class="bg-base-200/30 border-base-200 border-t"
       )
         button.btn.btn-ghost.btn-sm(
           type="button"
@@ -257,6 +228,7 @@ dialog.modal.modal-open(
         button.btn.btn-primary.btn-sm(
           type="submit"
         )
+          LogOut.h-4.w-4.mr-1
           | Подтвердить
 
   form.modal-backdrop(
@@ -270,28 +242,17 @@ dialog.modal.modal-open(
   v-if="isReturnModalOpen"
 )
   .modal-box.max-w-md.p-0.overflow-hidden(
-    class="bg-base-100 rounded-xl shadow-2xl border border-base-200/50"
+    class="bg-base-100 shadow-2xl border border-base-200/50 rounded-xl"
   )
     //- Header
     .relative.p-4(
-      class="bg-gradient-to-br from-primary/5 to-secondary/5 border-b border-base-200"
+      class="bg-linear-to-br from-primary/5 to-secondary/5 border-base-200 border-b"
     )
       button.absolute.top-3.right-3.btn.btn-ghost.btn-circle.btn-xs(
         @click="isReturnModalOpen = false"
       )
-        svg.h-4.w-4(
-          xmlns="http://www.w3.org/2000/svg"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-        )
-          path(
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-            d="M6 18L18 6M6 6l12 12"
-      )
-      
+        X.h-4.w-4
+
       h3.text-lg.font-bold.text-base-content Возврат
       p.text-lg(
         class="text-base-content/60"
@@ -303,7 +264,7 @@ dialog.modal.modal-open(
       div
         label.label.py-1.px-0.justify-start.gap-2
           span.text-xs.font-bold Транспорт:
-        
+
         .flex.flex-wrap.gap-2.mt-1
           //- Кнопки реального транспорта (отфильтрованного)
           button.flex.items-center.p-2.rounded-lg(
@@ -313,18 +274,20 @@ dialog.modal.modal-open(
             :class="returnForm.vehicle_in === v.plate ? 'border-primary bg-primary/10 shadow-sm' : 'border-base-300 hover:border-base-400 bg-base-50'"
             @click="returnForm.vehicle_in = v.plate"
           )
-            span.text-base 🚗
+            Car.h-4.w-4.shrink-0.opacity-70
             span.font-mono.text-xs.font-bold(
               :class="returnForm.vehicle_in === v.plate ? 'text-primary' : 'text-base-content'"
             ) {{ v.plate }}
 
-          //- Кнопка "Пешком" (используем новую логику)
+          //- Кнопка "Пешком"
           button.flex.items-center.p-2.rounded-lg(
             class="gap-1.5 border transition-all duration-200"
             :class="isWalkingSelected ? 'border-success bg-success/10 shadow-sm' : 'border-base-300 hover:border-base-400 bg-base-50'"
             @click="returnForm.vehicle_in = ''"
           )
-            span.text-base 🚶
+            Footprints.h-4.w-4.shrink-0(
+              :class="isWalkingSelected ? 'text-success' : 'text-base-content/70'"
+            )
             span.text-xs.font-bold(
               :class="isWalkingSelected ? 'text-success' : 'text-base-content'"
             ) Пешком
@@ -340,13 +303,13 @@ dialog.modal.modal-open(
             @click="selectAllReturnCandidates"
           )
             | Все
-        
+
         .flex.flex-col.gap-0.max-h-48.overflow-y-auto
           label.label.cursor-pointer.justify-between.rounded-lg(
-            class="p-[0.5] hover:bg-base-200/50 border border-transparent"
+            class="hover:bg-base-200/50 p-[0.5] border border-transparent"
             v-for="c in returnForm.groupCandidates"
             :key="c.id"
-            :class="returnForm.selectedGroupIds.includes(c.id) ? 'bg-primary/5 !border-primary/20' : 'bg-base-50'"
+            :class="returnForm.selectedGroupIds.includes(c.id) ? 'bg-primary/5 border-primary/20!' : 'bg-base-50'"
           )
             .flex.items-center.gap-2
               input.checkbox.checkbox-xs(
@@ -358,7 +321,7 @@ dialog.modal.modal-open(
               //- Подсветка детей и вывод родства
               span.text-sm(
                 :class="{ 'text-warning': c.isChild }"
-              ) 
+              )
                 | {{ c.fio }}
                 span.pl-1.opacity-70(v-if="c.relation") ({{ c.relation }})
 
@@ -374,7 +337,7 @@ dialog.modal.modal-open(
 
     //- Footer
     .modal-action.px-3.my-3(
-      class="bg-base-200/30 border-t border-base-200"
+      class="bg-base-200/30 border-base-200 border-t"
     )
       button.btn.btn-ghost.btn-sm(
         @click="isReturnModalOpen = false"
@@ -384,18 +347,7 @@ dialog.modal.modal-open(
         class="shadow-md shadow-success/20"
         @click="handleSaveReturn"
       )
-        svg.h-4.w-4.mr-1(
-          xmlns="http://www.w3.org/2000/svg"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-        )
-          path(
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-            d="M5 13l4 4L19 7"
-        )
+        Check.h-4.w-4.mr-1
         | Зафиксировать
 
   form.modal-backdrop(
@@ -409,11 +361,11 @@ dialog.modal.modal-open(
   v-if="isEditJournalOpen"
 )
   .modal-box.max-w-xs.p-0.overflow-hidden(
-    class="bg-base-100 rounded-xl shadow-2xl border border-base-200/50"
+    class="bg-base-100 shadow-2xl border border-base-200/50 rounded-xl"
   )
     .p-4
       h3.text-lg.font-bold.mb-3 Редактирование
-      
+
       .form-control.gap-3
         .form-control
           label.label.py-1
@@ -427,29 +379,18 @@ dialog.modal.modal-open(
           label.label.py-1
             span.label-text.text-xs Заметка
           textarea.textarea.textarea-bordered(
-            class="bg-base-200 border-0 text-sm h-16 resize-none"
+            class="bg-base-200 border-0 h-16 text-sm resize-none"
             v-model="editForm.note"
             placeholder="Заметка"
           )
 
     .modal-action.p-3(
-      class="bg-base-200/30 border-t border-base-200"
+      class="bg-base-200/30 border-base-200 border-t"
     )
       button.btn.btn-error.btn-sm(
         @click="handleDeleteEntry"
       )
-        svg.h-4.w-4.mr-1(
-          xmlns="http://www.w3.org/2000/svg"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-        )
-          path(
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-        )
+        Trash2.h-4.w-4.mr-1
         | Удалить
       .flex.gap-2
         button.btn.btn-ghost.btn-sm(
@@ -459,6 +400,7 @@ dialog.modal.modal-open(
         button.btn.btn-primary.btn-sm(
           @click="handleSaveEdit"
         )
+          Save.h-4.w-4.mr-1
           | Сохранить
 
   form.modal-backdrop(
@@ -469,10 +411,19 @@ dialog.modal.modal-open(
 </template>
 
 <script setup lang="ts">
-// app/pages/index.vue
-// Логика главной страницы.
+// app/pages/index.vue — script
+// Логика главной страницы (журнал).
+// [UI/UX] Lucide-иконки в модалках.
+// [FIX] статус в карточке человека считался от несуществующего поля
+// detailPerson.isInside — бейдж всегда показывал «За территорией».
+// Теперь: активная поездка (вышел, не вернулся) -> снаружи, иначе по location.
 
 import { onMounted, ref, computed, useState } from '#imports'
+// [UI/UX] Lucide: модалки журнала
+import {
+  X, ArrowLeftRight, Phone, Car, Footprints, Check,
+  Trash2, Save, LogOut
+} from 'lucide-vue-next'
 
 // Компоненты
 import JournalTable from '../components/JournalTable.vue'
@@ -487,20 +438,20 @@ definePageMeta({
 })
 
 // --- Инициализация Stores ---
-const { 
-  processedJournal, 
-  peopleList, 
-  loadData, 
-  sortField, 
-  sortOrder, 
-  displayMode 
+const {
+  processedJournal,
+  peopleList,
+  loadData,
+  sortField,
+  sortOrder,
+  displayMode
 } = useJournal()
 
-const { 
-  getVisibleColumns, 
-  getTableClasses, 
-  getTableFontStyle, 
-  loadConfig 
+const {
+  getVisibleColumns,
+  getTableClasses,
+  getTableFontStyle,
+  loadConfig
 } = useConfig()
 
 const pageLogic = useJournalPage()
@@ -521,41 +472,41 @@ onMounted(async () => {
 })
 
 // --- Проброс данных и методов из PageLogic ---
-const { 
-  selectedItem, 
-  vehiclesList, 
-  isExitModalOpen, 
-  isReturnModalOpen, 
-  isEditJournalOpen, 
+const {
+  selectedItem,
+  vehiclesList,
+  isExitModalOpen,
+  isReturnModalOpen,
+  isEditJournalOpen,
   isPersonDetailOpen,
-  exitForm, 
-  returnForm, 
-  editForm, 
-  columnWidths, 
+  exitForm,
+  returnForm,
+  editForm,
+  columnWidths,
   detailPerson,
-  suggestedVehicles, 
-  availableVehicles, // Добавлено для модалки возврата
-  isWalkingSelected, // Добавлено для модалки возврата
-  openPersonCard, 
-  openExitModal, 
-  handleSaveExit, 
-  openReturnModal, 
+  suggestedVehicles,
+  availableVehicles,
+  isWalkingSelected,
+  openPersonCard,
+  openExitModal,
+  handleSaveExit,
+  openReturnModal,
   handleSaveReturn,
   selectAllReturnCandidates,
-  selectAllExitCandidates, // ИСПРАВЛЕНО: добавлена отсутствующая функция
-  openEditJournal, 
-  handleSaveEdit, 
-  handleDeleteEntry, 
-  handleSimpleAction, 
+  selectAllExitCandidates,
+  openEditJournal,
+  handleSaveEdit,
+  handleDeleteEntry,
+  handleSimpleAction,
   handleGroupAction,
-  handleTableExit 
+  handleTableExit
 } = pageLogic
 
 // --- Логика отображения Транспорта ---
 // Возвращает строку транспорта. Если въезд и выезд отличаются — выводит через слеш.
 const formatVehicleDisplay = (person: any) => {
   if (!person) return '—'
-  
+
   const vOut = person.vehicle_out // Транспорт выезда
   const vIn = person.vehicle_in   // Транспорт въезда
 
@@ -563,10 +514,23 @@ const formatVehicleDisplay = (person: any) => {
   if (vOut && vIn && vOut !== vIn) {
     return `${vOut} / ${vIn}`
   }
-  
+
   // Если есть оба и они одинаковые, или есть только один
   return vOut || vIn || '—'
 }
+
+// --- Статус человека в карточке ---
+// [FIX] активная поездка в журнале (timestamp_out есть, timestamp_in нет)
+// = снаружи; иначе — по полю location ('В городе' = снаружи).
+const detailPersonInside = computed(() => {
+  const p = detailPerson.value
+  if (!p) return false
+  const activeTrip = processedJournal.value.find((e: any) =>
+    String(e.person_id) === String(p.id) && e.timestamp_out && !e.timestamp_in
+  )
+  if (activeTrip) return false
+  return (p.location || '').trim() !== 'В городе'
+})
 
 // --- Логика сортировки ---
 const setSort = (field: string) => {
@@ -598,7 +562,7 @@ const startResize = (e: MouseEvent, key: string) => {
   resizingKey.value = key
   startX.value = e.pageX
   startWidth.value = columnWidths.value[key] || 100
-  
+
   document.addEventListener('mousemove', onResizeMove)
   document.addEventListener('mouseup', stopResize)
 }

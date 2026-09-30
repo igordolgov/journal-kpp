@@ -99,20 +99,26 @@ dialog.modal(
 </template>
 
 <script setup lang="ts">
-// app/components/database/GeneratorModal.vue
+// app/components/database/GeneratorModal.vue — script
 // Логика генерации случайных данных для тестирования БД.
-
+// [UI/UX] alert() заменены на тосты.
+// [FIX] восстановлено присваивание defineProps в переменную props —
+// в template (v-if="isOpen") и в watch(() => props.isOpen) используется
+// props.isOpen; без const props = ... тип терялся (TS2339).
 import { ref, reactive, computed, watch } from 'vue'
 import { useDatabase } from '~/composables/useDatabase'
 import { usePatronymic } from '~/composables/usePatronymic'
+import { useToast } from '~/composables/useToast'
 
 // --- Props & Emits ---
 const props = defineProps({ isOpen: Boolean })
 const emit = defineEmits(['close', 'generated'])
 
 // --- Composables ---
-const { addItem } = useDatabase()
+// updateItem — для восстановления связей после импорта
+const { addItem, updateItem } = useDatabase()
 const { generatePatronymic } = usePatronymic()
+const toast = useToast()
 
 // --- State: Настройки генерации ---
 const settings = reactive({
@@ -134,6 +140,11 @@ const femaleNames = computed(() => settings.names.female.split('\n').map(s => s.
 const surnames = computed(() => settings.surnames.split('\n').map(s => s.trim()).filter(Boolean))
 const brands = computed(() => settings.vehicles.brands.split(',').map(s => s.trim()).filter(Boolean))
 
+// --- Запасные значения: списки редактируемые и могут быть пустыми ---
+const FALLBACKS = { surname: 'Иванов', male: 'Иван', female: 'Анна' }
+const pickFrom = (list: string[], fallback: string): string =>
+  list.length > 0 ? (list[Math.floor(Math.random() * list.length)] ?? fallback) : fallback
+
 // --- Methods: Генерация данных ---
 const generateData = () => {
   preview.people = []
@@ -143,16 +154,16 @@ const generateData = () => {
   const generatedPeople: any[] = []
 
   for (let i = 0; i < settings.families.count; i++) {
-    const familySurname = surnames.value[Math.floor(Math.random() * surnames.value.length)]
+    const familySurname = pickFrom(surnames.value, FALLBACKS.surname)
 
     // Папа (Глава семьи)
-    const fatherName = maleNames.value[Math.floor(Math.random() * maleNames.value.length)]
+    const fatherName = pickFrom(maleNames.value, FALLBACKS.male)
     const headId = personIdCounter++ // Запоминаем ID главы
-    
+
     generatedPeople.push({
       id: headId,
       fio: `${familySurname} ${fatherName} ${generatePatronymic(fatherName, 'male')}`,
-      fio_short: `${familySurname} ${fatherName[0]}.`,
+      fio_short: `${familySurname} ${fatherName.charAt(0)}.`,
       category: 'Сотрудник',
       location: 'Город',
       gender: 'male',
@@ -164,14 +175,14 @@ const generateData = () => {
     })
 
     // Мама (Супруга)
-    const motherName = femaleNames.value[Math.floor(Math.random() * femaleNames.value.length)]
-    // ИСПРАВЛЕНИЕ: Отчество жены формируется от имени ЕЁ отца (случайное мужское имя), а не от мужа
-    const wifeFatherName = maleNames.value[Math.floor(Math.random() * maleNames.value.length)]
-    
+    const motherName = pickFrom(femaleNames.value, FALLBACKS.female)
+    // Отчество жены формируется от имени ЕЁ отца (случайное мужское имя), а не от мужа
+    const wifeFatherName = pickFrom(maleNames.value, FALLBACKS.male)
+
     generatedPeople.push({
       id: personIdCounter++,
       fio: `${getFemaleSurname(familySurname)} ${motherName} ${generatePatronymic(wifeFatherName, 'female')}`,
-      fio_short: `${getFemaleSurname(familySurname)} ${motherName[0]}.`,
+      fio_short: `${getFemaleSurname(familySurname)} ${motherName.charAt(0)}.`,
       category: 'Член семьи',
       location: 'Город',
       gender: 'female',
@@ -187,13 +198,13 @@ const generateData = () => {
     for (let c = 0; c < childrenCount; c++) {
       const isBoy = Math.random() > 0.5
       const childName = isBoy
-        ? maleNames.value[Math.floor(Math.random() * maleNames.value.length)]
-        : femaleNames.value[Math.floor(Math.random() * femaleNames.value.length)]
+        ? pickFrom(maleNames.value, FALLBACKS.male)
+        : pickFrom(femaleNames.value, FALLBACKS.female)
 
       generatedPeople.push({
         id: personIdCounter++,
         fio: `${isBoy ? familySurname : getFemaleSurname(familySurname)} ${childName} ${generatePatronymic(fatherName, isBoy ? 'male' : 'female')}`,
-        fio_short: `${isBoy ? familySurname : getFemaleSurname(familySurname)} ${childName[0]}.`,
+        fio_short: `${isBoy ? familySurname : getFemaleSurname(familySurname)} ${childName.charAt(0)}.`,
         category: 'Ребенок',
         location: 'Город',
         gender: isBoy ? 'male' : 'female',
@@ -219,7 +230,7 @@ const generateData = () => {
     preview.vehicles.push({
       id: v + 1,
       plate,
-      model: brands.value[Math.floor(Math.random() * brands.value.length)],
+      model: brands.value[Math.floor(Math.random() * brands.value.length)] ?? 'Lada Vesta',
       owner_id: owner.id,
       type: 'vehicle'
     })
@@ -227,23 +238,52 @@ const generateData = () => {
 }
 
 // --- Methods: Импорт в БД ---
+// Трёхфазный импорт с ремапом временных id -> реальных.
+// [UI/UX] alert() заменены на тосты; результат — сводка по количеству.
+// --- Methods: Импорт в БД ---
+// Трёхфазный импорт с ремапом временных id -> реальных.
+// [UI/UX] alert() заменены на тосты; confirm отсутствовал — диалог не нужен,
+// решение принимает пользователь кнопкой «Загрузить в БД».
 const importData = async () => {
-  if (preview.people.length === 0) return
-
-  // Сохраняем людей (удаляем временный id)
-  for (const p of preview.people) {
-    const { id, ...personData } = p
-    await addItem('people', personData)
+  if (preview.people.length === 0) {
+    toast.warning('Сначала сгенерируйте данные')
+    return
   }
 
-  // Сохраняем машины (удаляем временный id)
-  for (const v of preview.vehicles) {
-    const { id, ...vehicleData } = v
-    await addItem('vehicles', vehicleData)
-  }
+  try {
+    // Фаза 1: люди без временных id
+    const tmpIdToRealId = new Map<number, number>()
+    for (const p of preview.people) {
+      const { id, ...personData } = p
+      const newId = await addItem('people', personData)
+      if (newId) tmpIdToRealId.set(id, newId)
+    }
 
-  emit('generated')
-  emit('close')
+    // Фаза 2: восстановление связей семья -> глава (id ПЕРСОНЫ, не группы)
+    for (const p of preview.people) {
+      const realId = tmpIdToRealId.get(p.id)
+      if (!realId) continue
+      const patch: any = { id: realId }
+      if (p.main_family_id !== null && p.main_family_id !== undefined) {
+        patch.main_family_id = tmpIdToRealId.get(p.main_family_id) ?? null
+      }
+      await updateItem('people', patch)
+    }
+
+    // Фаза 3: машины с ремапом владельца
+    for (const v of preview.vehicles) {
+      const { id, ...vehicleData } = v
+      await addItem('vehicles', { ...vehicleData, owner_id: tmpIdToRealId.get(v.owner_id) ?? null })
+    }
+
+    // [UI/UX] сводка вместо alert
+    toast.success(`Импортировано: людей — ${preview.people.length}, машин — ${preview.vehicles.length}`)
+    emit('generated')
+    emit('close')
+  } catch (e: any) {
+    console.error('[GeneratorModal] Import error:', e)
+    toast.error('Ошибка импорта: ' + (e?.message || 'неизвестная ошибка'))
+  }
 }
 
 // --- Helpers ---

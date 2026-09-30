@@ -1,11 +1,22 @@
 // app/composables/useDatabase.ts
-// Исправления:
-// 1. Добавлен метод addItems() (пакетная вставка в одну транзакцию)
-// 2. Добавлен метод destroyAudioEngine-companion: destroyDb() для явного закрытия
-// 3. addItem теперь возвращает полный объект с id
+// Назначение: слой IndexedDB — CRUD, пакетная вставка, экспорт/импорт.
+// [FIX] Deep-clone перед каждой записью (toRaw + JSON): Vue-Proxy нельзя
+// клонировать в structuredClone IndexedDB — падало
+// "Uncaught DOMException: Proxy object could not be cloned"
+// (воспроизводилось в updateItem при миграциях: записи из reactive-списков
+// уходили в put() как Proxy). Теперь write-путь безопасен для любых входных.
+// [FIX] deleteItem — guard от записи с невалидным ключом.
+
+// toRaw импортируем явно: composable может вызываться вне автоимпорт-контекста
+import { toRaw } from 'vue'
 
 let dbInstance: IDBDatabase | null = null
 let dbOpeningPromise: Promise<IDBDatabase> | null = null
+
+// Deep-клон без прокси: toRaw снимает внешний реактивный прокси,
+// JSON-цикл снимает ВСЕ вложенные. Функции теряются — для БД это ок.
+const toPlain = <T,>(value: T): T => JSON.parse(JSON.stringify(toRaw(value)))
+
 
 export const useDatabase = () => {
   const { $db } = useNuxtApp() as any
@@ -109,16 +120,16 @@ export const useDatabase = () => {
     return new Promise((resolve, reject) => {
       const transaction = db.transaction(storeName, 'readwrite')
       const store = transaction.objectStore(storeName)
-      const request = store.add(item)
+      // [FIX] клон: Proxy в structured clone не проходит
+      const request = store.add(toPlain(item))
       request.onsuccess = () => resolve(request.result as number)
       request.onerror = () => reject(request.error)
     })
   }
 
   /**
-   * НОВЫЙ МЕТОД: Пакетная вставка нескольких записей в одну транзакцию.
-   * Намного быстрее, чем N отдельных addItem-вызовов.
-   * Возвращает массив присвоенных id.
+   * Пакетная вставка нескольких записей в одну транзакцию.
+   * Возвращает массив присвоенных id (в порядке вставки).
    */
   const addItems = async (storeName: string, items: any[]): Promise<number[]> => {
     if (import.meta.server) return []
@@ -130,7 +141,8 @@ export const useDatabase = () => {
       const ids: number[] = []
 
       for (const item of items) {
-        const request = store.add(item)
+        // [FIX] клон каждой записи
+        const request = store.add(toPlain(item))
         request.onsuccess = () => ids.push(request.result as number)
         request.onerror = () => reject(request.error)
       }
@@ -152,10 +164,12 @@ export const useDatabase = () => {
       getRequest.onsuccess = () => {
         const existingData = getRequest.result
         if (!existingData) {
-          store.add(newItem)
+          // [FIX] клон
+          store.add(toPlain(newItem))
         } else {
-          const mergedData = { ...existingData, ...newItem }
-          const putRequest = store.put(mergedData)
+          const mergedData = { ...existingData, ...toPlain(newItem) }
+          // [FIX] клон — здесь и падало (Proxy from reactive list)
+          const putRequest = store.put(toPlain(mergedData))
           putRequest.onsuccess = () => resolve()
           putRequest.onerror = () => reject(putRequest.error)
         }
@@ -166,7 +180,7 @@ export const useDatabase = () => {
     })
   }
 
-  const deleteItem = async (storeName: string, id: number): Promise<void> => {
+  const deleteItem = async (storeName: string, id: number | string): Promise<void> => {
     if (import.meta.server) return
     const db = await getDb()
     return new Promise((resolve, reject) => {
@@ -233,7 +247,8 @@ export const useDatabase = () => {
                 req.onerror = () => rej(req.error)
               })
               for (const item of data[storeName]) {
-                store.add(item)
+                // [FIX] клон
+                store.add(toPlain(item))
               }
               await new Promise<void>((res) => {
                 tx.oncomplete = () => res()
@@ -254,12 +269,12 @@ export const useDatabase = () => {
     getItem,
     searchItems,
     addItem,
-    addItems,   // <-- новый метод
+    addItems,
     updateItem,
     deleteItem,
     clearStore,
     initSettings,
-    destroyDb,  // <-- для явной очистки
+    destroyDb,
     exportDB,
     importDB,
   }

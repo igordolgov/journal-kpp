@@ -5,39 +5,65 @@
   tabindex="0"
   @keydown="handleKeyDown"
 )
-  //- --- ЛИНЕЙКИ ---
+  //- Уголок линейки
   .absolute.top-0.left-0.w-5.h-5.bg-gray-700.z-30.border-r.border-b.border-gray-600
-  .absolute.top-5.left-0.w-5.bg-gray-700.z-20.border-r.border-gray-600.overflow-hidden.pointer-events-none(:style="{ height: canvasHeight + 'px' }")
+
+  //- Вертикальная линейка
+  .absolute.top-5.left-0.w-5.bg-gray-700.z-20.border-r.border-gray-600.overflow-hidden.pointer-events-none(
+    :style="{ height: canvasHeight + 'px' }"
+  )
     template(v-for="tick in vTicks" :key="'v'+tick")
       .absolute.left-0.border-t.border-gray-400(:style="getTickStyle(tick, 'v')")
-      span.absolute.left-1.text-gray-300.font-mono(v-if="tick % 100 === 0" :style="{ top: (tick + 2) + 'px', fontSize: '9px' }") {{ tick }}
-    .absolute.left-0.right-0.pointer-events-none.z-30(v-if="selectionMarker.y !== null" class="bg-blue-500/40" :style="{ top: selectionMarker.y + 'px', height: selectionMarker.h + 'px' }")
-  
-  .absolute.top-0.left-5.h-5.bg-gray-700.z-20.border-b.border-gray-600.overflow-hidden.pointer-events-none(:style="{ width: canvasWidth + 'px' }")
+      span.absolute.left-1.text-gray-300.font-mono(
+        v-if="tick % 100 === 0"
+        :style="{ top: (tick + 2) + 'px', fontSize: '9px' }"
+      ) {{ tick }}
+    .absolute.left-0.right-0.pointer-events-none.z-30(
+      v-if="selectionMarker.y !== null"
+      class="bg-blue-500/40"
+      :style="{ top: selectionMarker.y + 'px', height: selectionMarker.h + 'px' }"
+    )
+
+  //- Горизонтальная линейка
+  .absolute.top-0.left-5.h-5.bg-gray-700.z-20.border-b.border-gray-600.overflow-hidden.pointer-events-none(
+    :style="{ width: canvasWidth + 'px' }"
+  )
     template(v-for="tick in hTicks" :key="'h'+tick")
       .absolute.top-0.border-l.border-gray-400(:style="getTickStyle(tick, 'h')")
-      span.absolute.top-1.text-gray-300.font-mono(v-if="tick % 100 === 0" :style="{ left: (tick + 2) + 'px', fontSize: '9px' }") {{ tick }}
-    .absolute.top-0.bottom-0.pointer-events-none.z-30(v-if="selectionMarker.x !== null" class="bg-blue-500/40" :style="{ left: selectionMarker.x + 'px', width: selectionMarker.w + 'px' }")
+      span.absolute.top-1.text-gray-300.font-mono(
+        v-if="tick % 100 === 0"
+        :style="{ left: (tick + 2) + 'px', fontSize: '9px' }"
+      ) {{ tick }}
+    .absolute.top-0.bottom-0.pointer-events-none.z-30(
+      v-if="selectionMarker.x !== null"
+      class="bg-blue-500/40"
+      :style="{ left: selectionMarker.x + 'px', width: selectionMarker.w + 'px' }"
+    )
 
-  //- --- ОБЛАСТЬ РИСОВАНИЯ ---
+  //- Холст
   .absolute.top-5.left-5.bg-gray-600(
     :style="{ width: canvasWidth + 'px', height: canvasHeight + 'px' }"
     @mousedown.self="handleCanvasMouseDown"
   )
     .absolute.inset-0.pointer-events-none(:style="sceneBackgroundStyle")
-    .absolute.inset-0.pointer-events-none(v-if="settings.showGrid" :style="{ backgroundImage: 'linear-gradient(#374151 1px, transparent 1px), linear-gradient(90deg, #374151 1px, transparent 1px)', backgroundSize: '20px 20px' }")
+    .absolute.inset-0.pointer-events-none(
+      v-if="settings.showGrid"
+      :style="{ backgroundImage: 'linear-gradient(#374151 1px, transparent 1px), linear-gradient(90deg, #374151 1px, transparent 1px)', backgroundSize: '20px 20px' }"
+    )
 
-    //- --- ОБЪЕКТЫ СЦЕНЫ ---
+    //- Элементы сцены
     template(v-for="el in elements" :key="el.id")
       .absolute.cursor-move.transition-colors(
         :style="getElementStyle(el)"
         :class="isSelected(el.id) ? 'ring-2 ring-blue-400 z-10' : 'hover:ring-2 hover:ring-gray-500'"
         @mousedown.stop="handleElementMouseDown($event, el.id)"
       )
+        //- [ИСПРАВЛЕНО] el.width/height опциональны — fallback до number
+        //- (400x120 — дефолт дорожки из библиотеки)
         TrafficRoad.w-full.h-full(
           v-if="el.asset?.type === 'traffic_road'"
-          :width="el.width"
-          :height="el.height"
+          :width="el.width || 400"
+          :height="el.height || 120"
           :is-running="isSimulating"
           :spawn-rate="el.settings?.spawnRate"
           :min-speed="el.settings?.minSpeed"
@@ -46,15 +72,18 @@
         SimulatorPersonAvatar.absolute.w-full.h-full.pointer-events-none(
           v-else-if="el.asset?.type === 'person'"
           :appearance="el.asset.content"
-          :width="el.width"
-          :height="el.height"
+          :width="el.width || 50"
+          :height="el.height || 100"
           view="front"
         )
         .w-full.h-full.flex.items-center.justify-center.overflow-hidden(
           v-else-if="isUIElement(el)"
           :style="getUIElementStyle(el)"
         )
-          span(v-if="el.settings.label" :style="{ color: el.settings.textColor || '#fff', fontSize: (el.settings.fontSize || 12) + 'px', fontWeight: 'bold' }") {{ el.settings.label }}
+          span(
+            v-if="el.settings.label"
+            :style="{ color: el.settings.textColor || '#fff', fontSize: (el.settings.fontSize || 12) + 'px', fontWeight: 'bold' }"
+          ) {{ el.settings.label }}
 
         .w-full.h-full.pointer-events-none(
           v-else-if="el.asset?.type === 'svg'"
@@ -66,59 +95,151 @@
           v-else
           :style="{ backgroundColor: el.asset?.content || '#888' }"
         )
-        .absolute.-top-5.left-0.text-xs.text-gray-400.whitespace-nowrap {{ el.name }}
+        .absolute.text-xs.text-gray-400.whitespace-nowrap(
+          class="-top-5 left-0"
+        ) {{ el.name }}
 
+      //- Точки траекторий для ворот
       template(v-if="isGateElement(el) && isSelected(el.id)")
-        .text-xxs.text-yellow-500.absolute.z-20(style="top: -10px; left: 0;" v-if="!el.settings?.gateType") ⚠️ Выберите тип в инспекторе
+        .text-xxs.text-yellow-500.absolute.z-20(
+          style="top: -10px; left: 0;"
+          v-if="!el.settings?.gateType"
+        ) ⚠️ Выберите тип в инспекторе
 
         template(v-if="el.settings?.gateType === 'sliding'")
-          .absolute.pointer-events-none.rounded.border-2.border-dashed.border-green-400(class="bg-green-400/10 z-20" :style="getPointStyle(el, 'spawnEnter', 'car')")
-            span.absolute.-top-4.left-0.text-green-300(class="text-xxs whitespace-nowrap") 🚗 Въезд: Спавн
-          .absolute.pointer-events-none.rounded(class="border-2 border-dashed border-orange-400 bg-orange-400/10 z-20" :style="getPointStyle(el, 'stopEnter', 'car')")
-            span.absolute.-top-4.left-0.text-orange-300(class="text-xxs whitespace-nowrap") 🚗 Въезд: Стоп
-          .absolute.pointer-events-none.rounded(class="border-2 border-dashed border-yellow-400 bg-yellow-400/10 z-20" :style="getPointStyle(el, 'crossEnter', 'car')")
-            span.absolute.-top-4.left-0.text-yellow-300(class="text-xxs whitespace-nowrap") 🚗 Въезд: Поворот
-          .absolute.pointer-events-none.rounded(class="border-2 border-dashed border-gray-400 bg-gray-400/10 z-20" :style="getPointStyle(el, 'despawnEnter', 'car')")
-            span.absolute.-top-4.left-0.text-gray-300(class="text-xxs whitespace-nowrap") 🚗 Въезд: Деспавн
+          .absolute.pointer-events-none.border-2.border-dashed.border-green-400(
+            class="z-20 bg-green-400/10 rounded"
+            :style="getPointStyle(el, 'spawnEnter', 'car')"
+          )
+            span.absolute.text-green-300(
+              class="-top-4 left-0 text-xxs whitespace-nowrap"
+            ) 🚗 Въезд: Спавн
+          .absolute.pointer-events-none.border-2.border-dashed.border-orange-400(
+            class="z-20 bg-orange-400/10 rounded"
+            :style="getPointStyle(el, 'stopEnter', 'car')"
+          )
+            span.absolute.text-orange-300(
+              class="-top-4 left-0 text-xxs whitespace-nowrap"
+            ) 🚗 Въезд: Стоп
+          .absolute.pointer-events-none.border-2.border-dashed.border-yellow-400(
+            class="z-20 bg-yellow-400/10 rounded"
+            :style="getPointStyle(el, 'crossEnter', 'car')"
+          )
+            span.absolute.text-yellow-300(
+              class="-top-4 left-0 text-xxs whitespace-nowrap"
+            ) 🚗 Въезд: Поворот
+          .absolute.pointer-events-none.border-2.border-dashed.border-gray-400(
+            class="z-20 bg-gray-400/10 rounded"
+            :style="getPointStyle(el, 'despawnEnter', 'car')"
+          )
+            span.absolute.text-gray-300(
+              class="-top-4 left-0 text-xxs whitespace-nowrap"
+            ) 🚗 Въезд: Деспавн
 
-          .absolute.pointer-events-none.rounded.border-2.border-dashed.border-red-400(class="bg-red-400/10 z-20" :style="getPointStyle(el, 'spawnExit', 'car')")
-            span.absolute.-top-4.left-0.text-red-300(class="text-xxs whitespace-nowrap") 🚗 Выезд: Спавн
-          .absolute.pointer-events-none.rounded(class="border-2 border-dashed border-pink-400 bg-pink-400/10 z-20" :style="getPointStyle(el, 'stopExit', 'car')")
-            span.absolute.-top-4.left-0.text-pink-300(class="text-xxs whitespace-nowrap") 🚗 Выезд: Стоп
-          .absolute.pointer-events-none.rounded(class="border-2 border-dashed border-yellow-400 bg-yellow-400/10 z-20" :style="getPointStyle(el, 'crossExit', 'car')")
-            span.absolute.-top-4.left-0.text-yellow-300(class="text-xxs whitespace-nowrap") 🚗 Выезд: Поворот
-          .absolute.pointer-events-none.rounded(class="border-2 border-dashed border-gray-400 bg-gray-400/10 z-20" :style="getPointStyle(el, 'despawnExit', 'car')")
-            span.absolute.-top-4.left-0.text-gray-300(class="text-xxs whitespace-nowrap") 🚗 Выезд: Деспавн
+          .absolute.pointer-events-none.border-2.border-dashed.border-red-400(
+            class="z-20 bg-red-400/10 rounded"
+            :style="getPointStyle(el, 'spawnExit', 'car')"
+          )
+            span.absolute.text-red-300(
+              class="-top-4 left-0 text-xxs whitespace-nowrap"
+            ) 🚗 Выезд: Спавн
+          .absolute.pointer-events-none.border-2.border-dashed.border-pink-400(
+            class="z-20 bg-pink-400/10 rounded"
+            :style="getPointStyle(el, 'stopExit', 'car')"
+          )
+            span.absolute.text-pink-300(
+              class="-top-4 left-0 text-xxs whitespace-nowrap"
+            ) 🚗 Выезд: Стоп
+          .absolute.pointer-events-none.border-2.border-dashed.border-yellow-400(
+            class="z-20 bg-yellow-400/10 rounded"
+            :style="getPointStyle(el, 'crossExit', 'car')"
+          )
+            span.absolute.text-yellow-300(
+              class="-top-4 left-0 text-xxs whitespace-nowrap"
+            ) 🚗 Выезд: Поворот
+          .absolute.pointer-events-none.border-2.border-dashed.border-gray-400(
+            class="z-20 bg-gray-400/10 rounded"
+            :style="getPointStyle(el, 'despawnExit', 'car')"
+          )
+            span.absolute.text-gray-300(
+              class="-top-4 left-0 text-xxs whitespace-nowrap"
+            ) 🚗 Выезд: Деспавн
 
         template(v-if="el.settings?.gateType === 'wicket'")
-          .absolute.pointer-events-none.rounded.border-2.border-dashed.border-green-400(class="bg-green-400/10 z-20" :style="getPointStyle(el, 'spawnEnter', 'person')")
-            span.absolute.-top-4.left-0.text-green-300(class="text-xxs whitespace-nowrap") 👤 Вход: Спавн
-          .absolute.pointer-events-none.rounded(class="border-2 border-dashed border-cyan-400 bg-cyan-400/10 z-20" :style="getPointStyle(el, 'stopEnter', 'person')")
-            span.absolute.-top-4.left-0.text-cyan-300(class="text-xxs whitespace-nowrap") 👤 Вход: Стоп
-          .absolute.pointer-events-none.rounded(class="border-2 border-dashed border-yellow-400 bg-yellow-400/10 z-20" :style="getPointStyle(el, 'crossEnter', 'person')")
-            span.absolute.-top-4.left-0.text-yellow-300(class="text-xxs whitespace-nowrap") 👤 Вход: Поворот
-          .absolute.pointer-events-none.rounded(class="border-2 border-dashed border-gray-400 bg-gray-400/10 z-20" :style="getPointStyle(el, 'despawnEnter', 'person')")
-            span.absolute.-top-4.left-0.text-gray-300(class="text-xxs whitespace-nowrap") 👤 Вход: Деспавн
+          .absolute.pointer-events-none.border-2.border-dashed.border-green-400(
+            class="z-20 bg-green-400/10 rounded"
+            :style="getPointStyle(el, 'spawnEnter', 'person')"
+          )
+            span.absolute.text-green-300(
+              class="-top-4 left-0 text-xxs whitespace-nowrap"
+            ) 👤 Вход: Спавн
+          .absolute.pointer-events-none.border-2.border-dashed.border-cyan-400(
+            class="z-20 bg-cyan-400/10 rounded"
+            :style="getPointStyle(el, 'stopEnter', 'person')"
+          )
+            span.absolute.text-cyan-300(
+              class="-top-4 left-0 text-xxs whitespace-nowrap"
+            ) 👤 Вход: Стоп
+          .absolute.pointer-events-none.border-2.border-dashed.border-yellow-400(
+            class="z-20 bg-yellow-400/10 rounded"
+            :style="getPointStyle(el, 'crossEnter', 'person')"
+          )
+            span.absolute.text-yellow-300(
+              class="-top-4 left-0 text-xxs whitespace-nowrap"
+            ) 👤 Вход: Поворот
+          .absolute.pointer-events-none.border-2.border-dashed.border-gray-400(
+            class="z-20 bg-gray-400/10 rounded"
+            :style="getPointStyle(el, 'despawnEnter', 'person')"
+          )
+            span.absolute.text-gray-300(
+              class="-top-4 left-0 text-xxs whitespace-nowrap"
+            ) 👤 Вход: Деспавн
 
-          .absolute.pointer-events-none.rounded.border-2.border-dashed.border-red-400(class="bg-red-400/10 z-20" :style="getPointStyle(el, 'spawnExit', 'person')")
-            span.absolute.-top-4.left-0.text-red-300(class="text-xxs whitespace-nowrap") 👤 Выход: Спавн
-          .absolute.pointer-events-none.rounded(class="border-2 border-dashed border-purple-400 bg-purple-400/10 z-20" :style="getPointStyle(el, 'stopExit', 'person')")
-            span.absolute.-top-4.left-0.text-purple-300(class="text-xxs whitespace-nowrap") 👤 Выход: Стоп
-          .absolute.pointer-events-none.rounded(class="border-2 border-dashed border-yellow-400 bg-yellow-400/10 z-20" :style="getPointStyle(el, 'crossExit', 'person')")
-            span.absolute.-top-4.left-0.text-yellow-300(class="text-xxs whitespace-nowrap") 👤 Выход: Поворот
-          .absolute.pointer-events-none.rounded(class="border-2 border-dashed border-gray-400 bg-gray-400/10 z-20" :style="getPointStyle(el, 'despawnExit', 'person')")
-            span.absolute.-top-4.left-0.text-gray-300(class="text-xxs whitespace-nowrap") 👤 Выход: Деспавн
+          .absolute.pointer-events-none.border-2.border-dashed.border-red-400(
+            class="z-20 bg-red-400/10 rounded"
+            :style="getPointStyle(el, 'spawnExit', 'person')"
+          )
+            span.absolute.text-red-300(
+              class="-top-4 left-0 text-xxs whitespace-nowrap"
+            ) 👤 Выход: Спавн
+          .absolute.pointer-events-none.border-2.border-dashed.border-purple-400(
+            class="z-20 bg-purple-400/10 rounded"
+            :style="getPointStyle(el, 'stopExit', 'person')"
+          )
+            span.absolute.text-purple-300(
+              class="-top-4 left-0 text-xxs whitespace-nowrap"
+            ) 👤 Выход: Стоп
+          .absolute.pointer-events-none.border-2.border-dashed.border-yellow-400(
+            class="z-20 bg-yellow-400/10 rounded"
+            :style="getPointStyle(el, 'crossExit', 'person')"
+          )
+            span.absolute.text-yellow-300(
+              class="-top-4 left-0 text-xxs whitespace-nowrap"
+            ) 👤 Выход: Поворот
+          .absolute.pointer-events-none.border-2.border-dashed.border-gray-400(
+            class="z-20 bg-gray-400/10 rounded"
+            :style="getPointStyle(el, 'despawnExit', 'person')"
+          )
+            span.absolute.text-gray-300(
+              class="-top-4 left-0 text-xxs whitespace-nowrap"
+            ) 👤 Выход: Деспавн
 
-    //- --- ПАНЕЛИ (ПУЛЬТЫ) ---
+    //- Панели
     template(v-for="panel in panels" :key="'panel_'+panel.id")
       .absolute.cursor-move.transition-colors(
         :style="getPanelStyle(panel)"
         :class="isPanelSelected(panel.id) ? 'ring-2 ring-purple-400 z-10' : 'hover:ring-2 hover:ring-gray-500'"
         @mousedown.stop="handlePanelMouseDown($event, panel.id)"
       )
-        .absolute.top-0.left-0.right-0.h-6.bg-gray-700.text-gray-200.text-xs.flex.items-center.px-2.rounded-t-md(style="cursor: move; user-select: none;")
-          button.absolute.right-1.top-0.text-gray-400(class="hover:text-red-400" @click.stop="$emit('delete-panel', panel.id)" title="Удалить панель") ✕
-        
+        .absolute.top-0.left-0.right-0.h-6.bg-gray-700.text-gray-200.text-xs.flex.items-center.px-2.rounded-t-md(
+          style="cursor: move; user-select: none;"
+        )
+          button.absolute.right-1.top-0.text-gray-400(
+            class="hover:text-red-400"
+            @click.stop="$emit('delete-panel', panel.id)"
+            title="Удалить панель"
+          ) ✕
+
         .absolute.inset-x-0(:style="{ top: '24px', bottom: '0' }")
           .relative.w-full.h-full.p-1.flex.flex-wrap.gap-1.content-start
             .control-item.relative(
@@ -144,7 +265,7 @@
                   :class="{ 'pressed': pressedControls.has(ctrl.id) }"
                 )
                   span(
-                    v-if="ctrl.settings?.label && ctrl.settings?.labelPosition === 'inside'" 
+                    v-if="ctrl.settings?.label && ctrl.settings?.labelPosition === 'inside'"
                     :style="{ color: `color-mix(in srgb, ${ctrl.settings?.color || '#4b5563'} 70%, black)` }"
                   ) {{ ctrl.settings.label }}
                   span.text-3xl.font-mono.text-center.leading-tight(
@@ -154,7 +275,7 @@
 
                 template(v-else)
                   span(
-                    v-if="ctrl.settings?.label && ctrl.settings?.labelPosition === 'inside'" 
+                    v-if="ctrl.settings?.label && ctrl.settings?.labelPosition === 'inside'"
                     :style="{ color: `color-mix(in srgb, ${ctrl.settings?.color || '#4b5563'} 70%, black)` }"
                   ) {{ ctrl.settings.label }}
                   span.text-3xl.font-mono.text-center.leading-tight(
@@ -163,27 +284,32 @@
                   ) {{ ctrl.settings.hotkey }}
 
               .control-label(
-                v-if="ctrl.settings?.label && ctrl.settings?.labelPosition === 'bottom'" 
+                v-if="ctrl.settings?.label && ctrl.settings?.labelPosition === 'bottom'"
                 :style="getControlLabelStyle(ctrl)"
               ) {{ ctrl.settings.label }}
 
+    //- Прямоугольник выделения
     .absolute.border.border-blue-500.pointer-events-none(
       v-if="selectionState.isSelecting && selectionBox.width && selectionBox.height"
       class="bg-blue-500/10"
       :style="selectionBoxStyle"
     )
 
+  //- Ресайз-хендлы для элементов
   template(v-if="selectedIds.length === 1 && !selectedPanelId")
     template(v-for="handle in resizeHandles" :key="handle.pos")
-      .absolute.w-3.h-3.bg-white.border-2.border-blue-500.rounded-sm.z-40(
+      .absolute.w-3.h-3.bg-white.border-2.border-blue-500.z-40(
+        class="rounded-sm"
         :style="getHandleStyle(handle.pos, getSelectedElement())"
         :class="handle.cursor"
         @mousedown.stop="startResize($event, handle.pos, getSelectedElement())"
       )
-  
+
+  //- Ресайз-хендлы для панелей
   template(v-if="selectedPanelId && panels.find(p => p.id === selectedPanelId)")
     template(v-for="handle in resizeHandles" :key="'panel_'+handle.pos")
-      .absolute.w-3.h-3.bg-white.border-2.border-purple-400.rounded-sm.z-40(
+      .absolute.w-3.h-3.bg-white.border-2.border-purple-400.z-40(
+        class="rounded-sm"
         :style="getHandleStyle(handle.pos, getSelectedPanel())"
         :class="handle.cursor"
         @mousedown.stop="startPanelResize($event, handle.pos, getSelectedPanel())"
@@ -191,7 +317,12 @@
 </template>
 
 <script setup lang="ts">
+// app/components/editor/EditorCanvas.vue — script
+// [ИСПРАВЛЕНО v3]: стилевые функции аннотированы CSSProperties (строковые
+// литералы 'flex'/'column'/'break-word' без контекстного типа расширяются
+// до string и не проходят CSSProperties в биндингах :style).
 import { ref, computed, onMounted } from 'vue'
+import type { CSSProperties } from 'vue'
 import type { SceneElement, SceneSettings, Panel, Control } from '../../types/scene'
 import TrafficRoad from './TrafficRoad.vue'
 import SimulatorPersonAvatar from '../simulator/PersonAvatar.vue'
@@ -216,14 +347,12 @@ const emit = defineEmits<{
   (e: 'select-panel', id: string | null): void
   (e: 'select-control', panelId: string, controlId: string): void
   (e: 'delete-panel', id: string): void
-  (e: 'history:save'): void
 }>()
 
-const activeIntercoms = ref(new Set())
+const activeIntercoms = ref(new Set<any>())
 const canvasRef = ref<HTMLElement | null>(null)
 const RULER_SIZE = 20
 
-// Анимация нажатия
 const pressedControls = ref(new Set<string>())
 
 onMounted(() => { canvasRef.value?.focus() })
@@ -244,8 +373,8 @@ const sceneBackgroundStyle = computed(() => {
   return { backgroundColor: bgColor }
 })
 
-const hTicks = computed(() => { const t = []; for (let i = 0; i <= canvasWidth.value; i += 10) t.push(i); return t })
-const vTicks = computed(() => { const t = []; for (let i = 0; i <= canvasHeight.value; i += 10) t.push(i); return t })
+const hTicks = computed(() => { const t: number[] = []; for (let i = 0; i <= canvasWidth.value; i += 10) t.push(i); return t })
+const vTicks = computed(() => { const t: number[] = []; for (let i = 0; i <= canvasHeight.value; i += 10) t.push(i); return t })
 
 const getTickStyle = (tick: number, orientation: 'h' | 'v') => {
   const isMajor = tick % 100 === 0
@@ -260,7 +389,7 @@ const getTickStyle = (tick: number, orientation: 'h' | 'v') => {
 const selectionMarker = computed(() => {
   if (props.selectedIds.length === 1) {
     const el = props.elements.find(e => props.selectedIds.includes(e.id))
-    if (el) return { x: el.x, y: el.y, w: el.width, h: el.height }
+    if (el) return { x: el.x, y: el.y, w: el.width || 100, h: el.height || 100 }
   }
   if (props.selectedPanelId) {
     const panel = props.panels.find(p => p.id === props.selectedPanelId)
@@ -283,11 +412,11 @@ const getElementStyle = (el: any) => {
 const getDynamicSvg = (el: any): string => {
   if (!isGateElement(el)) return el.asset?.content || ''
   const s = el.settings || {}
-  const isOpen = false
+  // [ИСПРАВЛЕНО] генераторы принимают 3 аргумента — 4-й (isOpen) не существует
   if (s.gateType === 'wicket') {
-    return generateWicketSVG(el.width || 80, el.height || 120, s, isOpen)
+    return generateWicketSVG(el.width || 80, el.height || 120, s)
   }
-  return generateSlidingGateSVG(el.width || 320, el.height || 120, s, isOpen)
+  return generateSlidingGateSVG(el.width || 320, el.height || 120, s)
 }
 
 const getPointStyle = (el: any, pointPrefix: string, agentType: 'person' | 'car') => {
@@ -312,7 +441,8 @@ const getPanelStyle = (panel: Panel) => ({
   backgroundColor: '#2d3748', border: '1px solid #4a5568', borderRadius: '6px', zIndex: 9999
 })
 
-const getControlStyle = (ctrl: Control) => {
+// [ИСПРАВЛЕНО] CSSProperties-аннотации — литералы получают контекстный тип
+const getControlStyle = (ctrl: Control): CSSProperties => {
   const s = ctrl.settings || {}
   const isLabelBottom = s.labelPosition === 'bottom' && s.label
   const baseHeight = s.height || 40
@@ -323,7 +453,7 @@ const getControlStyle = (ctrl: Control) => {
   }
 }
 
-const getControlContentStyle = (ctrl: any) => {
+const getControlContentStyle = (ctrl: any): CSSProperties => {
   const s = ctrl.settings || {}
   const isGate = isGateControl(ctrl)
   if (isGate) {
@@ -359,7 +489,7 @@ const getGateInnerStyle = (ctrl: any) => {
   return { backgroundColor: s.color || '#4b5563' }
 }
 
-const getControlLabelStyle = (ctrl: any) => {
+const getControlLabelStyle = (ctrl: any): CSSProperties => {
   const s = ctrl.settings || {}
   return {
     marginTop: `${s.labelMarginTop || 4}px`,
@@ -375,7 +505,19 @@ const getControlLabelStyle = (ctrl: any) => {
   }
 }
 
-const dragState = ref({ isDragging: false, startX: 0, startY: 0, type: 'element' as 'element' | 'panel', targetId: '', elementsStart: [] as { id: string, x: number, y: number }[], panelStart: { id: '', x: 0, y: 0 } | null })
+// Drag state
+// [ИСПРАВЛЕНО] panelStart аннотирован через `null as {...} | null`:
+// `{ id: '', x: 0, y: 0 } | null` в позиции значения литерала —
+// синтаксическая ошибка (TS18050) + каскад неверных типов на .id/.x/.y
+const dragState = ref({
+  isDragging: false,
+  startX: 0,
+  startY: 0,
+  type: 'element' as 'element' | 'panel',
+  targetId: '',
+  elementsStart: [] as { id: string, x: number, y: number }[],
+  panelStart: null as { id: string, x: number, y: number } | null
+})
 const startDrag = (e: MouseEvent, type: 'element' | 'panel', targetId?: string) => {
   dragState.value = { isDragging: true, startX: e.clientX, startY: e.clientY, type, targetId: targetId || '', elementsStart: [], panelStart: null }
   if (type === 'element') dragState.value.elementsStart = props.elements.filter(el => isSelected(el.id)).map(el => ({ id: el.id, x: el.x, y: el.y }))
@@ -391,13 +533,14 @@ const onDrag = (e: MouseEvent) => {
 const endDrag = () => { dragState.value.isDragging = false; window.removeEventListener('mousemove', onDrag); window.removeEventListener('mouseup', endDrag) }
 
 const handleElementMouseDown = (e: MouseEvent, id: string) => {
-  emit('history:save'); if (props.selectedPanelId) emit('select-panel', null)
+  if (props.selectedPanelId) emit('select-panel', null)
   if (e.shiftKey) { const sel = [...props.selectedIds]; const i = sel.indexOf(id); if (i > -1) sel.splice(i, 1); else sel.push(id); emit('update:selection', sel) }
   else if (!isSelected(id)) emit('update:selection', [id])
   startDrag(e, 'element')
 }
 const handlePanelMouseDown = (e: MouseEvent, panelId: string) => {
-  emit('history:save'); if (!isPanelSelected(panelId)) { emit('select-panel', panelId); emit('update:selection', []) } startDrag(e, 'panel', panelId)
+  if (!isPanelSelected(panelId)) { emit('select-panel', panelId); emit('update:selection', []) }
+  startDrag(e, 'panel', panelId)
 }
 
 const resizeHandles = [
@@ -407,7 +550,8 @@ const resizeHandles = [
 ]
 const resizeState = ref({ isResizing: false, handle: '', startX: 0, startY: 0, startEl: null as SceneElement | null })
 const startResize = (e: MouseEvent, handle: string, el: SceneElement | null) => {
-  if (!el) return; emit('history:save'); resizeState.value = { isResizing: true, handle, startX: e.clientX, startY: e.clientY, startEl: { ...el } }
+  if (!el) return
+  resizeState.value = { isResizing: true, handle, startX: e.clientX, startY: e.clientY, startEl: { ...el } }
   window.addEventListener('mousemove', onResize); window.addEventListener('mouseup', endResize)
 }
 const onResize = (e: MouseEvent) => {
@@ -424,7 +568,8 @@ const endResize = () => { resizeState.value.isResizing = false; window.removeEve
 
 const panelResizeState = ref({ isResizing: false, handle: '', startX: 0, startY: 0, startPanel: null as Panel | null })
 const startPanelResize = (e: MouseEvent, handle: string, panel: Panel | null) => {
-  if (!panel) return; emit('history:save'); panelResizeState.value = { isResizing: true, handle, startX: e.clientX, startY: e.clientY, startPanel: { ...panel } }
+  if (!panel) return
+  panelResizeState.value = { isResizing: true, handle, startX: e.clientX, startY: e.clientY, startPanel: { ...panel } }
   window.addEventListener('mousemove', onPanelResize); window.addEventListener('mouseup', endPanelResize)
 }
 const onPanelResize = (e: MouseEvent) => {
@@ -463,7 +608,11 @@ const formatHotkey = (e: KeyboardEvent): string | null => {
 }
 
 const handleKeyDown = (e: KeyboardEvent) => {
+  const target = e.target as HTMLElement
+  if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return
+
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') return
+
   const hotkeyStr = formatHotkey(e)
   if (hotkeyStr) {
     for (const panel of props.panels) {
@@ -475,23 +624,36 @@ const handleKeyDown = (e: KeyboardEvent) => {
       }
     }
   }
+
   const step = e.shiftKey ? 1 : 10; let dx = 0, dy = 0
   if (e.key === 'ArrowLeft') dx = -step; if (e.key === 'ArrowRight') dx = step; if (e.key === 'ArrowUp') dy = -step; if (e.key === 'ArrowDown') dy = step
-  if (dx !== 0 || dy !== 0) { 
-    e.preventDefault(); 
-    emit('history:save'); 
-    props.selectedIds.forEach(id => { const el = props.elements.find(e => e.id === id); if (el) emit('update:element', id, { x: el.x + dx, y: el.y + dy }) }); 
-    if (props.selectedPanelId) { const p = props.panels.find(p => p.id === props.selectedPanelId); if (p) emit('update:panel', p.id, { x: (p.x || 0) + dx, y: (p.y || 0) + dy }) } 
+  if (dx !== 0 || dy !== 0) {
+    e.preventDefault()
+    props.selectedIds.forEach(id => { const el = props.elements.find(item => item.id === id); if (el) emit('update:element', id, { x: el.x + dx, y: el.y + dy }) })
+    if (props.selectedPanelId) { const p = props.panels.find(panel => panel.id === props.selectedPanelId); if (p) emit('update:panel', p.id, { x: (p.x || 0) + dx, y: (p.y || 0) + dy }) }
   }
 }
 
 const getSelectedElement = () => props.elements.find(e => props.selectedIds.includes(e.id)) || null
 const getSelectedPanel = () => props.panels.find(p => p.id === props.selectedPanelId) || null
 
-const getHandleStyle = (pos: string, target: any) => {
-  if (!target) return {}; const s = 12, o = -s / 2, x = target.x || 0, y = target.y || 0, w = target.width || 100, h = target.height || 100
+// [ИСПРАВЛЕНО] справочник хендлов — константа с аннотацией Record
+const HANDLE_POSITIONS = (l: number, t: number, r: number, b: number, w: number, h: number, o: number): Record<string, { left: string; top: string }> => ({
+  nw: { left: `${l + o}px`, top: `${t + o}px` },
+  ne: { left: `${r + o}px`, top: `${t + o}px` },
+  sw: { left: `${l + o}px`, top: `${b + o}px` },
+  se: { left: `${r + o}px`, top: `${b + o}px` },
+  n: { left: `${l + w / 2 + o}px`, top: `${t + o}px` },
+  s: { left: `${l + w / 2 + o}px`, top: `${b + o}px` },
+  w: { left: `${l + o}px`, top: `${t + h / 2 + o}px` },
+  e: { left: `${r + o}px`, top: `${t + h / 2 + o}px` }
+})
+
+const getHandleStyle = (pos: string, target: any): Record<string, string> => {
+  if (!target) return {}
+  const s = 12, o = -s / 2, x = target.x || 0, y = target.y || 0, w = target.width || 100, h = target.height || 100
   const l = RULER_SIZE + x, t = RULER_SIZE + y, r = RULER_SIZE + x + w, b = RULER_SIZE + y + h
-  return { nw: { left: `${l+o}px`, top: `${t+o}px` }, ne: { left: `${r+o}px`, top: `${t+o}px` }, sw: { left: `${l+o}px`, top: `${b+o}px` }, se: { left: `${r+o}px`, top: `${b+o}px` }, n: { left: `${l+w/2+o}px`, top: `${t+o}px` }, s: { left: `${l+w/2+o}px`, top: `${b+o}px` }, w: { left: `${l+o}px`, top: `${t+h/2+o}px` }, e: { left: `${r+o}px`, top: `${t+h/2+o}px` } }[pos] || {}
+  return HANDLE_POSITIONS(l, t, r, b, w, h, o)[pos] ?? {}
 }
 
 const handleCanvasMouseDown = (e: MouseEvent) => { if (!e.shiftKey) { emit('update:selection', []); emit('select-panel', null) } startSelectionRect(e) }
@@ -507,6 +669,15 @@ const handleControlClick = (panelId: string, controlId: string, ctrl: any) => {
 
 const isUIElement = (el: any) => el.type && ['button-gate-open', 'button-gate-close', 'button-wicket-open', 'button-wicket-close', 'button-intercom', 'switch', 'indicator-light', 'indicator-led', 'display-text', 'shape-rect', 'shape-circle', 'shape-line'].includes(el.type)
 
+const getUIElementStyle = (el: any) => {
+  const s = el.settings || {}
+  return {
+    backgroundColor: s.color || '#4b5563',
+    borderRadius: s.borderRadius ? `${s.borderRadius}%` : '4px',
+    color: s.textColor || '#fff'
+  }
+}
+
 const getSvgStyle = (el: any) => {
   const s = el.settings || {}
   const isWicket = s.gateType === 'wicket' || (el.width && el.width <= 60)
@@ -521,59 +692,12 @@ const getSvgStyle = (el: any) => {
 .control-item { transition: all 0.1s ease; }
 .control-item:hover { filter: brightness(1.1); }
 .text-xxs { font-size: 0.65rem; line-height: 1; }
-
-/* Анимация нажатия для внутренней кнопки (обычные) */
-.control-content.pressed {
-  transform: scale(0.92);
-  filter: brightness(0.85);
-  transition: all 0.08s ease;
-}
-/* Анимация нажатия для внутренней кнопки ворот */
-.gate-casing.pressed {
-  transform: scale(0.92);
-  filter: brightness(0.85);
-  transition: all 0.08s ease;
-}
-
-.is-3d-gate {
-  background-color: #111827 !important;
-  padding: 7px !important;
-  border: none !important;
-  box-shadow: 4px 4px 10px rgba(0, 0, 0, 0.9), 1px 1px 3px rgba(0, 0, 0, 0.5), inset 0 2px 8px rgba(0, 0, 0, 1) !important;
-}
-
-.gate-casing {
-  width: 100%;
-  height: 100%;
-  border-radius: inherit;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  position: relative;
-  overflow: hidden;
-  border: 1px solid rgba(0, 0, 0, 0.5);
-  box-shadow: inset 0 -3px 7px rgba(0, 0, 0, 0.7);
-}
-
-.gate-casing::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 50%;
-  background: linear-gradient(to bottom, rgba(255,255,255,0.4) 0%, transparent 100%);
-  pointer-events: none;
-  z-index: 1;
-}
-
-.glow-indicator {
-  background-color: #ef4444;
-  box-shadow: 0 0 1px 1px rgba(239, 68, 68, 0.6);
-  animation: led-pulse 0.1s ease-in-out infinite;
-}
-
+.control-content.pressed { transform: scale(0.92); filter: brightness(0.85); transition: all 0.08s ease; }
+.gate-casing.pressed { transform: scale(0.92); filter: brightness(0.85); transition: all 0.08s ease; }
+.is-3d-gate { background-color: #111827 !important; padding: 7px !important; border: none !important; box-shadow: 4px 4px 10px rgba(0, 0, 0, 0.9), 1px 1px 3px rgba(0, 0, 0, 0.5), inset 0 2px 8px rgba(0, 0, 0, 1) !important; }
+.gate-casing { width: 100%; height: 100%; border-radius: inherit; display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; overflow: hidden; border: 1px solid rgba(0, 0, 0, 0.5); box-shadow: inset 0 -3px 7px rgba(0, 0, 0, 0.7); }
+.gate-casing::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 50%; background: linear-gradient(to bottom, rgba(255,255,255,0.4) 0%, transparent 100%); pointer-events: none; z-index: 1; }
+.glow-indicator { background-color: #ef4444; box-shadow: 0 0 1px 1px rgba(239, 68, 68, 0.6); animation: led-pulse 0.1s ease-in-out infinite; }
 @keyframes led-pulse {
   0%, 100% { box-shadow: 0 0 1px 1px rgba(239, 68, 68, 0.5); }
   50% { box-shadow: 0 0 1px 1px rgba(239, 68, 68, 0.9); }

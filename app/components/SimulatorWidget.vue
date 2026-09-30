@@ -1,18 +1,21 @@
 <!-- app/components/SimulatorWidget.vue -->
 <template lang="pug">
 .simulator-widget.relative.flex.flex-col.w-full.h-full.bg-gray-950.overflow-hidden
-  // --- Хедер симулятора ---
+  //- Хедер симулятора
   header.flex.flex-none.justify-between.items-center.h-8.px-2.border-b.border-gray-700.bg-gray-900
     .flex.items-center.gap-1
       span.relative.flex.h-2.w-2
-        span.animate-ping.absolute.inline-flex.h-full.w-full.rounded-full.bg-green-400.opacity-75
+        span.animate-ping.absolute.inline-flex.h-full.w-full.rounded-full.bg-green-400(
+          class="opacity-75"
+        )
         span.relative.inline-flex.rounded-full.h-2.w-2.bg-green-500
       span.text-xs.font-bold.text-green-400 СИМУЛЯЦИЯ
 
     .text-xxs.text-gray-500
       | Режим: {{ isRunning ? 'Запущен' : 'Пауза' }}
       span.ml-2.text-cyan-400(v-if="aiAgents.length > 0") (Агентов: {{ aiAgents.length }})
-      span.ml-2.text-green-400(v-if="integration.usedPeopleIds.size > 0") (Уникальных: {{ integration.usedPeopleIds.size }})
+      //- usedPeopleIds — реф, в шаблоне читается напрямую (разворачивается)
+      span.ml-2.text-green-400(v-if="usedPeopleIds.size > 0") (Уникальных: {{ usedPeopleIds.size }})
 
     .flex.items-center.gap-2
       button.btn.btn-xs.btn-ghost(
@@ -53,10 +56,10 @@
           input.input.input-xs(type="number" v-model.number="userMaxNonFamily" min="0" max="4" placeholder="1")
         button.btn.btn-xs.btn-outline.btn-error.mt-2(@click="resetSettings") Сбросить
 
-  // --- Основной холст симуляции ---
+  //- Основной холст симуляции
   .relative.flex.flex-1.items-center.justify-center.overflow-hidden.bg-gray-800(ref="containerRef")
     .sim-canvas-wrapper.relative.overflow-hidden(
-      :style="{ width: sceneSize.width + 'px', height: sceneSize.height + 'px', transform: `scale(${scale})`, transformOrigin: 'center center' }"
+      :style="{ width: sceneSize.width + 'px', height: sceneSize.height + 'px', transform: `scale(${scale})`, transformOrigin: 'top left' }"
     )
       template(v-for="el in simElements" :key="el.id")
         .absolute.cursor-pointer(
@@ -64,15 +67,16 @@
           class="hover:z-50"
           @click="onElementClick(el)"
         )
+          //- fallback размеров: width/height опциональны
           TrafficRoad.w-full.h-full(
             v-if="el.asset?.type === 'traffic_road'"
-            :width="el.width"
-            :height="el.height"
+            :width="el.width || 400"
+            :height="el.height || 120"
             :is-running="isRunning"
             :muted="true"
             :spawn-rate="el.settings?.spawnRate"
-            :min-speed="el.defaultSettings?.minSpeed"
-            :max-speed="el.defaultSettings?.maxSpeed"
+            :min-speed="el.settings?.minSpeed"
+            :max-speed="el.settings?.maxSpeed"
           )
           .person-avatar.w-full.h-full.relative(
             v-else-if="el.asset?.type === 'person'"
@@ -92,7 +96,7 @@
       template(v-for="panel in config?.panels" :key="'panel_'+panel.id")
         .absolute(
           :style="getPanelStyle(panel)"
-          class="cursor-pointer hover:z-50"
+          class="hover:z-50 cursor-pointer"
         )
           .panel-controls.flex.flex-wrap.gap-1.p-1
             .control-item.relative(
@@ -116,26 +120,26 @@
                   :class="{ 'pressed': pressedControls.has(ctrl.id) }"
                 )
                   span(
-                    v-if="ctrl.settings?.label && ctrl.settings?.labelPosition === 'inside'" 
+                    v-if="ctrl.settings?.label && ctrl.settings?.labelPosition === 'inside'"
                     :style="{ color: `color-mix(in srgb, ${ctrl.settings?.color || '#4b5563'} 70%, black)` }"
                   ) {{ ctrl.settings.label }}
                   span.text-3xl.font-mono.text-center.leading-tight(
                     v-if="ctrl.settings?.hotkey && ctrl.settings?.labelPosition !== 'inside'"
                     :style="{ color: `color-mix(in srgb, ${ctrl.settings?.color || '#4b5563'} 70%, black)` }"
                   ) {{ ctrl.settings.hotkey }}
-                
+
                 template(v-else)
                   span(
-                    v-if="ctrl.settings?.label && ctrl.settings?.labelPosition === 'inside'" 
+                    v-if="ctrl.settings?.label && ctrl.settings?.labelPosition === 'inside'"
                     :style="{ color: `color-mix(in srgb, ${ctrl.settings?.color || '#4b5563'} 70%, black)` }"
                   ) {{ ctrl.settings.label }}
                   span.text-3xl.font-mono.text-center.leading-tight(
                     v-if="ctrl.settings?.hotkey && ctrl.settings?.labelPosition !== 'inside'"
                     :style="{ color: `color-mix(in srgb, ${ctrl.settings?.color || '#4b5563'} 70%, black)` }"
                   ) {{ ctrl.settings.hotkey }}
-              
+
               .control-label(
-                v-if="ctrl.settings?.label && ctrl.settings?.labelPosition === 'bottom'" 
+                v-if="ctrl.settings?.label && ctrl.settings?.labelPosition === 'bottom'"
                 :style="getControlLabelStyle(ctrl)"
               ) {{ ctrl.settings.label }}
 
@@ -149,26 +153,35 @@
           )
 
       .absolute.inset-0.pointer-events-none(style="z-index: 1000")
-        template(v-for="el in simElements")
+        //- [ИСПРАВЛЕНО] добавлен :key (был отсутствует — warning компилятора)
+        template(v-for="el in simElements" :key="'label_' + el.id")
           .absolute.text-label(
             v-if="(el.asset?.type === 'person' || el.asset?.type === 'car') && visibleAgentLabels.has(el.id)"
-            :key="`label_${el.id}`"
             :style="getLabelStyle(el)"
           )
             .flex.flex-col.items-center
               template(v-if="el.asset?.type === 'car'")
                 span.font-bold {{ el.asset?.plate }}
                 .text-xxs(v-if="el.occupants && el.occupants.length > 0")
+                  //- [ИСПРАВЛЕНО] без TS-cast (as any[] ломал компиляцию шаблона):
+                  //- v-for над any даёт индекс string | number, сравнение
+                  //- через Number(idx) — чистый JS
                   span(v-for="(occ, idx) in el.occupants" :key="occ.id")
                     | {{ occ.fio }}
-                    span(v-if="idx < el.occupants.length - 1") , 
+                    span(v-if="Number(idx) < el.occupants.length - 1") , 
               template(v-else)
                 span.font-bold {{ el.name }}
                 span.text-sm(v-if="el.groupLabel") {{ el.groupLabel }}
 </template>
 
 <script setup lang="ts">
+// app/components/SimulatorWidget.vue — script
+// [ИСПРАВЛЕНО v3]: типизация стилевых функций через CSSProperties — строковые
+// литералы ('flex'/'absolute'/'none') без контекстного типа расширяются до
+// string и не проходят CSSProperties; функции из useSimulatorUI/useSimulatorCore
+// обёрнуты с приведением (их исходники возвращают widening-объекты).
 import { ref, watch, onMounted, onUnmounted, nextTick, computed } from 'vue'
+import type { CSSProperties } from 'vue'
 import TrafficRoad from './editor/TrafficRoad.vue'
 import { useSimulatorCore } from '../composables/simulator/useSimulatorCore'
 import { useSimulatorPhysics } from '../composables/simulator/useSimulatorPhysics'
@@ -230,7 +243,11 @@ const resetSettings = () => {
 const integration = useSimulatorIntegration()
 const { allPeople, usedPeopleIds } = integration
 
-const { getElementStyle, getGateStyle, ...core } = useSimulatorCore(simElements)
+// [ИСПРАВЛЕНО] алиасы + типизированные обёртки: возврат core/ui-функций —
+// объекты с расширенными до string литералами, приведение через as CSSProperties
+const { getElementStyle: _getElementStyle, getGateStyle, ...core } = useSimulatorCore(simElements)
+const getElementStyle = (el: any, enableRotation: boolean): CSSProperties =>
+  _getElementStyle(el, enableRotation) as CSSProperties
 
 const simOpts = computed(() => ({
   ...props.simSettings,
@@ -280,12 +297,18 @@ const ui = useSimulatorUI(
 )
 const {
   onControlClick,
-  getPanelStyle,
-  getControlStyle,
-  getControlContentStyle,
+  getPanelStyle: _getPanelStyle,
+  getControlStyle: _getControlStyle,
+  getControlContentStyle: _getControlContentStyle,
   getGateInnerStyle,
-  getControlLabelStyle
+  getControlLabelStyle: _getControlLabelStyle
 } = ui
+
+// [ИСПРАВЛЕНО] типизированные обёртки над стилевыми функциями useSimulatorUI
+const getPanelStyle = (panel: any): CSSProperties => _getPanelStyle(panel) as CSSProperties
+const getControlStyle = (ctrl: any): CSSProperties => _getControlStyle(ctrl) as CSSProperties
+const getControlContentStyle = (ctrl: any): CSSProperties => _getControlContentStyle(ctrl) as CSSProperties
+const getControlLabelStyle = (ctrl: any): CSSProperties => _getControlLabelStyle(ctrl) as CSSProperties
 
 const pressedControls = ref(new Set<string>())
 const isGateControl = (ctrl: any) => {
@@ -302,7 +325,9 @@ const handleControlClick = (ctrl: any, panel: any, pos: { x: number; y: number }
   audioCtrl.updateIntercomAndLabels()
 }
 
-const getLabelStyle = (el: any) => {
+// [ИСПРАВЛЕНО] аннотация CSSProperties: pointerEvents/'center'/'break-word'
+// остаются литералами благодаря контекстной типизации
+const getLabelStyle = (el: any): CSSProperties => {
   const left = el.x + el.width / 2
   const top = el.y - 50
   return {
@@ -361,12 +386,12 @@ const onElementClick = (el: any) => {
   if (el.category === 'gate' || el.category === 'barrier') core.handleGateClick(el)
 }
 
+// [ИСПРАВЛЕНО] генераторы принимают 3 аргумента — 4-й (isOpen) не существует
 const getDynamicSvg = (el: any): string => {
   if (el.category === 'gate' || el.category === 'barrier' || el.type === 'gate') {
     const s = el.settings || {}
-    const isOpen = el.isOpen === true
-    if (s.gateType === 'wicket') return generateWicketSVG(el.width || 80, el.height || 120, s, isOpen)
-    return generateSlidingGateSVG(el.width || 320, el.height || 120, s, isOpen)
+    if (s.gateType === 'wicket') return generateWicketSVG(el.width || 80, el.height || 120, s)
+    return generateSlidingGateSVG(el.width || 320, el.height || 120, s)
   }
   return el.asset?.content || ''
 }
@@ -380,7 +405,7 @@ const gameLoop = (timestamp: number) => {
   lastTime = timestamp
   const cfg = getTrafficConfig()
   if (cfg.enabled) {
-    spawn.updateSpawnLogic(dt, cfg, allPeople.value.length > 0, aiAgents.value.length, cfg.maxAgents)
+    spawn.updateSpawnLogic(dt, cfg, allPeople.value.length > 0, aiAgents.value.length)
     physics.updateAiMovement(dt, { carGateId: cfg.carGateId, personGateId: cfg.personGateId })
     scriptsHandler.processScriptLogic(dt)
     scriptsHandler.updateActiveCommands(dt)
@@ -441,7 +466,6 @@ const handleKeyDown = (e: KeyboardEvent) => {
   }
 }
 
-// ✅ Хуки на одном уровне – синхронно в setup
 let resizeObserver: ResizeObserver | null = null
 
 onMounted(async () => {
@@ -477,16 +501,19 @@ onMounted(async () => {
 
   initAudioPools()
 
+  // [ИСПРАВЛЕНО] ctx в API движка — функция: audio.ctx()
   const unlock = () => {
     audio.init()
-    if (audio.ctx && audio.ctx.state === 'suspended') {
-      audio.ctx.resume().then(() => console.log('AudioContext resumed'))
+    const c = audio.ctx()
+    if (c && c.state === 'suspended') {
+      c.resume().then(() => console.log('AudioContext resumed'))
     }
     window.removeEventListener('click', unlock)
   }
   window.addEventListener('click', unlock, { once: true })
-  if (audio.ctx && audio.ctx.state === 'suspended') {
-    audio.ctx.resume()
+  const c0 = audio.ctx()
+  if (c0 && c0.state === 'suspended') {
+    c0.resume()
   }
 
   if (props.isRunning) {
@@ -495,7 +522,6 @@ onMounted(async () => {
   }
 })
 
-// ✅ onUnmounted на верхнем уровне setup
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeyDown)
   if (resizeObserver) resizeObserver.disconnect()
