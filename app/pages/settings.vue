@@ -1,11 +1,11 @@
 <!-- app/pages/settings.vue -->
 <!-- Назначение: настройки системы — вкладки конфигурации, резервные копии.
-     [UI/UX Фаза 1] UiPageHeader с описанием; Lucide-иконки кнопок;
-     alert/confirm -> тосты/ConfirmDialog; перезагрузка с задержкой,
-     чтобы тост успели прочитать.
-     [FIX] clearAllData удаляла несуществующую БД 'SecurityJournalDB' —
-     реальное имя 'KppDatabase'; плюс destroyDb() перед удалением:
-     IndexedDB не удаляет БД, пока открыты соединения (delete висел молча). -->
+    [UI/UX Фаза 1] UiPageHeader с описанием; Lucide-иконки кнопок;
+    alert/confirm -> тосты/ConfirmDialog; перезагрузка с задержкой,
+    чтобы тост успели прочитать.
+    [FIX] clearAllData удаляла несуществующую БД 'SecurityJournalDB' —
+    реальное имя 'KppDatabase'; плюс destroyDb() перед удалением:
+    IndexedDB не удаляет БД, пока открыты соединения (delete висел молча). -->
 <template lang="pug">
 .settings-page.flex.flex-col.h-full
   //- Шапка страницы: назначение экрана
@@ -46,6 +46,9 @@
         button.btn.rounded-md.btn-error(@click="clearAllData")
           Trash2.h-4.w-4.mr-1
           | Очистить
+        button.btn.rounded-md.btn-ghost(@click="showTour")
+          HelpCircle.h-4.w-4.mr-1
+          | Знакомство с программой
 </template>
 
 <script setup lang="ts">
@@ -65,6 +68,10 @@ import SettingsSimulator from '~/components/settings/SettingsSimulator.vue'
 import SettingsGenerator from '~/components/settings/SettingsGenerator.vue'
 
 definePageMeta({ title: 'Настройки' })
+
+// [ДОБАВЛЕНО] онбординг — кнопка повторного показа
+import { useOnboarding } from '~/composables/useOnboarding'
+const { show: showTour } = useOnboarding()
 
 const { exportDB, importDB, destroyDb } = useDatabase()
 const configStore = useConfig()

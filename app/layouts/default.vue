@@ -86,6 +86,10 @@
               p.text-lg.mb-2 Сцена не загружена
               p.text-xs Создайте или сохраните сцену в Редакторе
 
+    //- === Тур первого запуска (поверх всего) ===
+    ClientOnly
+      UiOnboardingTour
+
   .drawer-side.z-40
     label.drawer-overlay(for="main-drawer")
     ul.menu.flex.min-h-full.w-44.flex-col.gap-2.p-4.bg-base-200.text-base-content
@@ -168,6 +172,16 @@ const loadLatestScene = async () => {
     console.warn('[Layout] Failed to load last scene', e)
   }
 }
+
+// [ДОБАВЛЕНО] онбординг первого запуска
+import { useOnboarding } from '~/composables/useOnboarding'
+const { isDone, show: showOnboarding } = useOnboarding()
+
+// внутри существующего onMounted, ПОСЛЕ await loadLatestScene():
+  // Первый запуск — показать тур знакомства
+  if (!isDone()) {
+    setTimeout(() => showOnboarding(), 600) // [НАСТРОЙКА] задержка: дать интерфейсу отрисоваться
+  }
 
 // Настройки симулятора: глобальные дефолты перекрываются настройками сцены
 const simulatorSettings = computed(() => {
