@@ -121,18 +121,19 @@
 <script setup lang="ts">
 // app/layouts/default.vue — script
 // Глобальная инициализация: тема, конфиг, журнал, смена, БД, последняя сцена.
+// [MIGRATION] lucide-vue-next -> @lucide/vue (старый пакет deprecated)
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
-// Волна 1 Lucide: навигация, шапка, FAB
 import {
   Menu, BookOpen, Database, Settings, PencilRuler,
   ChartColumn, LogOut, LogIn, Video
-} from 'lucide-vue-next'
+} from '@lucide/vue'
 import { useTheme } from '~/composables/useTheme'
 import { useConfig } from '~/composables/useConfig'
 import { useJournal } from '~/composables/useJournal'
 import { useShift } from '~/composables/useShift'
 import { useSceneBuilder } from '~/composables/useSceneBuilder'
 import { useDatabase } from '~/composables/useDatabase'
+import { useOnboarding } from '~/composables/useOnboarding'
 import type { SceneConfig } from '~/types/scene'
 
 const route = useRoute()
@@ -145,6 +146,9 @@ const { loadScene, listScenes } = useSceneBuilder()
 
 // Шапка с брендом/сменой/статистикой — только на журнале
 const isJournalPage = computed(() => route.path === '/')
+
+// Онбординг первого запуска
+const { isDone, show: showOnboarding } = useOnboarding()
 
 const isSimulatorOpen = useState<boolean>('simulator-is-open', () => false)
 const sceneConfig = ref<SceneConfig | null>(null)
@@ -172,16 +176,6 @@ const loadLatestScene = async () => {
     console.warn('[Layout] Failed to load last scene', e)
   }
 }
-
-// [ДОБАВЛЕНО] онбординг первого запуска
-import { useOnboarding } from '~/composables/useOnboarding'
-const { isDone, show: showOnboarding } = useOnboarding()
-
-// внутри существующего onMounted, ПОСЛЕ await loadLatestScene():
-  // Первый запуск — показать тур знакомства
-  if (!isDone()) {
-    setTimeout(() => showOnboarding(), 600) // [НАСТРОЙКА] задержка: дать интерфейсу отрисоваться
-  }
 
 // Настройки симулятора: глобальные дефолты перекрываются настройками сцены
 const simulatorSettings = computed(() => {
@@ -220,6 +214,11 @@ onMounted(async () => {
 
   // Сцену грузим только после того, как стейт обновился
   await loadLatestScene()
+
+  // Первый запуск — показать тур знакомства
+  if (!isDone()) {
+    setTimeout(() => showOnboarding(), 600) // [НАСТРОЙКА] задержка: дать интерфейсу отрисоваться
+  }
 })
 
 onUnmounted(() => {

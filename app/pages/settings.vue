@@ -52,13 +52,16 @@
 </template>
 
 <script setup lang="ts">
+// app/pages/settings.vue — script
+// [MIGRATION] lucide-vue-next -> @lucide/vue
 import { ref, computed, onMounted } from 'vue'
 // [UI/UX] Lucide: кнопки действий
-import { Save, Download, Upload, Trash2 } from 'lucide-vue-next'
+import { Save, Download, Upload, Trash2, HelpCircle } from '@lucide/vue'
 import { useDatabase } from '../composables/useDatabase'
 import { useConfig } from '../composables/useConfig'
 import { useToast } from '~/composables/useToast'
 import { useConfirm } from '~/composables/useConfirm'
+import { useOnboarding } from '~/composables/useOnboarding'
 import SettingsUi from '~/components/settings/SettingsUi.vue'
 import SettingsLabels from '~/components/settings/SettingsLabels.vue'
 import SettingsColumns from '~/components/settings/SettingsColumns.vue'
@@ -69,14 +72,11 @@ import SettingsGenerator from '~/components/settings/SettingsGenerator.vue'
 
 definePageMeta({ title: 'Настройки' })
 
-// [ДОБАВЛЕНО] онбординг — кнопка повторного показа
-import { useOnboarding } from '~/composables/useOnboarding'
-const { show: showTour } = useOnboarding()
-
 const { exportDB, importDB, destroyDb } = useDatabase()
 const configStore = useConfig()
 const toast = useToast()
 const { confirmDialog } = useConfirm()
+const { show: showTour } = useOnboarding()
 
 const activeTab = ref('ui')
 const tabs = [
@@ -147,9 +147,9 @@ const clearAllData = async () => {
     danger: true
   })
   if (!ok) return
-  // [FIX] было deleteDatabase('SecurityJournalDB') — такой базы нет, очистка
-  // никогда не работала. Реальная БД — 'KppDatabase'. destroyDb() обязателен:
-  // IndexedDB не удаляет БД при открытых соединениях.
+  // [FIX] было deleteDatabase('SecurityJournalDB') — такой базы нет.
+  // Реальная БД — 'KppDatabase'. destroyDb() обязателен: IndexedDB
+  // не удаляет БД при открытых соединениях.
   destroyDb()
   indexedDB.deleteDatabase('KppDatabase')
   toast.success('База удалена — перезагрузка...')

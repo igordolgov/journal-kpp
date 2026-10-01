@@ -413,17 +413,13 @@ dialog.modal.modal-open(
 <script setup lang="ts">
 // app/pages/index.vue — script
 // Логика главной страницы (журнал).
-// [UI/UX] Lucide-иконки в модалках.
-// [FIX] статус в карточке человека считался от несуществующего поля
-// detailPerson.isInside — бейдж всегда показывал «За территорией».
-// Теперь: активная поездка (вышел, не вернулся) -> снаружи, иначе по location.
-
+// [MIGRATION] lucide-vue-next -> @lucide/vue
 import { onMounted, ref, computed, useState } from '#imports'
 // [UI/UX] Lucide: модалки журнала
 import {
   X, ArrowLeftRight, Phone, Car, Footprints, Check,
   Trash2, Save, LogOut
-} from 'lucide-vue-next'
+} from '@lucide/vue'
 
 // Компоненты
 import JournalTable from '../components/JournalTable.vue'

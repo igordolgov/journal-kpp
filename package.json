@@ -14,10 +14,10 @@
     "electron:build": "electron-builder --win portable"
   },
   "dependencies": {
+    "@lucide/vue": "^1.49.0",
     "chart.js": "^4.5.1",
     "fuse.js": "^7.5.0",
     "gsap": "^3.15.0",
-    "lucide-vue-next": "^1.0.0",
     "nanoid": "^6.0.1",
     "nuxt": "^4.5.2",
     "vue": "^3.5.43",
@@ -58,5 +58,10 @@
       "artifactName": "JournalKPP.exe"
     },
     "npmRebuild": false
+  },
+  "allowScripts": {
+    "@parcel/watcher@2.6.0": true,
+    "esbuild@0.28.1": true,
+    "electron-winstaller@5.4.0": true
   }
 }
