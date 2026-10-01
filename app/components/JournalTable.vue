@@ -8,15 +8,19 @@
         на семантические DaisyUI (badge-warning/badge-success/badge-ghost);
       4. [FIX-планшет] ресайз-зона 2px -> 8px (невидимая, рабочая);
       5. Унификация: applyHighlight — алиас единой highlightText;
-      6. Каскад по правилам Pug: классы со спецсимволами — только внутри class="". -->
+      6. Каскад по правилам Pug: классы со спецсимволами — только внутри class="";
+      7. Режимы отображения: «По дням» (groupedRows) / «Лента» (timelineRows),
+        выбор через displayRows (prop displayMode). -->
 <template lang="pug">
 .table-container.w-full.h-full.overflow-auto.relative.flex.flex-col
   //- Панель управления
-  .flex-none.p-2.flex.justify-between.items-center.bg-base-200.border-b.border-base-300(
+  //- [Фаза 2] Сортировка ленты — в ОДНОМ ряду с чекбоксами:
+  //-  слева чекбоксы (flex-1), справа селект (flex-none)
+  .flex-none.p-2.flex.justify-between.items-center.gap-3.bg-base-200.border-b.border-base-300(
     v-if="processedJournal.length > 0"
   )
-    .flex.gap-3.items-center
-      .form-control
+    .flex.flex-wrap.items-center.gap-3.flex-1
+      .form-control.my-2
         label.label.cursor-pointer.gap-2
           input.checkbox.checkbox-sm.checkbox-primary(
             type="checkbox"
@@ -31,6 +35,21 @@
             v-model="keepActiveOnTop"
           )
           span.label-text Активные сверху
+
+      //- Сортировка ЛЕНТЫ — справа, в том же ряду
+      .form-control.flex-none(
+        v-if="displayMode === 'timeline'"
+      )
+        select.select.select-sm(
+          class="bg-base-100"
+          v-model="timelineSort"
+          aria-label="Сортировка ленты"
+        )
+          option(
+            v-for="opt in timelineSortOptions"
+            :key="opt.value"
+            :value="opt.value"
+          ) {{ opt.label }}
 
   //- Таблица
   .flex-1.overflow-auto
@@ -65,7 +84,7 @@
             | Действия
 
       tbody
-        template(v-for="item in groupedRows" :key="item.uniqueId")
+        template(v-for="item in displayRows" :key="item.uniqueId")
 
           //- ЗАГОЛОВОК ДНЯ
           tr.bg-base-200.border-t-4.border-base-300(
@@ -176,15 +195,17 @@
 
 <script setup lang="ts">
 // app/components/JournalTable.vue — script
-import { computed, ref, unref } from 'vue'
+// [Фаза 2, Лента] timelineSort: сортировка ленты (date/fio/vehicle) —
+// независима от сортировки режима «По дням», персист в localStorage.
+import { computed, ref, unref, watch } from 'vue'
 import { useState } from 'nuxt/app'
-// [UI/UX] Lucide: иконки действий (вместо инлайн-SVG)
 import { Pencil, Info } from '@lucide/vue'
 import { useJournal } from '../composables/useJournal'
 
 const props = withDefaults(defineProps<{
   processedJournal?: any[]
   visibleColumns?: any[]
+  displayMode?: 'group' | 'timeline'
   sortField?: string
   sortOrder?: number
   tableClasses?: string
@@ -193,6 +214,7 @@ const props = withDefaults(defineProps<{
 }>(), {
   processedJournal: () => [],
   visibleColumns: () => [],
+  displayMode: 'group',
   sortField: 'date',
   sortOrder: 1,
   tableClasses: '',
@@ -207,6 +229,29 @@ const { formatTime } = useJournal()
 const searchQuery = useState<string>('kpp-global-search', () => '')
 const showClosed = ref(true)
 const keepActiveOnTop = ref(true)
+
+// ============================================================
+// ЛЕНТА: сортировка (персист в localStorage)
+// ============================================================
+const TIMELINE_SORT_KEY = 'journal-timeline-sort'
+type TimelineSort = 'date' | 'fio' | 'vehicle'
+
+const timelineSort = ref<TimelineSort>(
+  (import.meta.client && (localStorage.getItem(TIMELINE_SORT_KEY) as TimelineSort)) || 'date'
+)
+
+watch(timelineSort, (val) => {
+  if (import.meta.client) localStorage.setItem(TIMELINE_SORT_KEY, val)
+})
+
+// Подписи для селекта (template)
+const timelineSortOptions: { value: TimelineSort; label: string }[] = [
+  { value: 'date', label: 'По дате' },
+  { value: 'fio', label: 'По алфавиту' },
+  { value: 'vehicle', label: 'По транспорту' },
+]
+
+// ============================================================
 
 const getLabel = (key: string) => {
   const labels: Record<string, string> = {
@@ -236,7 +281,7 @@ const formatGroupDate = (date: Date) => {
   return `${dateStr} ${weekdayStr}`
 }
 
-// Сортировка строк
+// Сортировка строк (режим «По дням» — сортировка по заголовкам таблицы)
 const sortedRows = computed(() => {
   let list = props.processedJournal
 
@@ -293,7 +338,8 @@ const sortedRows = computed(() => {
   return [...list].sort(sortFn)
 })
 
-// Группировка строк по дням (счётчик гарантирует уникальность ключей заголовков)
+// Группировка строк по дням (режим «По дням»).
+// ВАЖНО: timelineRows/displayRows живут на уровне компонента (ниже).
 const groupedRows = computed(() => {
   const result: any[] = []
   let lastDayStr = ''
@@ -325,6 +371,56 @@ const groupedRows = computed(() => {
   return result
 })
 
+// ============================================================
+// ЛЕНТА: три стратегии сортировки
+// ============================================================
+const timelineRows = computed(() => {
+  // Фильтр закрытых — общий с таблицей
+  let list = props.processedJournal
+  if (!showClosed.value) {
+    list = list.filter((row: any) => !(row.timestamp_out && row.timestamp_in))
+  }
+
+  if (timelineSort.value === 'fio') {
+    // По алфавиту: русская коллация, дети («+ ...») сортируются как все —
+    // по факту фамилии с плюсом; при желании можно вынести их в конец отдельной группой
+    return [...list]
+      .sort((a, b) => String(a.person_fio || '').localeCompare(String(b.person_fio || ''), 'ru'))
+      .map(x => ({ type: 'row', data: x, uniqueId: x.id }))
+  }
+
+  if (timelineSort.value === 'vehicle') {
+    // По транспорту: пешие («🚶») — в конец списка
+    const rank = (r: any) => {
+      const v = String(r.vehicle_out || r.vehicle_in || '🚶')
+      return v.includes('🚶') ? 1 : 0
+    }
+    return [...list]
+      .sort((a, b) => {
+        const ra = rank(a) - rank(b)
+        if (ra !== 0) return ra
+        return String(a.vehicle_out || a.vehicle_in || '')
+          .localeCompare(String(b.vehicle_out || b.vehicle_in || ''), 'ru')
+      })
+      .map(x => ({ type: 'row', data: x, uniqueId: x.id }))
+  }
+
+  // date (по умолчанию): по последнему событию записи, новые сверху
+  const withTime = list.map((row: any) => {
+    const lastEvent = row.timestamp_in || row.timestamp_out || row.created_at
+    return { row, lastEvent: lastEvent ? new Date(lastEvent).getTime() : 0 }
+  })
+  return withTime
+    .sort((a, b) => b.lastEvent - a.lastEvent)
+    .map(x => ({ type: 'row', data: x.row, uniqueId: x.row.id }))
+})
+
+// Единая точка рендера для v-for: группировка или лента
+const displayRows = computed(() =>
+  props.displayMode === 'timeline' ? timelineRows.value : groupedRows.value
+)
+// ============================================================
+
 const getShortFio = (fio: string) => {
   if (!fio) return '—'
   let str = String(fio).trim()
@@ -343,15 +439,13 @@ const getShortFio = (fio: string) => {
   let initials = ''
 
   if (parts.length > 1) {
-    // charAt(0) вместо индексов строк (noUncheckedIndexedAccess)
     initials = parts.slice(1).map(n => n.charAt(0) ? n.charAt(0).toUpperCase() + '.' : '').join(' ')
   }
 
   return `${prefix}${surname} ${initials}`.trim()
 }
 
-// Подсветка поискового вхождения — ЕДИНАЯ функция
-// (принимает и ref, и строку — для совместимости с обоими вызовами)
+// Подсветка поискового вхождения — единая функция
 const highlightText = (text: string, query: any) => {
   const q = unref(query) || query?.value || ''
   if (!q || !text) return text
@@ -362,8 +456,6 @@ const highlightText = (text: string, query: any) => {
   return String(text).replace(regex, '<span class="bg-warning/40 px-0.5 rounded">$1</span>')
 }
 
-// [FIX] алиас: formatPlateHtml использует историческое имя applyHighlight.
-// Логика едина с highlightText — дублирования нет.
 const applyHighlight = (text: string, queryVal: string) => highlightText(text, queryVal)
 
 const isChild = (entry: any) => {
@@ -373,9 +465,6 @@ const isChild = (entry: any) => {
   return isChildFlag || isChildCategory || fioHasPlus
 }
 
-// [FIX] семантические статусы: DaisyUI-классы вместо захардкоженных цветов.
-// Смысл: снаружи = warning (нужен возврат), внутри = success (гость на месте),
-// закрыто = ghost (история).
 const getStatusClass = (entry: any) => {
   if (entry.timestamp_out && entry.timestamp_in) return 'badge-ghost'
   if (entry.timestamp_out && !entry.timestamp_in) return 'badge-warning'
@@ -397,7 +486,6 @@ const formatPlateHtml = (plateStr: string, queryVal: string) => {
   }
 
   const parts = plateStr.split(' ')
-  // pop() может вернуть undefined — fallback ''
   const region = parts.length > 1 ? (parts.pop() ?? '') : ''
   const main = parts.join(' ')
 
@@ -430,7 +518,6 @@ const formatVehicleEntry = (entry: any, queryRef: any) => {
   const q = unref(queryRef) || ''
 
   if (text.includes('/')) {
-    // деструктуризация split даёт string | undefined — fallback
     const chunks = text.split('/')
     const p1 = chunks[0] ?? ''
     const p2 = chunks[1] ?? ''

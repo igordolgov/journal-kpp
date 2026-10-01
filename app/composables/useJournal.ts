@@ -142,7 +142,7 @@ export const useJournal = () => {
 
   const sortField = ref('date')
   const sortOrder = ref(-1)
-  const displayMode = ref('timeline')
+  const displayMode = useState<'group' | 'timeline'>('journal-display-mode', () => 'group')
 
   const getCompanions = (personId: string | number) => {
     const targetEntry = journalList.value.find(

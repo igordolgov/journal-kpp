@@ -8,7 +8,7 @@
   :style="isSimulatorOpen ? { paddingBottom: simulatorDockStyle.height } : {}"
 )
 
-  //- 1. БОКОВАЯ ПАНЕЛЬ (Фильтры и поиск)
+  //- 1. БОКОВАЯ ПАНЕЛЬ
   ClientOnly
     JournalSidebar.h-full.min-h-0(
       v-model:selectedItem="selectedItem"
@@ -19,7 +19,7 @@
       @group-action="handleGroupAction"
     )
 
-  //- 2. ОСНОВНАЯ ОБЛАСТЬ (Таблица)
+  //- 2. ОСНОВНАЯ ОБЛАСТЬ
   .flex-1.min-h-0.flex.flex-col
     .card.flex-1.min-h-0.flex.flex-col.overflow-hidden.shadow-xl(
       class="bg-base-100"
@@ -31,7 +31,6 @@
           class="border-base-300 border-b"
         )
           .flex.justify-between.items-center
-            //- [UI/UX] подсказка-онбординг: назначение экрана и первый шаг
             div
               h3.card-title Журнал событий
               p.mt-1.text-xs(class="text-base-content/50")
@@ -40,19 +39,19 @@
               class="bg-base-200"
             )
               button.tab.text-xs(
-                class="bg-base-100 tab-active"
-                :class="displayMode === 'group' ? '' : 'bg-transparent'"
+                class="bg-base-100"
+                :class="displayMode === 'group' ? 'tab-active' : 'bg-transparent'"
                 @click="handleGroupClick"
               )
                 | По дням
               button.tab.text-xs(
-                class="bg-base-100 tab-active"
-                :class="displayMode === 'timeline' ? '' : 'bg-transparent'"
+                class="bg-base-100"
+                :class="displayMode === 'timeline' ? 'tab-active' : 'bg-transparent'"
                 @click="displayMode = 'timeline'"
               )
                 | Лента
 
-        //- Область таблицы с прокруткой
+        //- Область таблицы
         .flex-1.min-h-0.overflow-y-auto(
           ref="scrollContainer"
         )
@@ -60,6 +59,7 @@
             JournalTable(
               :processed-journal="processedJournal"
               :visible-columns="visibleColumns"
+              :display-mode="displayMode"
               :sort-field="sortField"
               :sort-order="sortOrder"
               :table-classes="getTableClasses"
@@ -76,7 +76,7 @@
               .flex.justify-center.items-center.h-full
                 span.loading.loading-dots.loading-lg.text-primary
 
-//- МОДАЛЬНЫЕ ОКНА — единый паттерн: header (иконка+тайтл+X) / body / footer
+//- МОДАЛЬНЫЕ ОКНА
 
 //- 1. Детальная карточка человека
 dialog.modal.modal-open(
@@ -85,7 +85,6 @@ dialog.modal.modal-open(
   .modal-box.max-w-lg.p-0.overflow-hidden(
     class="bg-base-100 shadow-2xl border border-base-200/50 rounded-xl"
   )
-    //- Header
     .flex.justify-between.items-center.p-4(
       class="bg-base-200/50 border-base-200 border-b"
     )
@@ -105,24 +104,20 @@ dialog.modal.modal-open(
       )
         X.h-5.w-5
 
-    //- Body: Реальные данные
     .p-4.text-sm
       .grid.grid-cols-2.gap-x-4.gap-y-2
-        //- Строка: Должность
         .flex.flex-col
           span.text-xs.font-medium.uppercase.tracking-wider(
             class="text-base-content/50"
           ) Должность
           span.font-medium {{ detailPerson.position || '—' }}
 
-        //- Строка: Отдел
         .flex.flex-col
           span.text-xs.font-medium.uppercase.tracking-wider(
             class="text-base-content/50"
           ) Отдел
           span.font-medium {{ detailPerson.department || '—' }}
 
-        //- Строка: Транспорт (Слеш, если разные)
         .flex.flex-col.col-span-2.mt-2
           span.text-xs.font-medium.uppercase.tracking-wider(
             class="text-base-content/50"
@@ -131,7 +126,6 @@ dialog.modal.modal-open(
             ArrowLeftRight.w-4.h-4.shrink-0(class="opacity-60")
             | {{ formatVehicleDisplay(detailPerson) }}
 
-        //- Строка: Телефон
         .flex.flex-col.col-span-2.mt-2(
           v-if="detailPerson.phone"
         )
@@ -142,7 +136,6 @@ dialog.modal.modal-open(
             Phone.w-4.h-4.shrink-0(class="opacity-60")
             | {{ detailPerson.phone }}
 
-        //- Строка: Статус (computed detailPersonInside — не несуществующее isInside)
         .flex.flex-col.col-span-2.mt-2
           span.text-xs.font-medium.uppercase.tracking-wider(
             class="text-base-content/50"
@@ -152,7 +145,6 @@ dialog.modal.modal-open(
           )
             | {{ detailPersonInside ? 'На объекте' : 'За территорией' }}
 
-    //- Footer
     .modal-action.p-3(
       class="bg-base-100 border-base-200 border-t"
     )
@@ -166,23 +158,29 @@ dialog.modal.modal-open(
   )
     button close
 
-//- 2. Модалка Выезда (Simple)
+//- 2. Модалка Выезда
+//- [UX] в шапке — КТО выезжает; дети у попутчиков помечены; кнопка защищена
+//- saving-флагом от двойной фиксации
 dialog.modal.modal-open(
   v-if="isExitModalOpen"
 )
   .modal-box.max-w-xs.p-0.overflow-hidden(
     class="bg-base-100 shadow-2xl border border-base-200/50 rounded-xl"
   )
-    //- Header — единый паттерн
     .flex.justify-between.items-center.p-3(
       class="bg-base-200/50 border-base-200 border-b"
     )
-      .flex.items-center.gap-2
-        .w-8.h-8.rounded-full.flex.items-center.justify-center(
+      .flex.items-center.gap-2.min-w-0
+        .w-8.h-8.rounded-full.flex.items-center.justify-center.shrink-0(
           class="bg-info/10 text-info"
         )
           LogOut.w-4.h-4
-        h3.text-base.font-bold Фиксация выезда
+        div.min-w-0
+          h3.text-base.font-bold Фиксация выезда
+          //- [UX] КТО выезжает — крупно, не теряется
+          p.text-xs.font-semibold.truncate(
+            class="text-base-content/70"
+          ) {{ exitForm.person_fio }}
       button.btn.btn-ghost.btn-circle.btn-xs(
         type="button"
         @click="isExitModalOpen = false"
@@ -207,7 +205,7 @@ dialog.modal.modal-open(
         div(v-if="exitForm.groupCandidates && exitForm.groupCandidates.length > 0")
           .flex.justify-between.items-center.mb-1
             label.label.py-1.px-0
-              span.text-xs.font-bold Попутчики:
+              span.text-xs.font-bold Попутчики (выйдут на этом же транспорте):
             button.btn.btn-xs.btn-ghost.py-0.h-4(
               type="button"
               @click="selectAllExitCandidates"
@@ -227,9 +225,13 @@ dialog.modal.modal-open(
                   :value="c.id"
                   v-model="exitForm.selectedGroupIds"
                 )
-                span.text-sm {{ c.fio }}
+                //- [UX] дети помечены жёлтым — заметно при тапе
+                span.text-sm(
+                  :class="{ 'text-warning font-semibold': c.isChild }"
+                )
+                  | {{ c.fio }}
+                  span.pl-1.text-xs(class="opacity-60" v-if="c.isChild") (ребёнок)
 
-      //- Footer — единый паттерн
       .modal-action.p-3(
         class="bg-base-200/30 border-base-200 border-t"
       )
@@ -239,13 +241,15 @@ dialog.modal.modal-open(
         ) Отмена
         button.btn.btn-primary.btn-sm(
           type="submit"
+          :disabled="isSavingExit"
         )
-          LogOut.w-4.h-4.mr-1
-          | Подтвердить
+          span.loading.loading-spinner.loading-xs(v-if="isSavingExit")
+          LogOut.w-4.h-4.mr-1(v-else)
+          | {{ isSavingExit ? 'Сохранение...' : 'Подтвердить' }}
 
   form.modal-backdrop(
     class="bg-black/40 backdrop-blur-sm"
-    @click="isExitModalOpen = false"
+    @click="!isSavingExit && (isExitModalOpen = false)"
   )
     button close
 
@@ -256,19 +260,18 @@ dialog.modal.modal-open(
   .modal-box.max-w-md.p-0.overflow-hidden(
     class="bg-base-100 shadow-2xl border border-base-200/50 rounded-xl"
   )
-    //- Header — единый паттерн
     .flex.justify-between.items-center.p-3(
       class="bg-base-200/50 border-base-200 border-b"
     )
-      .flex.items-center.gap-2
-        .w-8.h-8.rounded-full.flex.items-center.justify-center(
+      .flex.items-center.gap-2.min-w-0
+        .w-8.h-8.rounded-full.flex.items-center.justify-center.shrink-0(
           class="bg-success/10 text-success"
         )
           LogIn.w-4.h-4
-        div
+        div.min-w-0
           h3.text-base.font-bold.text-base-content Возврат
-          p.text-xs(
-            class="text-base-content/60"
+          p.text-xs.font-semibold.truncate(
+            class="text-base-content/70"
           ) {{ returnForm.person_fio }}
       button.btn.btn-ghost.btn-circle.btn-xs(
         type="button"
@@ -277,17 +280,14 @@ dialog.modal.modal-open(
       )
         X.w-4.h-4
 
-    //- Body (прокрутка: на планшете в landscape не влезает)
     .px-4.py-3.space-y-1.overflow-y-auto(
       class="max-h-[55vh]"
     )
-      //- Секция: Транспорт
       div
         label.label.py-1.px-0.justify-start.gap-2
           span.text-xs.font-bold Транспорт:
 
         .flex.flex-wrap.gap-2.mt-1
-          //- Кнопки реального транспорта
           button.flex.items-center.p-2.rounded-lg(
             v-for="v in availableVehicles"
             :key="v.id"
@@ -300,7 +300,6 @@ dialog.modal.modal-open(
               :class="returnForm.vehicle_in === v.plate ? 'text-primary' : 'text-base-content'"
             ) {{ v.plate }}
 
-          //- Кнопка "Пешком"
           button.flex.items-center.p-2.rounded-lg(
             class="gap-1.5 border transition-all duration-200"
             :class="isWalkingSelected ? 'border-success bg-success/10 shadow-sm' : 'border-base-300 hover:border-base-400 bg-base-100'"
@@ -313,7 +312,6 @@ dialog.modal.modal-open(
               :class="isWalkingSelected ? 'text-success' : 'text-base-content'"
             ) Пешком
 
-      //- Секция: Попутчики
       div(
         v-if="returnForm.groupCandidates.length > 0"
       )
@@ -339,14 +337,12 @@ dialog.modal.modal-open(
                 :value="c.id"
                 v-model="returnForm.selectedGroupIds"
               )
-              //- Подсветка детей и родство
               span.text-sm(
                 :class="{ 'text-warning': c.isChild }"
               )
                 | {{ c.fio }}
                 span.pl-1.opacity-70(v-if="c.relation") ({{ c.relation }})
 
-      //- Секция: Заметка
       div
         label.label.py-1.px-0
           span.text-xs.font-bold Заметка:
@@ -356,7 +352,6 @@ dialog.modal.modal-open(
           placeholder="Примечание..."
         )
 
-    //- Footer — единый паттерн
     .modal-action.px-3.py-3(
       class="bg-base-200/30 border-base-200 border-t"
     )
@@ -367,25 +362,27 @@ dialog.modal.modal-open(
       button.btn.btn-success.btn-sm(
         type="button"
         class="shadow-md shadow-success/20"
+        :disabled="isSavingReturn"
         @click="handleSaveReturn"
       )
-        Check.w-4.h-4.mr-1
-        | Зафиксировать
+        span.loading.loading-spinner.loading-xs(v-if="isSavingReturn")
+        Check.w-4.h-4.mr-1(v-else)
+        | {{ isSavingReturn ? 'Сохранение...' : 'Зафиксировать' }}
 
   form.modal-backdrop(
     class="bg-black/40 backdrop-blur-sm"
-    @click="isReturnModalOpen = false"
+    @click="!isSavingReturn && (isReturnModalOpen = false)"
   )
     button close
 
 //- 4. Модалка Редактирования записи
+//- [UX] «Удалить» отделён от «Отмена/Сохранить» (деструктив не рядом)
 dialog.modal.modal-open(
   v-if="isEditJournalOpen"
 )
   .modal-box.max-w-xs.p-0.overflow-hidden(
     class="bg-base-100 shadow-2xl border border-base-200/50 rounded-xl"
   )
-    //- Header — единый паттерн
     .flex.justify-between.items-center.p-3(
       class="bg-base-200/50 border-base-200 border-b"
     )
@@ -421,26 +418,32 @@ dialog.modal.modal-open(
             placeholder="Заметка"
           )
 
-    .modal-action.p-3(
+    //- [UX] футер: Сохранить справа, Отмена рядом, Удалить — ОСОБОЙ строкой
+    //- ниже, отделён (нельзя промахнуться с «Отмены» на «Удалить»)
+    .p-3(
       class="bg-base-200/30 border-base-200 border-t"
     )
-      button.btn.btn-error.btn-sm(
-        type="button"
-        @click="handleDeleteEntry"
-      )
-        Trash2.w-4.h-4.mr-1
-        | Удалить
-      .flex.gap-2
+      .modal-action
         button.btn.btn-ghost.btn-sm(
           type="button"
           @click="isEditJournalOpen = false"
         ) Отмена
         button.btn.btn-primary.btn-sm(
           type="button"
+          :disabled="isSavingEdit"
           @click="handleSaveEdit"
         )
-          Save.w-4.h-4.mr-1
-          | Сохранить
+          span.loading.loading-spinner.loading-xs(v-if="isSavingEdit")
+          Save.w-4.h-4.mr-1(v-else)
+          | {{ isSavingEdit ? 'Сохранение...' : 'Сохранить' }}
+
+      button.btn.btn-ghost.btn-sm.btn-block.mt-2(
+        type="button"
+        class="hover:bg-error/10 text-error/70 hover:text-error"
+        @click="handleDeleteEntry"
+      )
+        Trash2.w-4.h-4.mr-1
+        | Удалить запись
 
   form.modal-backdrop(
     class="bg-black/40 backdrop-blur-sm"
@@ -522,6 +525,9 @@ const {
   suggestedVehicles,
   availableVehicles,
   isWalkingSelected,
+  isSavingExit,
+  isSavingReturn,
+  isSavingEdit,
   openPersonCard,
   openExitModal,
   handleSaveExit,
@@ -579,11 +585,11 @@ const setSort = (field: string) => {
 
 const handleGroupClick = () => {
   if (displayMode.value === 'group' && sortField.value === 'date') {
-    sortOrder.value *= -1
+    sortOrder.value = sortOrder.value * -1
   } else {
     displayMode.value = 'group'
     sortField.value = 'date'
-    sortOrder.value = -1
+    sortOrder.value = -1 // новые дни сверху
   }
 }
 

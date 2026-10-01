@@ -2,9 +2,19 @@
 // Назначение: Логика управления модальными окнами и действиями на странице журнала.
 // Обрабатывает выход, возврат, редактирование и удаление записей.
 // При любом изменении журнала вызывает integration.reloadJournal() для синхронизации с симулятором.
-// [UI/UX] нативный confirm в handleDeleteEntry заменён на ConfirmDialog;
-// удаление — с тостом результата. process.client -> import.meta.client.
-// [FIX] handleGroupAction: потерянный else между ветками exit/enter.
+//
+// [UI/UX Фаза 2 — аудит действий]:
+//  1. [FIX] тосты + try/catch во ВСЕХ save-действиях (раньше ошибка БД
+//     закрывала модалку молча — данные не сохранялись, пользователь не знал);
+//  2. [FIX] защита от двойной фиксации: saving-флаги (двойной клик создавал
+//     дублирующие записи выезда);
+//  3. [UX] ConfirmDialog при удалении — предупреждает о попутчиках группы;
+//
+// [FIX] АВТОРСТВО ЗАПИСЕЙ: точки создания/редактирования не писали
+// created_by/updated_by — мета-дропдаун «Создано/Автор» в JournalTable
+// всегда был пустым. Теперь автор = дежурный текущей смены (useShift).
+// Бонус-фикс: в ветке exit->addItem отсутствовал created_at — такие записи
+// пропадали из группировки «По дням» (groupedRows отсекал записи без даты).
 
 import { ref, computed, reactive, watch } from 'vue'
 import { useState } from '#imports'
@@ -14,6 +24,7 @@ import { useFamily } from './useFamily'
 import { useSimulatorIntegration } from './useSimulatorIntegration'
 import { useConfirm } from './useConfirm'
 import { useToast } from './useToast'
+import { useShift } from './useShift'
 
 const STORAGE_KEY_WIDTHS = 'journal-column-widths'
 
@@ -24,12 +35,21 @@ export const useJournalPage = () => {
   const integration = useSimulatorIntegration()
   const { confirmDialog } = useConfirm()
   const toast = useToast()
+  const { currentShift } = useShift()
+
+  /** Автор действия — дежурный текущей смены (null, если смена не принята) */
+  const currentAuthor = () => currentShift.value?.guard_name || null
 
   // --- Состояния модальных окон ---
   const isExitModalOpen = ref(false)
   const isReturnModalOpen = ref(false)
   const isEditJournalOpen = ref(false)
   const isPersonDetailOpen = ref(false)
+
+  // --- [FIX] флаги сохранения — защита от двойной фиксации ---
+  const isSavingExit = ref(false)
+  const isSavingReturn = ref(false)
+  const isSavingEdit = ref(false)
 
   // --- Выбранная запись (общая через useState) ---
   // Тип: запись журнала или undefined. Используется в v-model:selectedItem для JournalSidebar.
@@ -42,6 +62,7 @@ export const useJournalPage = () => {
   const exitForm = reactive({
     id: null as number | null,
     person_id: null as number | null,
+    person_fio: '',       // [UX] ФИО — для шапки модалки выезда
     destination: '',
     vehicle_out: '',
     groupCandidates: [] as any[],
@@ -155,12 +176,14 @@ export const useJournalPage = () => {
    * Открывает модалку выхода.
    * Запоминает person_id и транспорт, на котором человек въехал (если есть),
    * чтобы создать новую запись выхода с этими данными.
+   * [UX] попутчики помечаются isChild — для подсветки в модалке.
    */
   const openExitModal = (entry: any) => {
     if (!entry) return
 
     exitForm.id = entry.id
     exitForm.person_id = entry.person_id
+    exitForm.person_fio = entry.person_fio || ''   // [UX] для шапки модалки
     exitForm.vehicle_out = entry.vehicle_in || '🚶 Пеш.'
     exitForm.destination = entry.destination || ''
     exitForm.selectedGroupIds = []
@@ -169,10 +192,12 @@ export const useJournalPage = () => {
       row.timestamp_in && !row.timestamp_out && row.id !== entry.id
     )
 
-    exitForm.groupCandidates = activeEntries.map((row: any) => ({
-      id: row.id,
-      fio: row.person_fio
-    }))
+    // [UX] попутчики: помечаем детей — чтобы охранник видел, кого отмечает
+    exitForm.groupCandidates = activeEntries.map((row: any) => {
+      const person = peopleList.value.find((p: any) => String(p.id) === String(row.person_id))
+      const isChild = person?.category === 'Ребенок' || person?.is_child === true || String(person?.fio).startsWith('+')
+      return { id: row.id, fio: row.person_fio, isChild }
+    })
 
     isExitModalOpen.value = true
   }
@@ -180,50 +205,71 @@ export const useJournalPage = () => {
   /**
    * Сохраняет выход путём создания НОВОЙ записи.
    * Не изменяет существующую запись входа.
+   * [FIX] try/catch + тост + saving-флаг (защита от двойной фиксации).
+   * [FIX] created_by/created_at пишутся во все создаваемые записи.
    */
   const handleSaveExit = async () => {
     if (!exitForm.person_id) return
-    const timestamp = Date.now()
+    if (isSavingExit.value) return   // [FIX] двойной клик
+    isSavingExit.value = true
 
-    const saveOneExit = async (personId: number, vehiclePlate: string, destination: string) => {
-      // 1. Ищем активную запись ВХОДА (есть timestamp_in, нет timestamp_out)
-      const activeEntry = processedJournal.value.find(
-        (e: any) => String(e.person_id) === String(personId) && e.timestamp_in && !e.timestamp_out
-      )
-      if (activeEntry) {
-        // Закрываем её – добавляем timestamp_out и транспорт выезда
-        await updateItem('journal', {
-          id: activeEntry.id,
-          timestamp_out: timestamp,
-          vehicle_out: vehiclePlate,
-          destination: destination || activeEntry.destination,
-        })
-      } else {
-        // Нет активного входа – создаём запись только с выходом (человек был снаружи)
-        await addItem('journal', {
-          person_id: personId,
-          timestamp_out: timestamp,
-          vehicle_out: vehiclePlate,
-          destination: destination || '',
-          created_at: timestamp,
-        })
+    try {
+      const timestamp = Date.now()
+      const author = currentAuthor()
+
+      const saveOneExit = async (personId: number, vehiclePlate: string, destination: string) => {
+        // 1. Ищем активную запись ВХОДА (есть timestamp_in, нет timestamp_out)
+        const activeEntry = processedJournal.value.find(
+          (e: any) => String(e.person_id) === String(personId) && e.timestamp_in && !e.timestamp_out
+        )
+        if (activeEntry) {
+          // Закрываем её – добавляем timestamp_out и транспорт выезда
+          await updateItem('journal', {
+            id: activeEntry.id,
+            timestamp_out: timestamp,
+            vehicle_out: vehiclePlate,
+            destination: destination || activeEntry.destination,
+            created_by: activeEntry.created_by || author,   // [FIX] если вход создан без автора — дописываем
+          })
+        } else {
+          // Нет активного входа – создаём запись только с выходом
+          await addItem('journal', {
+            person_id: personId,
+            timestamp_out: timestamp,
+            vehicle_out: vehiclePlate,
+            destination: destination || '',
+            created_by: author,      // [FIX] автор
+            created_at: timestamp,   // [FIX] дата (для группировки «По дням»)
+          })
+        }
       }
-    }
 
-    // Сохраняем выход для основного человека
-    await saveOneExit(exitForm.person_id, exitForm.vehicle_out || '🚶 Пеш.', exitForm.destination || '')
+      // Сохраняем выход для основного человека
+      await saveOneExit(exitForm.person_id, exitForm.vehicle_out || '🚶 Пеш.', exitForm.destination || '')
 
-    // Сохраняем выход для попутчиков
-    for (const companionJournalId of exitForm.selectedGroupIds) {
-      const companionEntry = processedJournal.value.find((e: any) => e.id === companionJournalId)
-      if (companionEntry) {
-        await saveOneExit(companionEntry.person_id, exitForm.vehicle_out || '🚶 Пеш.', exitForm.destination || '')
+      // Сохраняем выход для попутчиков
+      for (const companionJournalId of exitForm.selectedGroupIds) {
+        const companionEntry = processedJournal.value.find((e: any) => e.id === companionJournalId)
+        if (companionEntry) {
+          await saveOneExit(companionEntry.person_id, exitForm.vehicle_out || '🚶 Пеш.', exitForm.destination || '')
+        }
       }
-    }
 
-    isExitModalOpen.value = false
-    await loadJournalData()
-    await integration.reloadJournal()
+      isExitModalOpen.value = false
+      // [UX] сводка: кто и сколько
+      const groupCount = exitForm.selectedGroupIds.length
+      toast.success(exitForm.person_fio
+        ? `Выезд зафиксирован: ${exitForm.person_fio}${groupCount ? ` + ${groupCount} попутчик(ов)` : ''}`
+        : 'Выезд зафиксирован')
+      await loadJournalData()
+      await integration.reloadJournal()
+    } catch (e: any) {
+      console.error('[useJournalPage] Save exit error:', e)
+      // [UX] ошибка БД — модалка ОСТАЁТСЯ открытой, данные формы целы
+      toast.error('Не удалось зафиксировать выезд: ' + (e?.message || 'ошибка базы'))
+    } finally {
+      isSavingExit.value = false
+    }
   }
 
   /**
@@ -263,31 +309,50 @@ export const useJournalPage = () => {
 
   /**
    * Сохраняет возврат путём обновления существующей записи выхода.
+   * [FIX] try/catch + тост + saving-флаг; updated_by/updated_at.
    */
   const handleSaveReturn = async () => {
     if (!returnForm.id) return
+    if (isSavingReturn.value) return   // [FIX] двойной клик
+    isSavingReturn.value = true
 
-    const timestamp = Date.now()
-    const vehicle = returnForm.vehicle_in || '🚶 Пеш.'
+    try {
+      const timestamp = Date.now()
+      const vehicle = returnForm.vehicle_in || '🚶 Пеш.'
+      const author = currentAuthor()
 
-    await updateItem('journal', {
-      id: returnForm.id,
-      timestamp_in: timestamp,
-      vehicle_in: vehicle,
-      note: returnForm.note
-    })
-
-    for (const companionJournalId of returnForm.selectedGroupIds) {
       await updateItem('journal', {
-        id: companionJournalId,
+        id: returnForm.id,
         timestamp_in: timestamp,
-        vehicle_in: vehicle
+        vehicle_in: vehicle,
+        note: returnForm.note,
+        updated_by: author,    // [FIX] редактор
+        updated_at: timestamp, // [FIX] время правки
       })
-    }
 
-    isReturnModalOpen.value = false
-    await loadJournalData()
-    await integration.reloadJournal()
+      for (const companionJournalId of returnForm.selectedGroupIds) {
+        await updateItem('journal', {
+          id: companionJournalId,
+          timestamp_in: timestamp,
+          vehicle_in: vehicle,
+          updated_by: author,    // [FIX]
+          updated_at: timestamp, // [FIX]
+        })
+      }
+
+      isReturnModalOpen.value = false
+      const groupCount = returnForm.selectedGroupIds.length
+      toast.success(returnForm.person_fio
+        ? `Возврат зафиксирован: ${returnForm.person_fio}${groupCount ? ` + ${groupCount} попутчик(ов)` : ''}`
+        : 'Возврат зафиксирован')
+      await loadJournalData()
+      await integration.reloadJournal()
+    } catch (e: any) {
+      console.error('[useJournalPage] Save return error:', e)
+      toast.error('Не удалось зафиксировать возврат: ' + (e?.message || 'ошибка базы'))
+    } finally {
+      isSavingReturn.value = false
+    }
   }
 
   const selectAllReturnCandidates = () => {
@@ -310,29 +375,53 @@ export const useJournalPage = () => {
 
   /**
    * Сохраняет изменения в записи.
+   * [FIX] try/catch + тост + saving-флаг + updated_by/updated_at.
    */
   const handleSaveEdit = async () => {
     if (!editForm.id) return
-    await updateItem('journal', {
-      id: editForm.id,
-      destination: editForm.destination,
-      note: editForm.note
-    })
-    isEditJournalOpen.value = false
-    await loadJournalData()
-    await integration.reloadJournal()
+    if (isSavingEdit.value) return
+    isSavingEdit.value = true
+
+    try {
+      await updateItem('journal', {
+        id: editForm.id,
+        destination: editForm.destination,
+        note: editForm.note,
+        updated_by: currentAuthor(),  // [FIX] редактор
+        updated_at: Date.now(),       // [FIX] время правки
+      })
+      isEditJournalOpen.value = false
+      toast.success('Запись обновлена')
+      await loadJournalData()
+      await integration.reloadJournal()
+    } catch (e: any) {
+      console.error('[useJournalPage] Save edit error:', e)
+      toast.error('Не удалось обновить запись: ' + (e?.message || 'ошибка базы'))
+    } finally {
+      isSavingEdit.value = false
+    }
   }
 
   /**
    * Удаляет запись.
-   * [UI/UX] нативный confirm -> ConfirmDialog; результат — тост.
+   * [UX] ConfirmDialog: при активном выезде с группой — предупреждает о попутчиках.
    */
   const handleDeleteEntry = async () => {
     if (!editForm.id) return
 
+    // Если запись — чей-то активный выезд, ищем попутчиков той же поездки
+    const entry = processedJournal.value.find((e: any) => e.id === editForm.id)
+    const hasActiveGroup = entry?.timestamp_out && !entry.timestamp_in &&
+      processedJournal.value.some((e: any) =>
+        e.id !== editForm.id && e.timestamp_out && !e.timestamp_in &&
+        Math.abs(new Date(e.timestamp_out).getTime() - new Date(entry.timestamp_out).getTime()) < 60000
+      )
+
     const ok = await confirmDialog({
       title: 'Удалить запись журнала?',
-      message: 'Запись о въезде/выезде будет удалена безвозвратно. Статус человека пересчитается.',
+      message: hasActiveGroup
+        ? 'Это активный выезд с попутчиками. Будет удалена только эта запись — попутчики останутся «снаружи».'
+        : 'Запись о въезде/выезде будет удалена безвозвратно. Статус человека пересчитается.',
       confirmLabel: 'Удалить',
       danger: true
     })
@@ -371,6 +460,8 @@ export const useJournalPage = () => {
 
   /**
    * Групповое действие (универсальное для выхода/входа).
+   * [FIX] тосты результата; created_by/created_at/updated_by — во все записи;
+   * [FIX] потерянный else между ветками exit/enter.
    */
   const handleGroupAction = async (payload: any) => {
     const { mainPerson, passengers, vehicle, actionKey, destination, note } = payload
@@ -380,6 +471,7 @@ export const useJournalPage = () => {
     const everyone = [mainPerson, ...(passengers || [])]
     const timestamp = Date.now()
     const vehiclePlate = vehicle?.plate || ''
+    const author = currentAuthor()
 
     try {
       if (actionKey === 'exit') {
@@ -391,7 +483,8 @@ export const useJournalPage = () => {
             await updateItem('journal', {
               id: existingExit.id,
               vehicle_out: vehiclePlate,
-              destination: destination || existingExit.destination
+              destination: destination || existingExit.destination,
+              created_by: existingExit.created_by || author,   // [FIX] автор выхода
             })
           } else {
             const newEntry = {
@@ -399,14 +492,15 @@ export const useJournalPage = () => {
               timestamp_out: timestamp,
               vehicle_out: vehiclePlate,
               destination: destination || '',
-              note: note || ''
+              note: note || '',
+              created_by: author,    // [FIX] автор
+              created_at: timestamp, // [FIX] дата (группировка «По дням»)
             }
             await addItem('journal', newEntry)
           }
         }
       } else if (actionKey === 'enter') {
-        // [FIX] был потерян else: две независимые if — при 'exit' вторая
-        // всё равно вычислялась (безвредно, но некорректно по смыслу)
+        // [FIX] был потерян else — ветки выполнялись независимо
         for (const person of everyone) {
           const activeEntry = processedJournal.value.find((e: any) =>
             String(e.person_id) === String(person.id) && e.timestamp_out && !e.timestamp_in
@@ -416,7 +510,9 @@ export const useJournalPage = () => {
               id: activeEntry.id,
               timestamp_in: timestamp,
               vehicle_in: vehiclePlate,
-              note: note || activeEntry.note
+              note: note || activeEntry.note,
+              updated_by: author,    // [FIX] редактор
+              updated_at: timestamp, // [FIX]
             })
           } else {
             await addItem('journal', {
@@ -424,11 +520,19 @@ export const useJournalPage = () => {
               timestamp_in: timestamp,
               vehicle_in: vehiclePlate,
               destination: destination || '',
-              note: note || ''
+              note: note || '',
+              created_by: author,    // [FIX] автор
+              created_at: timestamp, // [FIX]
             })
           }
         }
       }
+      // [UX] тост результата группы
+      const n = everyone.length
+      const who = n === 1 ? (mainPerson.fio_short || mainPerson.fio || 'человек') : `${n} чел.`
+      toast.success(actionKey === 'exit'
+        ? `Выезд: ${who}${vehiclePlate ? ` (${vehiclePlate})` : ''}`
+        : `Въезд: ${who}${vehiclePlate ? ` (${vehiclePlate})` : ''}`)
     } catch (e) {
       console.error('[useJournalPage] Ошибка сохранения группы', e)
       toast.error('Ошибка сохранения поездки')
@@ -456,6 +560,9 @@ export const useJournalPage = () => {
     suggestedVehicles: computed(() => []), // [ТЕХДОЛГ] заглушка — потребитель index.vue
     availableVehicles,
     isWalkingSelected,
+    isSavingExit,        // [ДОБАВЛЕНО] защита от двойной фиксации
+    isSavingReturn,      // [ДОБАВЛЕНО]
+    isSavingEdit,        // [ДОБАВЛЕНО]
     selectedItem,
     columnWidths,
 
