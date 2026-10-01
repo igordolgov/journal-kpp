@@ -29,7 +29,7 @@ import { useShift } from './useShift'
 const STORAGE_KEY_WIDTHS = 'journal-column-widths'
 
 export const useJournalPage = () => {
-  const { getAllItems, updateItem, addItem, deleteItem } = useDatabase()
+  const { getAllItems, updateItem, addItem, deleteItem, getItem } = useDatabase()
   const { processedJournal, loadData: loadJournalData, getCompanions } = useJournal()
   const { getFullFamily } = useFamily()
   const integration = useSimulatorIntegration()
@@ -439,15 +439,32 @@ export const useJournalPage = () => {
     }
   }
 
-  /**
+    /**
    * Открывает карточку человека.
+   * [FIX Фаза 3] перечитываем запись из БД: раньше брали из кэша peopleList,
+   * и свежесохранённые поля (position/department) не показывались до F5.
    */
-  const openPersonCard = (personId: number) => {
+  const openPersonCard = async (personId: number) => {
     if (!personId) return
-    const person = peopleList.value.find(p => p.id === personId)
-    if (person) {
-      detailPerson.value = person
-      isPersonDetailOpen.value = true
+    try {
+      // Свежая копия из БД — источник истины
+      const fresh = await getItem('people', personId)
+      const person = fresh || peopleList.value.find(p => p.id === personId)
+      if (person) {
+        // Обновляем кэш, чтобы следующие открытия не мерцали старым
+        const idx = peopleList.value.findIndex(p => p.id === personId)
+        if (idx !== -1 && fresh) peopleList.value[idx] = fresh
+        detailPerson.value = person
+        isPersonDetailOpen.value = true
+      }
+    } catch (e) {
+      console.error('[useJournalPage] openPersonCard error:', e)
+      // Фолбэк на кэш, если БД недоступна
+      const person = peopleList.value.find(p => p.id === personId)
+      if (person) {
+        detailPerson.value = person
+        isPersonDetailOpen.value = true
+      }
     }
   }
 

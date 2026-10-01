@@ -10,9 +10,8 @@
     template(#actions)
       button.btn.btn-primary(@click="openCreatePerson") + Человек
 
-  //- Панель управления: поиск (кнопка создания перенесена в шапку страницы)
+  //- Панель управления: поиск
   .flex.flex-none.gap-2.pr-3
-    //- Поле поиска
     .form-control.relative.flex-1
       svg.absolute.h-4.w-4.text-gray-400.pointer-events-none(
         fill="none" stroke="currentColor" viewBox="0 0 24 24"
@@ -108,6 +107,57 @@
             td.p-2.text-gray-400
               span(v-html="highlightText(p.phone || '-', highlights[p.id]?.phone)")
 
+          //- ==========================================
+          //- ТРАНСПОРТ БЕЗ ВЛАДЕЛЬЦА (вариант А):
+          //- строки в ТОЙ ЖЕ таблице, внизу, после людей.
+          //- Появляются после удаления человека (owner_id обнулён).
+          //- Плашки кликабельны — открывают редактирование ТС.
+          //- ==========================================
+          template(v-if="visibleOrphanVehicles.length")
+            tr.bg-base-200.border-t-4.border-base-300
+              td.p-2(colspan="100%")
+                span.inline-flex.items-center.gap-2(
+                  class="text-warning"
+                )
+                  TriangleAlert.w-4.h-4
+                  span.heading-eyebrow Транспорт без владельца
+                .badge.badge-sm.badge-warning.ml-2 {{ visibleOrphanVehicles.length }}
+            tr.hover(
+              v-for="v in visibleOrphanVehicles"
+              :key="'veh_' + v.id"
+            )
+              td.p-2
+                span.font-medium.cursor-pointer.inline-flex.items-center.gap-1(
+                  class="hover:underline"
+                  @click="openEditVehicle(v)"
+                )
+                  Car.w-4.h-4(class="opacity-60")
+                  | Без владельца
+
+              td.p-2
+                span Транспорт
+
+              td.p-2
+                span.text-base-content.opacity-30 —
+
+              td.p-2
+                span.text-base-content.opacity-30 —
+
+              td.p-2
+                .badge.badge-lg.gap-1.cursor-pointer.transition-transform(
+                  title="Нажмите для редактирования"
+                  class="hover:scale-105"
+                  @click="openEditVehicle(v)"
+                )
+                  span.pl-2.pr-1.text-center.font-semibold.text-black.bg-neutral-400.border-2.border-gray-500.rounded-sm(
+                    class="w-23 h-6.5"
+                    v-html="formatPlate(v.plate)"
+                  )
+                span.pt-1.ml-2.text-xs.text-gray-500(v-if="v.model") {{ v.model }}
+
+              td.p-2.text-gray-400
+                span.text-base-content.opacity-30 —
+
   //- МОДАЛЬНЫЕ ОКНА
   DatabasePersonDetailModal(
     :is-open="isPersonDetailOpen"
@@ -153,8 +203,8 @@
 <script setup lang="ts">
 // app/pages/database.vue — script
 // База данных: поиск (Fuse), таблица, модалки, сидер аватаров, миграции.
-// [UI/UX] alert() заменены на тосты; нативные confirm() временно остаются —
-// их заменит ConfirmDialog (следующий шаг Фазы 0).
+// [Фаза 3]: бесхозные ТС — строками в основной таблице (visibleOrphanVehicles);
+// чистка ТС при удалении человека (вариант А: owner_id -> null, допуски сняты).
 import { useDatabase } from '~/composables/useDatabase'
 import { useJournal } from '~/composables/useJournal'
 import { useConfig } from '~/composables/useConfig'
@@ -162,7 +212,8 @@ import { useCompanions } from '~/composables/useCompanions'
 import { useToast } from '~/composables/useToast'
 import { onMounted, ref, computed, watch, nextTick } from 'vue'
 import Fuse from 'fuse.js'
-import { useConfirm } from '~/composables/useConfirm' 
+import { useConfirm } from '~/composables/useConfirm'
+import { TriangleAlert, Car } from '@lucide/vue'
 
 const { confirmDialog } = useConfirm()
 const { getDb } = useDatabase()
@@ -203,8 +254,7 @@ let fuseVehicles: Fuse<any> | null = null
 // ГЕНЕРАТОР
 // =========================================================================
 
-// non-null assertion: вызывается только с константными непустыми
-// сид-массивами (EUROPEAN_SKIN_TONES и т.п.), undefined там невозможен
+// non-null assertion: вызывается только с константными непустыми сид-массивами
 const randomFrom = <T,>(arr: readonly T[]): T => arr[Math.floor(Math.random() * arr.length)]!
 
 const EUROPEAN_SKIN_TONES = ['#FDE8D0', '#FDE2C8', '#FDDCB5', '#F8D5B0', '#F5D0A9', '#EDCAAB', '#E8C4A0', '#E3BE96'] as const
@@ -309,7 +359,6 @@ const loadAllData = async () => {
     await seedMissingAvatars()
   } catch (error) {
     console.error('Ошибка загрузки данных:', error)
-    // [UI/UX] пользователь узнаёт о проблеме без консоли
     toast.error('Ошибка загрузки базы данных')
   }
 }
@@ -325,22 +374,19 @@ const migrateFamilyLocationsAndStatus = async () => {
   const heads = allPeopleList.value.filter(p => !p.main_family_id)
   const children = allPeopleList.value.filter(p => !!p.main_family_id)
 
-  // Карта: ID главы семьи -> валидное проживание
   const familyLocations = new Map<number, string>()
   let updatedCount = 0
 
-  // 1. Сначала валидируем глав семей
+  // 1. Валидируем глав семей
   for (const head of heads) {
     let currentLoc = head.location
     let currentStatus = head.status === undefined ? null : head.status
 
-    // Если в location затесался статус
     if (TEMP_STATUSES.includes(currentLoc)) {
       currentStatus = currentLoc
       currentLoc = DEFAULT_LOCATION
     }
 
-    // Защита от мусора
     if (!VALID_LOCATIONS.includes(currentLoc)) {
       currentLoc = DEFAULT_LOCATION
     }
@@ -355,10 +401,9 @@ const migrateFamilyLocationsAndStatus = async () => {
     }
   }
 
-  // 2. Принудительно применяем проживание главы ко всем членам семьи
+  // 2. Проживание главы — ко всем членам семьи
   for (const child of children) {
     const familyId = child.main_family_id
-    // Берем проживание семьи. Если глава удален (сирота), дефолтное
     const familyLoc = familyLocations.get(familyId) || DEFAULT_LOCATION
 
     let currentStatus = child.status === undefined ? null : child.status
@@ -366,7 +411,6 @@ const migrateFamilyLocationsAndStatus = async () => {
       currentStatus = child.location
     }
 
-    // ЖЕСТКОЕ ПРАВИЛО: проживание ребенка всегда равно проживанию главы
     if (child.location !== familyLoc || child.status !== currentStatus) {
       const updates = { ...child, location: familyLoc, status: currentStatus }
       await updateItem('people', updates)
@@ -462,6 +506,21 @@ const vehiclesByOwner = computed(() => {
 })
 const getVehiclesForPerson = (id: number) => vehiclesByOwner.value.get(id) || []
 
+// --- ТС без владельца (вариант А) ---
+const orphanVehicles = computed(() =>
+  vehiclesList.value.filter(v => v.owner_id == null)
+)
+
+// Бесхозные ТС с учётом поиска (по номеру/модели)
+const visibleOrphanVehicles = computed(() => {
+  const q = debouncedQuery.value.trim().toLowerCase()
+  if (!q) return orphanVehicles.value
+  return orphanVehicles.value.filter(v =>
+    String(v.plate || '').toLowerCase().includes(q) ||
+    String(v.model || '').toLowerCase().includes(q)
+  )
+})
+
 // --- Computed Properties ---
 const adultPeopleList = computed(() => allPeopleList.value.filter(p => !isChild(p)))
 
@@ -481,12 +540,12 @@ watch(searchResults, (res) => {
 })
 
 const processedResults = computed(() => {
-  // 1. БАЗОВЫЙ ФИЛЬТР: только "Доступен" или пустой статус (доступен по умолчанию)
+  // 1. БАЗОВЫЙ ФИЛЬТР: только "Доступен" или пустой статус
   let baseList = allPeopleList.value.filter(p => !p.status || p.status === 'Доступен')
 
   const q = debouncedQuery.value.trim()
 
-  // 2. ПОИСК: фильтруем по тексту строго внутри доступных людей
+  // 2. ПОИСК: строго внутри доступных людей
   if (q) {
     const foundIds = new Set<number>()
     searchResults.value.people.forEach(r => foundIds.add(r.item.id))
@@ -557,12 +616,9 @@ const setSort = (field: string) => { if (sortField.value === field) sortOrder.va
 // --- Actions ---
 const openPersonDetail = (person: any) => { detailPerson.value = person; isPersonDetailOpen.value = true }
 const handleOpenRelative = (personId: string | number) => {
-  // Ищем человека по ID в общем списке
   const relative = allPeopleList.value.find(p => String(p.id) === String(personId))
 
   if (relative) {
-    // Подменяем человека в детальной карточке; модалка не закрывается,
-    // матрица семьи пересчитывается реактивно
     detailPerson.value = relative
   } else {
     console.warn(`Родственник с ID ${personId} не найден в базе.`)
@@ -578,7 +634,7 @@ const handleSavePerson = async (formData: any) => {
   const payload = { ...formData }; if (!payload.main_family_id) payload.relation = ''
 
   // СОХРАНЕНИЕ СЕМЕЙНОГО ПРАВИЛА: у члена семьи location перезаписывается
-  // от главы семьи, чтобы пользователь не сломал логику вручную
+  // от главы семьи
   if (payload.main_family_id) {
     const head = allPeopleList.value.find(p => p.id === payload.main_family_id)
     if (head) {
@@ -598,16 +654,36 @@ const handleDeletePerson = async (id: number) => {
     console.error('[DB] Попытка удаления без id. detailPerson:', detailPerson.value)
     return
   }
-  // [UI/UX] нативный confirm -> ConfirmDialog
   const ok = await confirmDialog({
     title: 'Удалить человека?',
-    message: 'Запись будет удалена безвозвратно. Транспорт останется в базе, но потеряет владельца.',
+    message: 'Запись будет удалена безвозвратно. Его транспорт останется в базе без владельца, допуски будут сняты.',
     confirmLabel: 'Удалить',
     danger: true
   })
   if (!ok) return
   try {
     await deleteItem('people', id)
+
+    // [Фаза 3, вариант А] чистка транспорта удалённого человека:
+    // owner_id -> null, человек убирается из допущенных водителей.
+    const vehicles = await getAllItems('vehicles')
+    for (const v of vehicles) {
+      let changed = false
+      const updates: any = { id: v.id }
+
+      if (v.owner_id === id) {
+        updates.owner_id = null
+        updates.owner_name = 'Неизвестно'
+        changed = true
+      }
+      if (Array.isArray(v.allowed_driver_ids) && v.allowed_driver_ids.includes(id)) {
+        updates.allowed_driver_ids = v.allowed_driver_ids.filter((d: number) => d !== id)
+        changed = true
+      }
+
+      if (changed) await updateItem('vehicles', updates)
+    }
+
     isPersonDetailOpen.value = false
     toast.success('Запись удалена')
     await loadAllData()
@@ -641,7 +717,6 @@ const handleSaveVehicle = async (formData: any) => {
 
 const handleDeleteVehicle = async (id: number) => {
   if (!id) return
-  // [UI/UX] нативный confirm -> ConfirmDialog
   const ok = await confirmDialog({
     title: 'Удалить транспорт?',
     message: 'Запись будет удалена безвозвратно.',

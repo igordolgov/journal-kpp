@@ -1,31 +1,46 @@
 <!-- app/components/database/VehicleFormModal.vue -->
-<!-- Модальное окно: Создание/Редактирование транспортного средства. -->
-
+<!-- Модальное окно: Создание/Редактирование транспортного средства.
+    [UI/UX Фаза 3]:
+      1. Единый паттерн: шапка (кружок-иконка + тайтл + X), футер (Отмена/Сохранить);
+      2. [FIX] поле id в форме (шаблон использует form.id для emit('delete'));
+      3. [UX] владелец автоматически добавляется в допущенные водители
+        при смене владельца;
+      4. Валидация тостами; type-only props; Lucide. -->
 <template lang="pug">
 dialog.modal(
   v-if="isOpen"
   class="modal-open"
 )
-  .modal-box.max-w-lg.p-0.overflow-hidden.rounded-lg.bg-base-200
-    //- HEADER
-    .flex.items-center.justify-between.p-4.bg-primary.text-white
-      .flex.items-center.gap-3
-        .text-5xl 🚗
-        div
-          h2.text-2xl.font-bold
+  .modal-box.max-w-lg.p-0.overflow-hidden.rounded-xl(
+    class="bg-base-100 shadow-2xl border border-base-200/50"
+  )
+    //- HEADER — единый паттерн
+    .flex.items-center.justify-between.p-3(
+      class="bg-base-200/50 border-base-200 border-b"
+    )
+      .flex.items-center.gap-2.min-w-0
+        .w-8.h-8.rounded-full.flex.items-center.justify-center.shrink-0(
+          class="bg-primary/10 text-primary"
+        )
+          Car.w-4.h-4
+        div.min-w-0
+          h3.text-base.font-bold.truncate
             | {{ form.plate || 'Новый авто' }}
-          p.text-sm(
-            class="text-white/80"
+          p.text-xs(
+            class="text-base-content/60"
           )
             | {{ form.model || 'Модель не указана' }}
-      button.btn.btn-circle.btn-sm.btn-ghost.text-white(
+      button.btn.btn-ghost.btn-circle.btn-xs(
         type="button"
         @click="$emit('close')"
+        aria-label="Закрыть"
       )
-        | ✕
+        X.w-4.h-4
 
     //- BODY
-    .p-6.pb-1.space-y-4
+    form.p-4.space-y-4(
+      @submit.prevent="onSave"
+    )
       .grid.grid-cols-2.gap-4
         .form-control
           label.label
@@ -33,6 +48,7 @@ dialog.modal(
           input.input.w-full.input-bordered.input-md(
             v-model="form.plate"
             placeholder="А 000 АА 00"
+            class="font-mono uppercase"
           )
         .form-control
           label.label
@@ -55,6 +71,10 @@ dialog.modal(
         .form-control
           label.label
             span.label-text.font-semibold Владелец
+            UiAppHint(
+              text="Владелец автоматически добавляется в список допущенных водителей."
+              side="top"
+            )
           select.select.w-full.select-bordered.select-md(
             v-model="form.owner_id"
           )
@@ -68,7 +88,7 @@ dialog.modal(
               | {{ p.fio_short || p.fio }} ({{ p.category }})
 
       //- Секция: Допущенные водители
-      .divider.mt-6
+      .divider.mt-2
         | Допущенные водители
 
       .p-3.min-h-1.transition-all.rounded-box.border-2.border-dashed.border-base-300.bg-base-200(
@@ -84,19 +104,10 @@ dialog.modal(
               button.btn.btn-ghost.btn-xs.p-0.w-4.h-4(
                 type="button"
                 @click.prevent="removeDriver(driver.id)"
+                :aria-label="`Убрать ${driver.fio}`"
               )
-                svg.h-3.w-3(
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                )
-                  path(
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="3"
-                    d="M6 18L18 6M6 6l12 12"
-                  )
-        .text-sm.text-gray-400(v-else)
+                X.w-3.h-3
+        .text-sm(class="text-base-content/50" v-else)
           | Нет допущенных водителей
 
       //- Добавление водителя (Поиск)
@@ -115,53 +126,45 @@ dialog.modal(
           .absolute.left-0.right-0.top-full.mt-1.shadow.z-50.max-h-48.overflow-y-auto.rounded-box.bg-base-100(
             v-if="foundDrivers.length"
           )
-            ul.menu.menu-compact.w-full.bg-base-100
+            ul.menu.menu-sm.w-full.bg-base-100
               li(
                 v-for="p in foundDrivers"
                 :key="p.id"
               )
                 a(@click="addDriver(p)")
-                  | 👤 {{ p.fio }}
+                  UserRound.w-4.h-4.mr-1.inline
+                  | {{ p.fio }}
 
-    //- FOOTER
-    .flex.items-center.gap-2.p-4.m-2.border-t.border-base-300.bg-base-200
-      button.btn.btn-sm.btn-ghost.text-error.gap-1(
+      //- FOOTER — единый паттерн
+      .flex.justify-end.gap-2.p-3(
+        class="bg-base-200/30 border-base-200 border-t"
+      )
+        button.btn.btn-ghost(
+          type="button"
+          @click="$emit('close')"
+        ) Отмена
+        button.btn.btn-primary(
+          type="submit"
+        )
+          Save.w-4.h-4.mr-1
+          | Сохранить
+
+    //- Деструктив — отдельно, вне формы
+    .px-3.pb-3
+      button.btn.btn-ghost.btn-sm.btn-block(
         type="button"
+        class="hover:bg-error/10 text-error/70 hover:text-error"
         @click="$emit('delete', form.id)"
       )
-        svg.h-4.w-4(
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        )
-          path(
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-          )
-        | Удалить
-      .flex-1
-      button.btn.btn-sm.btn-ghost(
-        type="button"
-        @click="$emit('close')"
-      )
-        | Отмена
-      
-      button.btn.btn-sm.btn-primary(
-        type="button"
-        @click="onSave"
-      )
-        | Сохранить
+        Trash2.w-4.h-4.mr-1
+        | Удалить транспорт
 </template>
 
 <script setup lang="ts">
 // app/components/database/VehicleFormModal.vue — script
-// Создание/редактирование ТС: номер, тип, владелец, допущенные водители.
-// [UI/UX] alert() заменены на тосты. Нативный confirm() удаления — в template
-// ($emit('delete')), заменит ConfirmDialog отдельным шагом.
-// [FIX] поле id в типе form — шаблон использует form.id для emit('delete').
+// [Фаза 3]: авто-допуск владельца при смене; тосты валидации; Lucide; паттерн.
 import { ref, computed, watch } from 'vue'
+import { Car, X, Save, Trash2, UserRound } from '@lucide/vue'
 import { useToast } from '~/composables/useToast'
 
 // --- Props ---
@@ -172,6 +175,7 @@ const props = withDefaults(defineProps<{
   adultPeople?: any[]
 }>(), {
   isOpen: false,
+  vehicle: null,
   allPeople: () => [],
   adultPeople: () => []
 })
@@ -190,6 +194,9 @@ const form = ref<{ id?: number | null; plate: string; model: string; type: strin
   allowed_driver_ids: []
 })
 
+// Следим за прошлым owner_id — реагируем только на СМЕНУ владельца
+let prevOwnerId: number | null = null
+
 const driverSearch = ref('')
 const foundDrivers = ref<any[]>([])
 
@@ -201,7 +208,20 @@ watch(() => props.vehicle, (val) => {
   } else {
     form.value = { plate: '', model: '', type: 'Личный', owner_id: null, allowed_driver_ids: [] }
   }
+  prevOwnerId = form.value.owner_id
 }, { immediate: true })
+
+// [UX] владелец автоматически допускается к управлению (при смене владельца)
+watch(() => form.value.owner_id, (newOwner) => {
+  if (newOwner == null) return
+  if (!form.value.allowed_driver_ids) return
+  // прежнего владельца не отчисляем — он мог быть допущен вручную
+  if (prevOwnerId === newOwner) return
+  if (!form.value.allowed_driver_ids.includes(newOwner)) {
+    form.value.allowed_driver_ids.push(newOwner)
+  }
+  prevOwnerId = newOwner
+})
 
 // --- Computed ---
 const currentDrivers = computed(() => {
@@ -230,10 +250,9 @@ const removeDriver = (id: number) => {
   form.value.allowed_driver_ids = form.value.allowed_driver_ids.filter(d => d !== id)
 }
 
-// Сохранение: вызывается напрямую по клику.
-// [UI/UX] alert() -> warning-тосты (валидация не блокирует поток).
+// Сохранение: валидация тостами
 const onSave = () => {
-  if (!form.value.plate) {
+  if (!form.value.plate.trim()) {
     toast.warning('Введите гос. номер')
     return
   }

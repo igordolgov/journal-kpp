@@ -1,9 +1,14 @@
 <!-- app/components/database/PersonDetailModal.vue -->
 <!-- Модальное окно: Детальная карточка человека.
-    Отображает крупный аватар (по пояс/голова), информацию, списки ТС, семью.
-    Интегрирован вызов дизайнера внешности (DesignerModal).
--->
-
+     [UI/UX Фаза 3]:
+      1. [FIX] при открытии карточка перечитывает запись из БД (getItem) —
+         раньше показывала кэш родителя: свежие position/department/статус
+         появлялись только после перезагрузки страницы;
+      2. [UX] футер пересобран: «Редактировать» (primary) + «Внешность» в
+         основном ряду; «Родственник»/«Назначить авто» — ghost во втором;
+         «Удалить» — ОТДЕЛЬНОЙ строкой снизу (деструктив не рядом с главными);
+      3. [UX] смена статуса — с тостом (было молча);
+      4. Lucide в кнопках; каскад: спецсимволы — только в class="". -->
 <template lang="pug">
 dialog.modal(
   v-if="isOpen"
@@ -14,21 +19,22 @@ dialog.modal(
     .flex.justify-between.items-center.p-6.border-b.rounded-t-2xl.bg-base-100
       div
         h3.text-2xl.font-bold
-          | {{ person.fio }}
+          | {{ card.fio }}
         .flex.gap-2.mt-1
           .badge.rounded-md.badge-outline
             | {{ displayCategory }}
       button.btn.btn-circle.btn-sm.btn-ghost(
         @click="$emit('close')"
+        aria-label="Закрыть"
       )
-        | ✕
+        X.w-4.h-4
 
     //- BODY: Основное содержимое
     .p-6
-      
+
       //- ВЕРХНИЙ БЛОК: Превью аватара + Основная информация
       .flex.gap-6.mb-6.items-stretch
-        
+
         // --- БЛОК АВАТАРА (Крупный план) ---
         .flex.flex-col.items-center.p-4.rounded-box.bg-base-100.shrink-0(
           style="width: 220px;"
@@ -36,9 +42,9 @@ dialog.modal(
           .flex.items-start.justify-center.w-full.overflow-hidden(
             style="height: 170px; margin-top: -25px;"
           )
-            template(v-if="person.skinTone")
+            template(v-if="card.skinTone")
               PersonAvatar(
-                :appearance="person"
+                :appearance="card"
                 :width="220"
                 :height="440"
                 view="front"
@@ -52,36 +58,46 @@ dialog.modal(
           .p-4.rounded-box.bg-base-100
             span.text-sm.text-gray-500 Проживание
             p.text-lg.font-bold(
-              :class="person.location === 'На территории' ? 'text-success' : 'text-info'"
+              :class="card.location === 'На территории' ? 'text-success' : 'text-info'"
             )
-
-              | {{ person.location }}
+              | {{ card.location }}
 
             //- БЛОК: БЫСТРОЕ ПЕРЕКЛЮЧЕНИЕ СТАТУСА
+            //- [UX] тост при смене (в setQuickStatus)
             .mt-3.rounded-box.bg-base-100.border.border-dashed.border-base-300
               span.text-sm.text-gray-500 Статус (исключение из симуляции)
               .flex.flex-wrap.gap-2.mt-2
                 button.btn.btn-xs(
-                  :class="!person.status ? 'btn-success text-white' : 'btn-ghost border-2 border-gray-600'"
+                  :class="!card.status ? 'btn-success text-white' : 'btn-ghost border-2 border-gray-600'"
                   @click="setQuickStatus(null)"
-                ) ✅ Доступен
+                ) Доступен
                 button.btn.btn-xs(
-                  :class="person.status === 'Отпуск' ? 'btn-warning' : 'btn-ghost border-2 border-gray-600'"
+                  :class="card.status === 'Отпуск' ? 'btn-warning' : 'btn-ghost border-2 border-gray-600'"
                   @click="setQuickStatus('Отпуск')"
-                ) 🏖 Отпуск
+                ) Отпуск
                 button.btn.btn-xs(
-                  :class="person.status === 'Командировка' ? 'btn-warning' : 'btn-ghost border-2 border-gray-600'"
+                  :class="card.status === 'Командировка' ? 'btn-warning' : 'btn-ghost border-2 border-gray-600'"
                   @click="setQuickStatus('Командировка')"
-                ) 💼 Командировка
+                ) Командировка
                 button.btn.btn-xs(
-                  :class="person.status === 'Болен' ? 'btn-error' : 'btn-ghost border-2 border-gray-600'"
+                  :class="card.status === 'Болен' ? 'btn-error' : 'btn-ghost border-2 border-gray-600'"
                   @click="setQuickStatus('Болен')"
-                ) 🤒 Болен
+                ) Болен
 
           .p-4.rounded-box.bg-base-100
             span.text-sm.text-gray-500 Телефон
             p.text-lg.font-bold
-              | {{ person.phone || '-' }}
+              | {{ card.phone || '—' }}
+            .mt-4
+              span.text-sm.text-gray-500 Должность / Отдел
+              p.text-base.font-semibold(
+                v-if="card.position || card.department"
+              )
+                | {{ [card.position, card.department].filter(Boolean).join(' · ') }}
+              p.text-base(
+                class="text-base-content/40"
+                v-else
+              ) —
 
       //- Блок: Владелец ТС
       div(v-if="ownedVehicles.length")
@@ -137,28 +153,39 @@ dialog.modal(
             span.opacity-60
               | ({{ f.relation }})
 
-    //- FOOTER: Кнопки действий
-    .flex.justify-end.gap-2.p-4.border-t.rounded-b-2xl.bg-base-100
-      button.btn.btn-success.rounded-md(
-        @click="showAddRelative = true"
+    //- FOOTER: пересобран [Фаза 3]
+    //- Ряд 1: Редактировать (primary) + Внешность
+    //- Ряд 2: Родственник + Назначить авто (ghost)
+    //- Ряд 3: Удалить — отдельно, приглушённый деструктив
+    .p-4.border-t.rounded-b-2xl.bg-base-100
+      .flex.justify-end.gap-2
+        button.btn.btn-primary.rounded-md(
+          @click="$emit('edit', card)"
+        )
+          Pencil.w-4.h-4.mr-1
+          | Редактировать
+        button.btn.btn-warning.rounded-md(
+          @click="isDesignerOpen = true"
+        )
+          Palette.w-4.h-4.mr-1
+          | Внешность
+      .flex.justify-end.gap-2.mt-2
+        button.btn.btn-ghost.btn-sm.rounded-md(
+          @click="showAddRelative = true"
+        )
+          UserPlus.w-4.h-4.mr-1
+          | Родственник
+        button.btn.btn-ghost.btn-sm.rounded-md(
+          @click="$emit('assign')"
+        )
+          KeyRound.w-4.h-4.mr-1
+          | Назначить авто
+      button.btn.btn-ghost.btn-sm.btn-block.mt-3(
+        class="hover:bg-error/10 text-error/70 hover:text-error"
+        @click="$emit('delete', card.id)"
       )
-        | ➕ Родственник
-      button.btn.btn-info.rounded-md(
-        @click="$emit('assign')"
-      )
-        | 🔑 Назначить авто
-      button.btn.btn-outline.btn-error.rounded-md(
-        @click="$emit('delete', person.id)"
-      )
-        | 🗑 Удалить
-      button.btn.btn-warning.rounded-md(
-        @click="isDesignerOpen = true"
-      )
-        | 🎨 Внешность
-      button.btn.btn-primary.rounded-md(
-        @click="$emit('edit', person)"
-      )
-        | ✎ Редактировать
+        Trash2.w-4.h-4.mr-1
+        | Удалить запись
 
   //- --- ВСПЛЫВАЮЩЕЕ ОКНО ДОБАВЛЕНИЯ РОДСТВЕННИКА ---
   dialog.modal(
@@ -169,9 +196,9 @@ dialog.modal(
       h3.mb-4.text-lg.font-bold
         | ➕ Добавить родственника
       p.mb-2.text-sm
-        | Для: {{ person.fio }}
+        | Для: {{ card.fio }}
         span.text-gray-500
-          | ({{ person.relation || 'Глава семьи' }})
+          | ({{ card.relation || 'Глава семьи' }})
 
       form.form-control.gap-3(
         @submit.prevent="saveNewRelative"
@@ -247,7 +274,7 @@ dialog.modal(
   //- --- ИНТЕГРИРОВАННАЯ МОДАЛКА ДИЗАЙНЕРА ---
   DesignerModal(
     :is-open="isDesignerOpen"
-    :person="person"
+    :person="card"
     @close="isDesignerOpen = false"
     @save="handleDesignerSave"
   )
@@ -256,15 +283,17 @@ dialog.modal(
 
 <script setup lang="ts">
 // app/components/database/PersonDetailModal.vue — script
-// Детальная карточка человека: аватар, статусы, ТС, семья, дизайнер внешности.
-// [UI/UX] alert() заменены на тосты. Нативные confirm() пока не трогаем
-// (их заменит ConfirmDialog отдельным шагом).
-import { computed, ref, reactive } from 'vue'
+// [FIX Фаза 3] card = локальная перечитанная копия: при открытии (isOpen)
+// тянем свежую запись из БД (getItem) — props.person мог быть кэшем
+// (старые position/department/статус показывались до F5).
+import { computed, ref, reactive, watch } from 'vue'
 import { useCompanions } from '~/composables/useCompanions'
 import { useFamilyActions } from '~/composables/useFamilyActions'
 import { useFamily } from '~/composables/useFamily'
 import { useDatabase } from '~/composables/useDatabase'
 import { useToast } from '~/composables/useToast'
+// [UI/UX] Lucide
+import { X, Pencil, Palette, UserPlus, KeyRound, Trash2, UserRound } from '@lucide/vue'
 
 import PersonAvatar from '~/components/simulator/PersonAvatar.vue'
 import DesignerModal from '~/components/designer/DesignerModal.vue'
@@ -288,12 +317,15 @@ const emit = defineEmits(['close', 'edit', 'delete', 'assign', 'edit-vehicle', '
 const { isChild } = useCompanions()
 const { addRelative } = useFamilyActions()
 const { getFullFamily } = useFamily()
-const { updateItem } = useDatabase()
+const { updateItem, getItem } = useDatabase()
 const toast = useToast()
 
 // --- State ---
+// [FIX] card — рабочий объект карточки. При открытии перезаписывается
+// свежей записью из БД (watch isOpen).
+const card = ref<any>({})
+
 const showAddRelative = ref(false)
-// Режимы и ID для существующих людей
 const newRelative = reactive({
   mode: 'existing' as 'existing' | 'new',
   fio: '',
@@ -302,10 +334,23 @@ const newRelative = reactive({
 })
 const isDesignerOpen = ref(false)
 
-// --- Computed ---
+// --- Перечитывание из БД при открытии ---
+watch(() => props.isOpen, async (open) => {
+  if (open && props.person?.id) {
+    try {
+      const fresh = await getItem('people', props.person.id)
+      card.value = fresh || props.person
+    } catch (e) {
+      console.error('[PersonDetailModal] refresh error:', e)
+      card.value = props.person
+    }
+  }
+}, { immediate: true })
+
+// --- Computed (читают card, не props.person) ---
 const displayCategory = computed(() => {
-  if (!props.person) return ''
-  const p = props.person
+  if (!card.value) return ''
+  const p = card.value
 
   if (p.exit_category === 'escort') return 'Сопровождение'
   if (p.exit_category === 'small') return 'Ребенок'
@@ -317,12 +362,12 @@ const displayCategory = computed(() => {
 })
 
 const familyMembers = computed(() => {
-  if (!props.person || !props.peopleList) return []
-  return getFullFamily(props.person, props.peopleList)
+  if (!card.value || !props.peopleList) return []
+  return getFullFamily(card.value, props.peopleList)
 })
 
-const ownedVehicles = computed(() => props.vehicles?.filter(v => v.owner_id === props.person?.id) || [])
-const allowedVehicles = computed(() => props.vehicles?.filter(v => v.allowed_driver_ids?.includes(props.person?.id) && v.owner_id !== props.person?.id) || [])
+const ownedVehicles = computed(() => props.vehicles?.filter(v => v.owner_id === card.value?.id) || [])
+const allowedVehicles = computed(() => props.vehicles?.filter(v => v.allowed_driver_ids?.includes(card.value?.id) && v.owner_id !== card.value?.id) || [])
 
 // Список взрослых людей, не привязанных ни к какой семье
 const orphanAdults = computed(() => {
@@ -330,7 +375,7 @@ const orphanAdults = computed(() => {
   return props.peopleList.filter((p: any) => {
     if (p.main_family_id) return false // Уже в семье
     if (p.ageGroup === 'child' || p.exit_category === 'small' || p.is_child) return false // Это ребенок
-    if (p.id === props.person?.id) return false // Это сам человек
+    if (p.id === card.value?.id) return false // Это сам человек
     return true
   })
 })
@@ -345,17 +390,20 @@ const getVehicleTypeBadgeClass = (type: string) => {
 // --- Actions ---
 
 // БЫСТРОЕ ПЕРЕКЛЮЧЕНИЕ СТАТУСА
+// [UX] тост результата (было молча)
 const setQuickStatus = async (newStatus: string | null) => {
-  if (!props.person?.id) return
+  if (!card.value?.id) return
 
-  // Клон без функций (в записях могут оказаться методы из реактивных обёрток)
-  const safeClone = JSON.parse(JSON.stringify(props.person, (key, value) => {
+  const safeClone = JSON.parse(JSON.stringify(card.value, (key, value) => {
     if (typeof value === 'function') return undefined
     return value
   }))
 
   safeClone.status = newStatus
   await updateItem('people', safeClone)
+  // [FIX] обновляем карточку локально — бейдж сменится мгновенно
+  card.value = safeClone
+  toast.success(newStatus ? `Статус: ${newStatus}` : 'Статус снят — доступен')
   emit('update')
 }
 
@@ -365,8 +413,7 @@ const onRelativeModeChange = () => {
   newRelative.existingId = null
 }
 
-// Сохранение с учетом существующих людей.
-// [UI/UX] alert() -> тосты (warning для валидации, error для сбоев).
+// Сохранение с учетом существующих людей
 const saveNewRelative = async () => {
   try {
     if (newRelative.mode === 'existing') {
@@ -375,7 +422,6 @@ const saveNewRelative = async () => {
         return
       }
 
-      // Полная запись человека — включая внешность для симулятора
       const existingPerson = props.peopleList.find((p: any) => p.id === newRelative.existingId)
       if (!existingPerson) {
         toast.error('Человек не найден в базе')
@@ -383,7 +429,7 @@ const saveNewRelative = async () => {
       }
 
       // Флаги для useFamilyActions: обновить существующего, а не создать с нуля
-      await addRelative(props.person, newRelative.type, {
+      await addRelative(card.value, newRelative.type, {
         ...existingPerson,
         _isExisting: true,
         _existingId: newRelative.existingId
@@ -393,8 +439,7 @@ const saveNewRelative = async () => {
         toast.warning('Введите ФИО')
         return
       }
-      // Новый человек (useFamilyActions назначит дефолтную внешность)
-      await addRelative(props.person, newRelative.type, { fio: newRelative.fio })
+      await addRelative(card.value, newRelative.type, { fio: newRelative.fio })
     }
 
     showAddRelative.value = false
@@ -418,6 +463,8 @@ const handleDesignerSave = async (updatedPersonData: any) => {
 
     await updateItem('people', safeClone)
     isDesignerOpen.value = false
+    // [FIX] обновляем карточку — аватар перерисуется без перечитывания
+    card.value = safeClone
     toast.success('Внешность сохранена')
     emit('update')
   } catch (e: any) {
