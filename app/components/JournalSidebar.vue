@@ -1,3 +1,14 @@
+<!-- app/components/JournalSidebar.vue -->
+<!-- Назначение: конструктор поездки — поиск (люди/авто), выбор, валидация,
+     кнопки действия. Главный рабочий инструмент охранника.
+     [UI/UX Фаза 2]:
+      1. [FIX] мёртвые классы v2-синтаксиса: mt-0_5/gap-0_5/p-[0.5] -> точка,
+         bg-base-50 (не существует) -> токены, menu-compact -> menu-sm,
+         hover:badge-primary -> hover:bg-primary/10;
+      2. [UI/UX] Empty state: до выбора — подсказка «с чего начать»;
+      3. [UI/UX] Lucide: поиск, аватары результатов, кнопки, предупреждения;
+      4. [FIX] захардкоженные цвета -> токены темы;
+      5. [КАСКАД] все hover:/active:/дробные классы — только внутри class="". -->
 <template lang="pug">
 .sidebar.flex.flex-col.flex-shrink-0.w-full(
   class="lg:top-0 lg:sticky bg-base-200 rounded-box lg:w-80 lg:h-fit"
@@ -7,11 +18,11 @@
   //- ==========================================
   .form-control.relative.mb-0
     .relative
-      input.input.w-full.pr-0.transition-all.duration-300(
+      input.input.w-full.pr-8.transition-all.duration-300(
         ref="globalSearchInput"
         v-model="globalSearch"
-        placeholder="Поиск: ФИО, Гос. номер..."
-        class="bg-base-100 input-bordered input-sm"
+        placeholder="ФИО или гос. номер..."
+        class="bg-base-100 pl-9 input-bordered input-sm"
         :class="dropdownResults.length > 0 && isSearchFocused ? 'rounded-b-none border-primary border-b-0 shadow-none z-40 relative' : ''"
         @focus="onSearchFocus"
         @blur="onSearchBlur"
@@ -20,14 +31,18 @@
         @keydown.up.prevent="handleArrowUp"
         @keydown.enter.prevent="handleEnterKey"
       )
+      //- [UI/UX] иконка поиска слева
+      Search.absolute.pointer-events-none(
+        class="top-1/2 left-3 w-4 h-4 text-base-content/40 -translate-y-1/2"
+      )
       button.absolute.z-50.right-2.transition-colors.duration-200(
         class="top-1/2 hover:text-primary -translate-y-1/2"
         v-if="globalSearch"
         type="button"
         @click="clearSearch"
+        aria-label="Очистить поиск"
       )
-        svg.h-4.w-4(fill="none" stroke="currentColor" viewBox="0 0 24 24")
-          path(stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12")
+        X.h-4.w-4
 
     //- РЕЗУЛЬТАТЫ ПОИСКА / СПИСОК ДОСТУПНЫХ
     transition(name="search-results")
@@ -42,26 +57,29 @@
             :data-index="index"
             class="hover:bg-base-200 rounded-lg active:scale-99"
             :class="{ 'bg-primary/20': activeDropdownIndex === index }"
-            @mousedown.prevent="selectItem(item)" 
+            @mousedown.prevent="selectItem(item)"
             @mouseenter="activeDropdownIndex = index"
             :title="item.type === 'person' ? item.fio : 'Владелец: ' + (item.owner_name || 'неизвестен')"
           )
             .flex.items-center.justify-center.flex-shrink-0.w-10.h-10.transition-colors.rounded-full(
-              class="bg-base-200"
-              class="hover:bg-primary hover:text-primary-content"
+              class="bg-base-200 hover:bg-primary hover:text-primary-content"
             )
-              span.text-xl {{ item.type === 'person' ? '👤' : '🚗' }}
+              //- [UI/UX] Lucide вместо эмодзи
+              UserRound.w-5.h-5(v-if="item.type === 'person'")
+              Car.w-5.h-5(v-else)
             .flex-1.min-w-0
               .flex.items-center.gap-2
                 span.font-semibold.truncate(
-                  :class='{ "text-yellow-500": item.type === "person" && isChild(item) }'
-                ) 
+                  :class="{ 'text-warning': item.type === 'person' && isChild(item) }"
+                )
                   | {{ item.displayShort || item.display }}
                 template(v-if="item.type === 'person'")
                   .badge.badge-xs.badge-ghost(v-if="item.category")
                     | {{ item.category }}
-              .text-xs.mt-0_5.truncate(v-if="item.location" class="text-base-content/60")
-                span 📍 {{ item.location }}
+              .text-xs.mt-1.truncate(v-if="item.location" class="text-base-content/60")
+                span.inline-flex.items-center.gap-1
+                  MapPin.w-3.h-3
+                  | {{ item.location }}
 
     //- Сценарий: Выбор водителя
     transition(name="search-results")
@@ -71,7 +89,7 @@
       )
         .p-2
           h3.p-2.mb-2.text-xs.font-bold.uppercase(class="text-base-content/60")
-            | 🚗 Кто за рулем?
+            | 🚗 Кто за рулём?
           .flex.items-center.gap-3.p-3.mb-1.cursor-pointer.transition-all(
             v-for="p in potentialDrivers"
             :key="p.id"
@@ -81,7 +99,7 @@
             .flex.items-center.justify-center.flex-shrink-0.w-10.h-10.rounded-full(
               class="bg-base-200"
             )
-              span.text-xl 👤
+              UserRound.w-5.h-5
             .flex-1.min-w-0
               span.font-semibold
                 | {{ p.fio }}
@@ -89,24 +107,38 @@
                 | {{ p.category }}
 
   //- ==========================================
+  //- 1а. EMPTY STATE (до выбора — подсказка «с чего начать»)
+  //- ==========================================
+  .mt-3.p-5.rounded-box.text-center(
+    v-if="!selectedItem"
+    class="bg-base-100/60 border border-base-300 border-dashed"
+  )
+    Search.w-8.h-8.mx-auto.mb-2(class="text-base-content/30")
+    p.text-sm.font-medium(class="text-base-content/60")
+      | Найдите человека или автомобиль
+    p.mt-1.text-xs(class="text-base-content/40")
+      | Введите ФИО («Иванов») или номер («а123бв»),
+      | затем нажмите «Вышел» или «Вошёл».
+
+  //- ==========================================
   //- 2. КАРТОЧКА ВЫБРАННОГО
   //- ==========================================
-  .mt-0(v-if="selectedItem")
+  .mt-3(v-if="selectedItem")
     .card.overflow-hidden.shadow-xl.border(
       class="bg-base-100 border-base-200"
     )
       .card-body.p-0
-        
+
         //- Заголовок карточки
         .flex.justify-between.items-center.gap-3.px-2.pt-2.border-b(
           class="bg-linear-to-r from-primary/5 to-base-100 border-base-200"
         )
           .flex.items-center.gap-3
             .avatar.online(class="before:bg-success/80")
-              .w-12.rounded-full.bg-primary.text-primary-content
-                span.text-3xl.pl-1
-                  | {{ selectedItem.type === 'person' ? '👤' : '🚗' }}
-            
+              .w-12.rounded-full.bg-primary.text-primary-content.flex.items-center.justify-center
+                UserRound.w-6.h-6(v-if="selectedItem.type === 'person'")
+                Car.w-6.h-6(v-else)
+
             .flex-1.min-w-0
               h2.card-title.text-lg.leading-tight.truncate(
                 :title="selectedItem.fio || selectedItem.display"
@@ -126,18 +158,17 @@
             title="Сбросить"
             @click="handleDeselect"
           )
-            svg.h-4.w-4(fill="none" stroke="currentColor" viewBox="0 0 24 24")
-              path(stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12")
+            X.h-4.w-4
 
-        //- Заметка
+        //- Заметка активной поездки
         .p-3(v-if="activeTripNote")
           .p-3.shadow-sm.rounded-r-md.border-l-4(
-            class="bg-amber-50 border-amber-400 text-amber-900"
+            class="bg-warning/10 border-warning"
           )
             .flex.gap-2
-              span.text-2xl 📝
+              StickyNote.w-5.h-5.shrink-0(class="text-warning")
               div
-                span.font-bold.text-amber-700 Заметка:
+                span.font-bold(class="text-warning") Заметка:
                 p.text-xs.mt-1 {{ activeTripNote }}
 
         //- Ограничения
@@ -146,9 +177,8 @@
             class="bg-warning/80 text-warning-content alert-warning"
           )
             .flex.items-center.gap-1.font-bold
-              svg.h-4.w-4(fill="none" stroke="currentColor" viewBox="0 0 24 24")
-                path(stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z")
-              span Внимание! 
+              TriangleAlert.w-4.h-4
+              span Внимание!
               span.text-xs.ml-3
                 | {{ personRestrictions.join(', ') }}
 
@@ -161,7 +191,7 @@
               class="bg-warning/10 text-warning-content alert-warning"
             )
               | {{ statusTitle }}
-        
+
         template(v-else)
           .flex.flex-col.gap-3.p-3.pt-0
             //- Шаг 1: Куда
@@ -180,14 +210,15 @@
                   type="button"
                   :class="tripNote ? 'btn-warning' : 'btn-ghost'"
                   @click="isEditingNote = !isEditingNote"
+                  title="Заметка к поездке"
                 )
-                  span(v-if="tripNote") 📝
-                  span(v-else) ✏️
+                  StickyNote.w-4.h-4(v-if="tripNote")
+                  Pencil.w-4.h-4(v-else)
 
             //- Популярные места
             .flex.flex-wrap.gap-1
               template(v-for="dest in sortedDestinations" :key="dest.name")
-                .inline-flex.items-center.gap-0_5.px-3.py-1.text-xs.font-semibold.cursor-pointer.transition-all.rounded-full(
+                .inline-flex.items-center.gap-1.px-3.py-1.text-xs.font-semibold.cursor-pointer.transition-all.rounded-full(
                   @click="tripDestination = dest.name"
                   class="bg-base-200 hover:shadow-md border border-base-300"
                   :class="tripDestination === dest.name ? 'ring-2 ring-primary ring-offset-1 bg-primary text-primary-content' : ''"
@@ -196,16 +227,17 @@
                   button.opacity-50.transition-opacity(
                     class="hover:opacity-100"
                     @click.stop="removeDest(dest.name)"
+                    :aria-label="`Удалить ${dest.name}`"
                   )
-                    svg.h-3.w-3(fill="none" stroke="currentColor" viewBox="0 0 24 24")
-                      path(stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12")
-              
+                    X.w-3.h-3
+
               .badge.badge-sm.gap-1.cursor-pointer.transition-colors(
                 v-if="isNewDestination"
-                class="bg-gray-600 hover:bg-gray-500"
+                class="bg-neutral hover:bg-neutral/80"
                 @click="saveNewDestination"
-              ) 
-                | + Сохранить
+              )
+                Plus.w-3.h-3
+                | Сохранить
 
             //- Заметка (Редактор)
             transition(name="slide-fade")
@@ -222,9 +254,9 @@
                     v-if="tripNote"
                     type="button"
                     @click="clearNote"
+                    aria-label="Очистить заметку"
                   )
-                    svg.h-4.w-4(fill="none" stroke="currentColor" viewBox="0 0 24 24")
-                      path(stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12")
+                    X.w-4.w-4
 
             //- Шаг 2: Добавить
             template(v-if="showAddSection")
@@ -237,12 +269,13 @@
               //- Авто владельца
               .mb-1(v-if="availableVehicles.length")
                 .flex.flex-wrap.gap-1
-                  .badge.gap-1.mr-1.p-1.cursor-pointer.transition-colors.font-semibold.border.border-gray-400.rounded-sm(
+                  .badge.gap-1.mr-1.p-1.cursor-pointer.transition-colors.font-semibold.rounded-sm(
+                    class="border border-base-content/20"
                     v-for="v in availableVehicles"
                     :key="v.id"
-                    class="bg-white hover:border-primary text-black"
+                    class="bg-neutral hover:border-primary text-neutral-content"
                     @click="selectVehicle(v)"
-                  ) 
+                  )
                     | {{ v.plate }}
 
               //- Рекомендованные
@@ -251,7 +284,7 @@
                   template(v-for="p in availableRelatives" :key="p.id")
                     .btn.btn-sm.p-2.py-0.transition-colors.border.rounded-lg(
                       class="bg-secondary/20"
-                      :class="canJoinTrip(p) ? 'hover:badge-primary cursor-pointer' : 'cursor-not-allowed'"
+                      :class="canJoinTrip(p) ? 'cursor-pointer hover:bg-primary/10' : 'cursor-not-allowed'"
                       @click="tryAddPassenger(p)"
                     )
                       | {{ formatShortFio(p.fio) }}
@@ -261,7 +294,7 @@
                       span.text-xs.ml-0(
                         class="opacity-50"
                         v-if="!canJoinTrip(p)"
-                      ) 
+                      )
                         | [{{ getPersonStatusTextLocal(p) }}]
 
               //- Подсказка
@@ -269,7 +302,9 @@
                 v-if="!availableRelatives.length && eligibleCompanions.length"
                 class="text-base-content/40"
               )
-                span.info.mr-1 Родственники есть, но они в другой локации.
+                span.inline-flex.items-center.gap-1
+                  Info.w-3.h-3
+                  | Родственники есть, но они в другой локации.
 
             //- Поиск попутчиков
             .form-control.relative
@@ -289,12 +324,12 @@
                   v-if="foundPassengers.length"
                   class="bg-base-100 rounded-box"
                 )
-                  ul.menu.menu-compact.w-full(
+                  ul.menu.menu-sm.w-full(
                     class="bg-base-100"
                   )
                     li(v-for="p in foundPassengers" :key="p.item.id")
                       a(
-                        :class="[getPassengerClass(p.item), { 'text-yellow-500 font-semibold': isChild(p.item) }]"
+                        :class="[getPassengerClass(p.item), { 'text-warning font-semibold': isChild(p.item) }]"
                         @click="tryAddPassenger(p.item)"
                       )
                         span {{ p.item.fio }}
@@ -305,26 +340,22 @@
                 class="text-base-content/40"
               )
                 | Состав:
-              
+
               .flex.flex-wrap
-                .inline-flex.items-center.gap-1.p-0.pr-2.mb-1.mr-1.cursor-pointer.transition-all.bg-gradient-to-br(
+                .inline-flex.items-center.gap-1.p-0.pr-2.mb-1.mr-1.cursor-pointer.transition-all(
                   v-if="selectedVehicle"
                   @click="deselectVehicle"
-                  class="from-base-100 to-base-200 shadow-sm hover:shadow-md border border-base-300 rounded-full"
+                  class="bg-linear-to-br from-base-100 to-base-200 shadow-sm hover:shadow-md border border-base-300 rounded-full"
                 )
-                  span.px-1.font-semibold.border.border-gray-400.rounded-md(
-                    class="bg-white text-black"
+                  span.px-1.font-semibold.border.border-base-content/20.rounded-md(
+                    class="bg-neutral text-neutral-content"
                   )
                     | {{ selectedVehicle.plate }}
-                  svg.h-4.w-4.opacity-60(
+                  X.w-4.w-4.opacity-60(
                     class="hover:text-error"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
                   )
-                    path(stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12")
 
-                .inline-flex.items-center.gap-1.p-1.pr-1.mb-1.mr-1.text-xs.cursor-pointer.transition-all.bg-gradient-to-br(
+                .inline-flex.items-center.gap-1.p-1.pr-1.mb-1.mr-1.text-xs.cursor-pointer.transition-all(
                   v-for="p in tripPassengers"
                   :key="p.id"
                   @click="removePassenger(p)"
@@ -334,20 +365,18 @@
                   span.text-xs(
                     class="opacity-60"
                   ) ({{ getRelationLabel(p) }})
-                  svg.h-4.w-4.opacity-60(
+                  X.w-4.w-4.opacity-60(
                     class="hover:text-error"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
                   )
-                    path(stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12")
 
             //- ПРЕДУПРЕЖДЕНИЯ
             .mt-2(v-if="needsEscortConfirmation")
               .flex.flex-col.w-full.p-2.text-xs.shadow-sm(
                 class="bg-error/10 text-error-content alert-error"
               )
-                span.font-bold ⚠️ Требуется сопровождение!
+                span.font-bold.inline-flex.items-center.gap-1
+                  TriangleAlert.w-3.h-3
+                  | Требуется сопровождение!
                 span.text-xs.opacity-80 Этот человек не может выходить один.
               label.label.justify-start.gap-2.p-2.rounded.mt-1.cursor-pointer(
                 class="bg-base-200"
@@ -410,7 +439,8 @@
                   class="bg-green-700 disabled:bg-gray-400 text-white"
                   @click="handleGroupTrip"
                 )
-                  | 🚗 {{ actionButtonLabel }} 
+                  Car.w-4.h-4.mr-1
+                  | {{ actionButtonLabel }}
                   span.ml-1 ({{ totalPeopleCount }})
 
               template(v-else)
@@ -419,8 +449,9 @@
                   :disabled="!isTripValid"
                   @click="handleWalkingTrip"
                 )
+                  Footprints.w-4.h-4.mr-1
                   | {{ walkingButtonLabel }}
-                
+
               p.text-center.text-xs.mt-2.font-semibold(
                 v-if="validationError"
                 class="text-error"
@@ -431,14 +462,19 @@
 <script setup lang="ts">
 // app/components/JournalSidebar.vue — script
 // Конструктор поездки: поиск, выбор, валидация, действия.
-// [UI/UX] alert() заменены на тосты; confirm() в removeDest — на ConfirmDialog.
+// [UI/UX Фаза 2]: Lucide-иконки; getPassengerClass — валидный hover-класс
+// (hover:badge-primary не существует в Tailwind/DaisyUI).
 import { ref, computed, watch, toRaw, onMounted, nextTick } from 'vue'
 import { useState } from 'nuxt/app'
+// [UI/UX] Lucide
+import {
+  Search, X, UserRound, Car, StickyNote, Pencil, MapPin, Plus,
+  TriangleAlert, Info, Footprints
+} from '@lucide/vue'
 import { useConfig } from '~/composables/useConfig'
 import { useFamily } from '~/composables/useFamily'
 import { useCompanions } from '~/composables/useCompanions'
 import { useToast } from '~/composables/useToast'
-// [ДОБАВЛЕНО] ConfirmDialog — используется в removeDest
 import { useConfirm } from '~/composables/useConfirm'
 import Fuse from 'fuse.js'
 
@@ -458,7 +494,6 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits(['update:selectedItem', 'action', 'group-action'])
 const configStore = useConfig()
 const toast = useToast()
-// [ДОБАВЛЕНО] confirmDialog для removeDest
 const { confirmDialog } = useConfirm()
 
 const { getFamilyRoot, getFullFamily } = useFamily()
@@ -644,7 +679,6 @@ const saveNewDestination = async () => {
 }
 
 const removeDest = async (dest: string) => {
-  // [UI/UX] нативный confirm -> ConfirmDialog
   const ok = await confirmDialog({
     title: `Удалить «${dest}»?`,
     message: 'Место исчезнет из подсказок для всех сотрудников.',
@@ -814,9 +848,10 @@ const walkingButtonLabel = computed(() => {
 })
 
 // --- ДЕЙСТВИЯ ---
-const getPassengerClass = (p: any) => (canJoinTrip(p.item || p) ? 'cursor-pointer hover:badge-primary' : 'opacity-50 cursor-not-allowed')
+// [FIX] hover:badge-primary не существует — валидный hover-класс
+const getPassengerClass = (p: any) => (canJoinTrip(p.item || p) ? 'cursor-pointer hover:bg-primary/10' : 'opacity-50 cursor-not-allowed')
 
-// [UI/UX] alert -> warning-тост с именем
+// [UI/UX] warning-тост с именем и причиной
 const tryAddPassenger = (p: any) => {
   const person = p.item || p
   if (!canJoinTrip(person)) {
@@ -886,7 +921,6 @@ const selectItem = async (item: any) => {
     const driverPeople = props.peopleList.filter((p: any) => drivers.includes(p.id))
 
     if (driverPeople.length === 0) {
-      // [UI/UX] alert -> error-тост
       toast.error('У этого автомобиля нет зарегистрированных водителей')
       clearSearch()
       return
@@ -927,8 +961,7 @@ const finalizeSelection = (person: any, vehicle: any | null) => {
   if (vehicle) {
     const allowedIds = vehicle.allowed_driver_ids || (vehicle.owner_id ? [vehicle.owner_id] : [])
     if (!allowedIds.includes(finalPerson.id)) {
-      // [UI/UX] alert -> error-тост
-      toast.error(`⛔ ${finalPerson.fio} не допущен к управлению данным автомобилем`)
+      toast.error(`${finalPerson.fio} не допущен к управлению данным автомобилем`)
       selectedVehicle.value = null
       emit('update:selectedItem', finalPerson)
       globalSearch.value = finalPerson.display
@@ -973,7 +1006,6 @@ const selectDriver = (person: any) => {
 // --- ОБРАБОТЧИКИ КНОПОК ---
 const handleWalkingTrip = () => {
   if (!isTripValid.value) {
-    // [UI/UX] вместо console.warn — warning-тост с текстом валидации
     toast.warning(validationError.value || 'Действие недоступно')
     return
   }
@@ -1015,7 +1047,6 @@ const handleWalkingTrip = () => {
 
 const handleGroupTrip = () => {
   if (!selectedVehicle.value || !isTripValid.value) {
-    // [UI/UX] вместо молчаливого return — объяснение
     toast.warning(validationError.value || 'Выберите автомобиль')
     return
   }
@@ -1066,6 +1097,7 @@ onMounted(() => {
 </script>
 
 <style scoped>
+/* Анимации выпадающих панелей */
 .search-results-enter-active { animation: down-slide 0.25s cubic-bezier(0.16, 1, 0.3, 1); }
 .search-results-leave-active { animation: down-slide 0.2s cubic-bezier(0.4, 0, 1, 1) reverse; }
 @keyframes down-slide {

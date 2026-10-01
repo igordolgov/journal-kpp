@@ -1,6 +1,14 @@
 <!-- app/components/JournalTable.vue -->
-<!-- Компонент: Таблица журнала событий. -->
-
+<!-- Компонент: Таблица журнала событий.
+    [UI/UX Фаза 2]:
+      1. [FIX-планшет] кнопки действий БЫЛИ opacity-0 (только hover) — на тач-экране
+        недоступны. Теперь: видны всегда (приглушены), активируются на hover;
+      2. [FIX-планшет] мета-инфо: dropdown-hover -> dropdown-end (по клику/тапу);
+      3. [FIX] статус-бейджи: захардкоженные bg-red-900/bg-green-800 заменены
+        на семантические DaisyUI (badge-warning/badge-success/badge-ghost);
+      4. [FIX-планшет] ресайз-зона 2px -> 8px (невидимая, рабочая);
+      5. Унификация: applyHighlight — алиас единой highlightText;
+      6. Каскад по правилам Pug: классы со спецсимволами — только внутри class="". -->
 <template lang="pug">
 .table-container.w-full.h-full.overflow-auto.relative.flex.flex-col
   //- Панель управления
@@ -15,7 +23,7 @@
             v-model="showClosed"
           )
           span.label-text Показывать закрытые
-      
+
       .form-control(v-if="showClosed")
         label.label.cursor-pointer.gap-2
           input.checkbox.checkbox-sm.checkbox-secondary(
@@ -44,28 +52,30 @@
                 v-if="sortField === col.key"
               )
                 | {{ sortOrder === 1 ? '▲' : '▼' }}
-            
-            .resize-handle.absolute.top-0.bottom-0.w-2.cursor-col-resize(
-              class="z-20 hover:bg-primary opacity-0 hover:opacity-100 transition-opacity"
-              style="right: 0;"
+
+            //- [FIX-планшет] зона ресайза 8px: невидимая, но рабочая.
+            //- Классы со спецсимволами (:, /) — только внутри class=""
+            .resize-handle.absolute.top-0.bottom-0(
+              class="z-20 hover:bg-primary/20 w-2 cursor-col-resize"
+              style="right: -4px;"
               @mousedown.stop="$emit('resize', $event, col.key)"
             )
-          
+
           th(:style="{ width: '90px', minWidth: '90px' }")
             | Действия
 
       tbody
-        template(v-for="(item, index) in groupedRows" :key="item.uniqueId")
-          
+        template(v-for="item in groupedRows" :key="item.uniqueId")
+
           //- ЗАГОЛОВОК ДНЯ
           tr.bg-base-200.border-t-4.border-base-300(
             v-if="item.type === 'header'"
           )
             td.p-2.text-base-content(
-              colspan="100%" 
+              colspan="100%"
               class="bg-opacity-70"
             )
-              span.text-red-400 {{ item.dateLabel }}
+              span.heading-eyebrow {{ item.dateLabel }}
 
           //- ОБЫЧНАЯ ЗАПИСЬ
           tr.hover(
@@ -83,8 +93,7 @@
                   button.btn.btn-xs.btn-info(
                     @click="$emit('exit', item.data)"
                     title="Зафиксировать выход"
-                  )
-                    | Вышел
+                  ) Вышел
                 template(v-else-if="item.data.timestamp_out")
                   span {{ formatTime(item.data.timestamp_out) }}
 
@@ -94,8 +103,7 @@
                   button.btn.btn-xs.btn-success(
                     @click="$emit('return', item.data)"
                     title="Зафиксировать возвращение"
-                  )
-                    | Вернулся
+                  ) Вернулся
                 template(v-else-if="item.data.timestamp_in")
                   span {{ formatTime(item.data.timestamp_in) }}
 
@@ -115,56 +123,63 @@
                 )
 
               //- КОЛОНКА: СТАТУС
+              //- [FIX] семантические DaisyUI-бейджи вместо захардкоженных цветов:
+              //- снаружи = warning (нужен возврат), внутри = success, история = ghost
               template(v-else-if="col.key === 'status'")
                 .badge.badge-sm(
                   :class="getStatusClass(item.data)"
-                )
-                  | {{ getStatusText(item.data) }}
-              
+                ) {{ getStatusText(item.data) }}
+
               //- Остальные
               template(v-else)
                 span {{ item.data[col.key] || '—' }}
 
             //- Ячейка действий
+            //- [FIX-планшет] кнопки видны всегда (opacity-30), ярко на hover:
+            //- тач-пользователь видит и тапает, мышь — получает подсветку
             td.p-1
               .flex.items-center.gap-1.justify-center.relative
-                button.btn.btn-ghost.btn-xs.text-gray-400(
-                  class="opacity-0 group-hover:opacity-100 hover:text-primary"
+                button.btn.btn-ghost.btn-xs.opacity-30(
+                  class="hover:opacity-100! group-hover:opacity-100 hover:text-primary"
                   @click="$emit('edit', item.data)"
                   title="Редактировать запись"
                 )
-                  svg.h-4.w-4(fill="none" stroke="currentColor" viewBox="0 0 24 24")
-                    path(stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z")
+                  Pencil.h-4.w-4
 
-                .dropdown.dropdown-left.dropdown-hover
-                  label.btn.btn-ghost.btn-xs.text-gray-400(tabindex="0")
-                    svg.h-4.w-4(fill="none" stroke="currentColor" viewBox="0 0 24 24")
-                      path(stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z")
+                //- [FIX-планшет] мета-инфо по клику (было dropdown-hover —
+                //- только мышь), dropdown-end — не вылезает за правый край
+                .dropdown.dropdown-left.dropdown-end
+                  label.btn.btn-ghost.btn-xs.opacity-30(
+                    class="group-hover:opacity-100"
+                    tabindex="0"
+                    title="Информация о записи"
+                  )
+                    Info.h-4.w-4
                   .dropdown-content.z-50.p-3.shadow.bg-base-100.rounded-box.w-64(translate="no")
                     .text-xs.space-y-1
-                      div
-                        span.font-bold Создено: 
-                        span {{ formatMetaDate(item.data.created_at) }}
-                      div
-                        span.font-bold Автор: 
-                        span {{ getAuthorName(item.data) }}
-                      
+                      .flex.justify-between.gap-2
+                        span.font-bold.shrink-0 Создано:
+                        span.text-right {{ formatMetaDate(item.data.created_at) }}
+                      .flex.justify-between.gap-2
+                        span.font-bold.shrink-0 Автор:
+                        span.text-right {{ getAuthorName(item.data) }}
+
                       template(v-if="item.data.updated_at")
                         .divider.my-1
-                        div
-                          span.font-bold Изменено: 
-                          span {{ formatMetaDate(item.data.updated_at) }}
-                        div
-                          span.font-bold Редактор: 
-                          span {{ item.data.updated_by || 'Не указан' }}
+                        .flex.justify-between.gap-2
+                          span.font-bold.shrink-0 Изменено:
+                          span.text-right {{ formatMetaDate(item.data.updated_at) }}
+                        .flex.justify-between.gap-2
+                          span.font-bold.shrink-0 Редактор:
+                          span.text-right {{ item.data.updated_by || 'Не указан' }}
 </template>
 
 <script setup lang="ts">
 // app/components/JournalTable.vue — script
-// [ИСПРАВЛЕНО] type-only props (runtime Object/Array давали unknown) и guard'ы
-// строковых индексов в formatPlateHtml/formatVehicleEntry/getShortFio.
 import { computed, ref, unref } from 'vue'
 import { useState } from 'nuxt/app'
+// [UI/UX] Lucide: иконки действий (вместо инлайн-SVG)
+import { Pencil, Info } from '@lucide/vue'
 import { useJournal } from '../composables/useJournal'
 
 const props = withDefaults(defineProps<{
@@ -328,22 +343,28 @@ const getShortFio = (fio: string) => {
   let initials = ''
 
   if (parts.length > 1) {
-    // [ИСПРАВЛЕНО] charAt(0) вместо индексов строк
+    // charAt(0) вместо индексов строк (noUncheckedIndexedAccess)
     initials = parts.slice(1).map(n => n.charAt(0) ? n.charAt(0).toUpperCase() + '.' : '').join(' ')
   }
 
   return `${prefix}${surname} ${initials}`.trim()
 }
 
+// Подсветка поискового вхождения — ЕДИНАЯ функция
+// (принимает и ref, и строку — для совместимости с обоими вызовами)
 const highlightText = (text: string, query: any) => {
-  const q = query?.value || ''
+  const q = unref(query) || query?.value || ''
   if (!q || !text) return text
 
   const searchTerm = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   const regex = new RegExp(`(${searchTerm})`, 'gi')
 
-  return String(text).replace(regex, '<span class="bg-yellow-200 px-0.5 rounded text-black">$1</span>')
+  return String(text).replace(regex, '<span class="bg-warning/40 px-0.5 rounded">$1</span>')
 }
+
+// [FIX] алиас: formatPlateHtml использует историческое имя applyHighlight.
+// Логика едина с highlightText — дублирования нет.
+const applyHighlight = (text: string, queryVal: string) => highlightText(text, queryVal)
 
 const isChild = (entry: any) => {
   const isChildCategory = entry.person_category === 'Ребенок'
@@ -352,10 +373,13 @@ const isChild = (entry: any) => {
   return isChildFlag || isChildCategory || fioHasPlus
 }
 
+// [FIX] семантические статусы: DaisyUI-классы вместо захардкоженных цветов.
+// Смысл: снаружи = warning (нужен возврат), внутри = success (гость на месте),
+// закрыто = ghost (история).
 const getStatusClass = (entry: any) => {
-  if (entry.timestamp_out && entry.timestamp_in) return 'badge-ghost text-gray-400'
-  if (entry.timestamp_out && !entry.timestamp_in) return 'bg-red-900 text-white'
-  if (entry.timestamp_in && !entry.timestamp_out) return 'bg-green-800 text-white'
+  if (entry.timestamp_out && entry.timestamp_in) return 'badge-ghost'
+  if (entry.timestamp_out && !entry.timestamp_in) return 'badge-warning'
+  if (entry.timestamp_in && !entry.timestamp_out) return 'badge-success'
   return 'badge-ghost'
 }
 
@@ -366,21 +390,14 @@ const getStatusText = (entry: any) => {
   return '—'
 }
 
-const applyHighlight = (text: string, queryVal: string) => {
-  if (!queryVal || !text) return text
-  const searchTerm = queryVal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const regex = new RegExp(`(${searchTerm})`, 'gi')
-  return text.replace(regex, '<span class="bg-yellow-200 px-0.5 rounded text-black">$1</span>')
-}
-
 const formatPlateHtml = (plateStr: string, queryVal: string) => {
   if (!plateStr) return ''
   if (plateStr.includes('🚶') || !/\d/.test(plateStr)) {
-    return `<span class="text-gray-500">${applyHighlight(plateStr, queryVal)}</span>`
+    return `<span class="text-base-content/50">${applyHighlight(plateStr, queryVal)}</span>`
   }
 
   const parts = plateStr.split(' ')
-  // [ИСПРАВЛЕНО] pop() может вернуть undefined — fallback ''
+  // pop() может вернуть undefined — fallback ''
   const region = parts.length > 1 ? (parts.pop() ?? '') : ''
   const main = parts.join(' ')
 
@@ -388,9 +405,9 @@ const formatPlateHtml = (plateStr: string, queryVal: string) => {
   const highlightedRegion = applyHighlight(region, queryVal)
 
   return `
-    <span class="inline-flex items-center bg-neutral-200 px-1 border-2 border-gray-400 rounded-sm h-6 font-mono text-xs plate-badge">
-      <span class="text-black text-lg">${highlightedMain}</span>
-      <sup class="ml-0.5 font-bold text-black">${highlightedRegion}</sup>
+    <span class="inline-flex items-center bg-neutral px-1 border-2 border-base-content/20 rounded-sm h-6 font-mono text-xs plate-badge">
+      <span class="text-neutral-content text-lg">${highlightedMain}</span>
+      <sup class="ml-0.5 font-bold text-neutral-content">${highlightedRegion}</sup>
     </span>
   `
 }
@@ -413,11 +430,11 @@ const formatVehicleEntry = (entry: any, queryRef: any) => {
   const q = unref(queryRef) || ''
 
   if (text.includes('/')) {
-    // [ИСПРАВЛЕНО] деструктуризация split даёт string | undefined — fallback
+    // деструктуризация split даёт string | undefined — fallback
     const chunks = text.split('/')
     const p1 = chunks[0] ?? ''
     const p2 = chunks[1] ?? ''
-    return `${formatPlateHtml(p1.trim(), q)} <span class="mx-1 text-gray-400">/</span> ${formatPlateHtml(p2.trim(), q)}`
+    return `${formatPlateHtml(p1.trim(), q)} <span class="mx-1 text-base-content/40">/</span> ${formatPlateHtml(p2.trim(), q)}`
   }
 
   return formatPlateHtml(text, q)
@@ -449,12 +466,12 @@ const getAuthorName = (entry: any) => {
 </script>
 
 <style scoped>
-/* 1. Блеклость закрытых записей */
+/* 1. Блеклость закрытых записей (история) — через токены темы */
 tr.row-is-faded {
-  color: #5d6168 !important;
+  color: color-mix(in oklab, var(--color-base-content) 45%, transparent) !important;
 }
 tr.row-is-faded td {
-  color: #7d828b !important;
+  color: color-mix(in oklab, var(--color-base-content) 50%, transparent) !important;
 }
 
 /* 2. Полупрозрачность бейджа номера для закрытых строк */
@@ -462,12 +479,7 @@ tr.row-is-faded :deep(.plate-badge) {
   opacity: 0.5;
 }
 
-/* 3. Фон номера авто в ячейке */
-td :deep(.bg-neutral-200) {
-  background-color: #bbbbbb; 
-}
-
-/* 4. Стили хэндлера ресайза */
+/* 3. Стили хэндлера ресайза */
 .resize-handle {
   background-clip: padding-box;
 }

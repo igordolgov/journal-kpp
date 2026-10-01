@@ -34,7 +34,7 @@
             //- [UI/UX] подсказка-онбординг: назначение экрана и первый шаг
             div
               h3.card-title Журнал событий
-              p.mt-1.text-xs(class="text-base-content/50")
+              p.mt-1.text-xs.text-base-content/50
                 | Все въезды и выезды. Оформите поездку слева: выберите человека или автомобиль.
             .tabs.tabs-boxed.p-1(
               class="bg-base-200"
@@ -76,7 +76,7 @@
               .flex.justify-center.items-center.h-full
                 span.loading.loading-dots.loading-lg.text-primary
 
-//- МОДАЛЬНЫЕ ОКНА (Compact & Premium UI)
+//- МОДАЛЬНЫЕ ОКНА — единый паттерн: header (иконка+тайтл+X) / body / footer
 
 //- 1. Детальная карточка человека
 dialog.modal.modal-open(
@@ -101,6 +101,7 @@ dialog.modal.modal-open(
 
       button.btn.btn-ghost.btn-circle.btn-sm(
         @click="isPersonDetailOpen = false"
+        aria-label="Закрыть"
       )
         X.h-5.w-5
 
@@ -121,13 +122,13 @@ dialog.modal.modal-open(
           ) Отдел
           span.font-medium {{ detailPerson.department || '—' }}
 
-        //- Строка: Транспорт (Логика: Слеш если разные)
+        //- Строка: Транспорт (Слеш, если разные)
         .flex.flex-col.col-span-2.mt-2
           span.text-xs.font-medium.uppercase.tracking-wider(
             class="text-base-content/50"
           ) Транспорт
           span.font-medium.flex.items-center.gap-1
-            ArrowLeftRight.h-4.w-4.shrink-0.opacity-60
+            ArrowLeftRight.w-4.h-4.shrink-0(class="opacity-60")
             | {{ formatVehicleDisplay(detailPerson) }}
 
         //- Строка: Телефон
@@ -138,12 +139,10 @@ dialog.modal.modal-open(
             class="text-base-content/50"
           ) Контакты
           span.font-medium.flex.items-center.gap-1
-            Phone.h-4.w-4.shrink-0.opacity-60
+            Phone.w-4.h-4.shrink-0(class="opacity-60")
             | {{ detailPerson.phone }}
 
-        //- Строка: Статус
-        //- [FIX] раньше detailPerson.isInside — поля не существует, бейдж
-        //- всегда показывал «За территорией»; теперь computed по поездке/локации
+        //- Строка: Статус (computed detailPersonInside — не несуществующее isInside)
         .flex.flex-col.col-span-2.mt-2
           span.text-xs.font-medium.uppercase.tracking-wider(
             class="text-base-content/50"
@@ -159,8 +158,7 @@ dialog.modal.modal-open(
     )
       button.btn.btn-primary.btn-sm.btn-block(
         @click="isPersonDetailOpen = false"
-      )
-        | Закрыть
+      ) Закрыть
 
   form.modal-backdrop(
     class="bg-black/40 backdrop-blur-sm"
@@ -168,19 +166,34 @@ dialog.modal.modal-open(
   )
     button close
 
-//- 2. Модалка Выезда/Въезда (Simple)
+//- 2. Модалка Выезда (Simple)
 dialog.modal.modal-open(
   v-if="isExitModalOpen"
 )
   .modal-box.max-w-xs.p-0.overflow-hidden(
     class="bg-base-100 shadow-2xl border border-base-200/50 rounded-xl"
   )
+    //- Header — единый паттерн
+    .flex.justify-between.items-center.p-3(
+      class="bg-base-200/50 border-base-200 border-b"
+    )
+      .flex.items-center.gap-2
+        .w-8.h-8.rounded-full.flex.items-center.justify-center(
+          class="bg-info/10 text-info"
+        )
+          LogOut.w-4.h-4
+        h3.text-base.font-bold Фиксация выезда
+      button.btn.btn-ghost.btn-circle.btn-xs(
+        type="button"
+        @click="isExitModalOpen = false"
+        aria-label="Закрыть"
+      )
+        X.w-4.h-4
+
     form.form-control.gap-3(
       @submit.prevent="handleSaveExit"
     )
       .p-4
-        h3.text-lg.font-bold.mb-3 Фиксация выезда
-
         .form-control
           label.label.py-1
             span.label-text.text-xs Место назначения
@@ -195,18 +208,17 @@ dialog.modal.modal-open(
           .flex.justify-between.items-center.mb-1
             label.label.py-1.px-0
               span.text-xs.font-bold Попутчики:
-            button.btn.btn-xs.btn-ghost.btn-sm.py-0.h-4(
+            button.btn.btn-xs.btn-ghost.py-0.h-4(
               type="button"
               @click="selectAllExitCandidates"
-            )
-              | Все
+            ) Все
 
           .flex.flex-col.gap-1.max-h-32.overflow-y-auto
             label.label.cursor-pointer.justify-between.p-2.rounded-lg(
-              class="hover:bg-base-200/50 border border-transparent"
               v-for="c in exitForm.groupCandidates"
               :key="c.id"
-              :class="exitForm.selectedGroupIds.includes(c.id) ? 'bg-primary/5 border-primary/20!' : 'bg-base-50'"
+              class="hover:bg-base-200/50 border border-transparent"
+              :class="exitForm.selectedGroupIds.includes(c.id) ? 'bg-primary/5 border-primary/20!' : 'bg-base-100'"
             )
               .flex.items-center.gap-2
                 input.checkbox.checkbox-xs(
@@ -217,18 +229,18 @@ dialog.modal.modal-open(
                 )
                 span.text-sm {{ c.fio }}
 
+      //- Footer — единый паттерн
       .modal-action.p-3(
         class="bg-base-200/30 border-base-200 border-t"
       )
         button.btn.btn-ghost.btn-sm(
           type="button"
           @click="isExitModalOpen = false"
-        )
-          | Отмена
+        ) Отмена
         button.btn.btn-primary.btn-sm(
           type="submit"
         )
-          LogOut.h-4.w-4.mr-1
+          LogOut.w-4.h-4.mr-1
           | Подтвердить
 
   form.modal-backdrop(
@@ -244,37 +256,46 @@ dialog.modal.modal-open(
   .modal-box.max-w-md.p-0.overflow-hidden(
     class="bg-base-100 shadow-2xl border border-base-200/50 rounded-xl"
   )
-    //- Header
-    .relative.p-4(
-      class="bg-linear-to-br from-primary/5 to-secondary/5 border-base-200 border-b"
+    //- Header — единый паттерн
+    .flex.justify-between.items-center.p-3(
+      class="bg-base-200/50 border-base-200 border-b"
     )
-      button.absolute.top-3.right-3.btn.btn-ghost.btn-circle.btn-xs(
+      .flex.items-center.gap-2
+        .w-8.h-8.rounded-full.flex.items-center.justify-center(
+          class="bg-success/10 text-success"
+        )
+          LogIn.w-4.h-4
+        div
+          h3.text-base.font-bold.text-base-content Возврат
+          p.text-xs(
+            class="text-base-content/60"
+          ) {{ returnForm.person_fio }}
+      button.btn.btn-ghost.btn-circle.btn-xs(
+        type="button"
         @click="isReturnModalOpen = false"
+        aria-label="Закрыть"
       )
-        X.h-4.w-4
+        X.w-4.h-4
 
-      h3.text-lg.font-bold.text-base-content Возврат
-      p.text-lg(
-        class="text-base-content/60"
-      ) {{ returnForm.person_fio }}
-
-    //- Body
-    .px-4.space-y-1
+    //- Body (прокрутка: на планшете в landscape не влезает)
+    .px-4.py-3.space-y-1.overflow-y-auto(
+      class="max-h-[55vh]"
+    )
       //- Секция: Транспорт
       div
         label.label.py-1.px-0.justify-start.gap-2
           span.text-xs.font-bold Транспорт:
 
         .flex.flex-wrap.gap-2.mt-1
-          //- Кнопки реального транспорта (отфильтрованного)
+          //- Кнопки реального транспорта
           button.flex.items-center.p-2.rounded-lg(
-            class="gap-1.5 border transition-all duration-200"
             v-for="v in availableVehicles"
             :key="v.id"
-            :class="returnForm.vehicle_in === v.plate ? 'border-primary bg-primary/10 shadow-sm' : 'border-base-300 hover:border-base-400 bg-base-50'"
+            class="gap-1.5 border transition-all duration-200"
+            :class="returnForm.vehicle_in === v.plate ? 'border-primary bg-primary/10 shadow-sm' : 'border-base-300 hover:border-base-400 bg-base-100'"
             @click="returnForm.vehicle_in = v.plate"
           )
-            Car.h-4.w-4.shrink-0.opacity-70
+            Car.w-4.h-4.shrink-0(class="opacity-70")
             span.font-mono.text-xs.font-bold(
               :class="returnForm.vehicle_in === v.plate ? 'text-primary' : 'text-base-content'"
             ) {{ v.plate }}
@@ -282,10 +303,10 @@ dialog.modal.modal-open(
           //- Кнопка "Пешком"
           button.flex.items-center.p-2.rounded-lg(
             class="gap-1.5 border transition-all duration-200"
-            :class="isWalkingSelected ? 'border-success bg-success/10 shadow-sm' : 'border-base-300 hover:border-base-400 bg-base-50'"
+            :class="isWalkingSelected ? 'border-success bg-success/10 shadow-sm' : 'border-base-300 hover:border-base-400 bg-base-100'"
             @click="returnForm.vehicle_in = ''"
           )
-            Footprints.h-4.w-4.shrink-0(
+            Footprints.w-4.h-4.shrink-0(
               :class="isWalkingSelected ? 'text-success' : 'text-base-content/70'"
             )
             span.text-xs.font-bold(
@@ -299,17 +320,17 @@ dialog.modal.modal-open(
         .flex.justify-between.items-center.mb-1
           label.label.py-1.px-0
             span.text-xs.font-bold Попутчики:
-          button.btn.btn-xs.btn-ghost.btn-sm.py-0.h-4(
+          button.btn.btn-xs.btn-ghost.py-0.h-4(
+            type="button"
             @click="selectAllReturnCandidates"
-          )
-            | Все
+          ) Все
 
-        .flex.flex-col.gap-0.max-h-48.overflow-y-auto
+        .flex.flex-col.gap-1.max-h-48.overflow-y-auto
           label.label.cursor-pointer.justify-between.rounded-lg(
-            class="hover:bg-base-200/50 p-[0.5] border border-transparent"
             v-for="c in returnForm.groupCandidates"
             :key="c.id"
-            :class="returnForm.selectedGroupIds.includes(c.id) ? 'bg-primary/5 border-primary/20!' : 'bg-base-50'"
+            class="hover:bg-base-200/50 p-1.5 border border-transparent"
+            :class="returnForm.selectedGroupIds.includes(c.id) ? 'bg-primary/5 border-primary/20!' : 'bg-base-100'"
           )
             .flex.items-center.gap-2
               input.checkbox.checkbox-xs(
@@ -318,7 +339,7 @@ dialog.modal.modal-open(
                 :value="c.id"
                 v-model="returnForm.selectedGroupIds"
               )
-              //- Подсветка детей и вывод родства
+              //- Подсветка детей и родство
               span.text-sm(
                 :class="{ 'text-warning': c.isChild }"
               )
@@ -330,24 +351,25 @@ dialog.modal.modal-open(
         label.label.py-1.px-0
           span.text-xs.font-bold Заметка:
         textarea.textarea.textarea-bordered.w-full.h-14.text-sm(
-          class="bg-base-50 focus:bg-base-100 transition-colors resize-none"
+          class="bg-base-100 focus:bg-base-100 transition-colors resize-none"
           v-model="returnForm.note"
           placeholder="Примечание..."
         )
 
-    //- Footer
-    .modal-action.px-3.my-3(
+    //- Footer — единый паттерн
+    .modal-action.px-3.py-3(
       class="bg-base-200/30 border-base-200 border-t"
     )
       button.btn.btn-ghost.btn-sm(
+        type="button"
         @click="isReturnModalOpen = false"
-      )
-        | Отмена
+      ) Отмена
       button.btn.btn-success.btn-sm(
+        type="button"
         class="shadow-md shadow-success/20"
         @click="handleSaveReturn"
       )
-        Check.h-4.w-4.mr-1
+        Check.w-4.h-4.mr-1
         | Зафиксировать
 
   form.modal-backdrop(
@@ -363,9 +385,24 @@ dialog.modal.modal-open(
   .modal-box.max-w-xs.p-0.overflow-hidden(
     class="bg-base-100 shadow-2xl border border-base-200/50 rounded-xl"
   )
-    .p-4
-      h3.text-lg.font-bold.mb-3 Редактирование
+    //- Header — единый паттерн
+    .flex.justify-between.items-center.p-3(
+      class="bg-base-200/50 border-base-200 border-b"
+    )
+      .flex.items-center.gap-2
+        .w-8.h-8.rounded-full.flex.items-center.justify-center(
+          class="bg-warning/10 text-warning"
+        )
+          Pencil.w-4.h-4
+        h3.text-base.font-bold Редактирование
+      button.btn.btn-ghost.btn-circle.btn-xs(
+        type="button"
+        @click="isEditJournalOpen = false"
+        aria-label="Закрыть"
+      )
+        X.w-4.h-4
 
+    .p-4
       .form-control.gap-3
         .form-control
           label.label.py-1
@@ -388,19 +425,21 @@ dialog.modal.modal-open(
       class="bg-base-200/30 border-base-200 border-t"
     )
       button.btn.btn-error.btn-sm(
+        type="button"
         @click="handleDeleteEntry"
       )
-        Trash2.h-4.w-4.mr-1
+        Trash2.w-4.h-4.mr-1
         | Удалить
       .flex.gap-2
         button.btn.btn-ghost.btn-sm(
+          type="button"
           @click="isEditJournalOpen = false"
-        )
-          | Отмена
+        ) Отмена
         button.btn.btn-primary.btn-sm(
+          type="button"
           @click="handleSaveEdit"
         )
-          Save.h-4.w-4.mr-1
+          Save.w-4.h-4.mr-1
           | Сохранить
 
   form.modal-backdrop(
