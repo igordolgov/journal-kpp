@@ -460,7 +460,7 @@ import { onMounted, ref, computed, useState } from '#imports'
 // [UI/UX] Lucide: модалки журнала
 import {
   X, ArrowLeftRight, Phone, Car, Footprints, Check,
-  Trash2, Save, LogOut
+  Trash2, Save, LogOut, LogIn, Pencil
 } from '@lucide/vue'
 
 // Компоненты
