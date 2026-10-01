@@ -34,7 +34,7 @@
             //- [UI/UX] подсказка-онбординг: назначение экрана и первый шаг
             div
               h3.card-title Журнал событий
-              p.mt-1.text-xs.text-base-content/50
+              p.mt-1.text-xs(class="text-base-content/50")
                 | Все въезды и выезды. Оформите поездку слева: выберите человека или автомобиль.
             .tabs.tabs-boxed.p-1(
               class="bg-base-200"
