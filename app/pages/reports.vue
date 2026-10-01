@@ -1,13 +1,7 @@
-<!-- app/pages/reports.vue -->
-<!-- Страница премиальной аналитики.
-    Интерфейс разработан для размещения на одном экране (100vh) без скролла.
-    Используется сетка из 12 колонок, жесткое управление высотами через flex-1/min-h-0,
-    градиентный фон для глубины и улучшенные карточки с тенями.
--->
-
 <template lang="pug">
-//- Основной контейнер. [FIX] было h-[calc(100dvh-60px)] — расчёт под старую
-//- шапку layout, которая теперь только на журнале; высоту даёт main (h-screen).
+//- Страница аналитики: один экран (100%), сетка 12 колонок.
+//- [Фаза 4]: Lucide на стат-карточках и заголовках секций; пустые состояния
+//- графиков («Нет данных за период») через оверлей hasEntries.
 .reports-page.flex.flex-col.w-full.overflow-hidden.gap-0(
   class="bg-linear-to-br from-base-200 to-base-300 h-full"
 )
@@ -28,28 +22,33 @@
   //- КАРТОЧКИ СТАТИСТИКИ (Компактные, в один ряд)
   .grid.grid-cols-5.gap-3.px-4.pb-3.flex-none
     .stat.shadow-xl.bg-base-100.p-3.rounded-xl.border.border-base-300
-      .stat-title.text-xs.opacity-60
-        | 📝 Записей
+      .stat-title.text-xs.opacity-60.flex.items-center.gap-1
+        ClipboardList.w-3.h-3
+        | Записей
       .stat-value.text-2xl.font-bold.text-primary {{ stats.totalEntries }}
 
     .stat.shadow-xl.bg-base-100.p-3.rounded-xl.border.border-base-300
-      .stat-title.text-xs.opacity-60
-        | 🚶 На выезде
+      .stat-title.text-xs.opacity-60.flex.items-center.gap-1
+        LogOut.w-3.h-3
+        | На выезде
       .stat-value.text-2xl.font-bold.text-warning {{ stats.residentsOut }}
 
     .stat.shadow-xl.bg-base-100.p-3.rounded-xl.border.border-base-300
-      .stat-title.text-xs.opacity-60
-        | 🤝 Гостей
+      .stat-title.text-xs.opacity-60.flex.items-center.gap-1
+        LogIn.w-3.h-3
+        | Гостей
       .stat-value.text-2xl.font-bold.text-success {{ stats.guestsIn }}
 
     .stat.shadow-xl.bg-base-100.p-3.rounded-xl.border.border-base-300
-      .stat-title.text-xs.opacity-60
-        | ⏱ В среднем
+      .stat-title.text-xs.opacity-60.flex.items-center.gap-1
+        Timer.w-3.h-3
+        | В среднем
       .stat-value.text-2xl.font-bold.text-accent {{ stats.avgDuration }}
 
     .stat.shadow-xl.bg-base-100.p-3.rounded-xl.border.border-base-300
-      .stat-title.text-xs.opacity-60
-        | 🔥 Пик
+      .stat-title.text-xs.opacity-60.flex.items-center.gap-1
+        Flame.w-3.h-3
+        | Пик
       .stat-value.text-2xl.font-bold.text-error {{ stats.peakHour }}
 
   //- ОСНОВНОЙ КОНТЕНТ (Графики занимают 100% оставшейся высоты)
@@ -63,20 +62,29 @@
           class="flex-2"
         )
           .card-body.p-3.gap-2
-            h4.text-xs.font-bold.text-base-content.opacity-70.uppercase.tracking-wider
+            h4.text-xs.font-bold.text-base-content.opacity-70.uppercase.tracking-wider.flex.items-center.gap-1
+              ChartPie.w-3.h-3
               | Текущая аудитория
             .relative.w-full.h-full
               DoughnutChart(
                 :data="audienceChartData"
                 :options="doughnutOptions"
               )
+              //- [Фаза 4] пустое состояние
+              .absolute.inset-0.flex.flex-col.items-center.justify-center.gap-1(
+                v-if="!hasEntries"
+                class="bg-base-100/80 rounded-box"
+              )
+                ChartPie.w-8.h-8(class="text-base-content/20")
+                p.text-xs.text-base-content/40 Нет данных за период
 
         .card.shadow-xl.bg-base-100.min-h-0.border.border-base-300(
           class="flex-1"
         )
           .card-body.p-3.gap-2.overflow-hidden
-            h4.text-xs.font-bold.text-base-content.opacity-70.uppercase.tracking-wider
-              | 🚶 Отсутствуют
+            h4.text-xs.font-bold.text-base-content.opacity-70.uppercase.tracking-wider.flex.items-center.gap-1
+              Footprints.w-3.h-3
+              | Отсутствуют
             .flex.flex-col.gap-1.overflow-y-auto.custom-scrollbar
               .flex.justify-between.items-center.rounded-lg(
                 v-for="p in topAbsentPeople"
@@ -96,13 +104,21 @@
       )
         .card.shadow-xl.bg-base-100.flex-1.min-h-0.border.border-base-300
           .card-body.p-4.h-full.flex.flex-col.gap-2
-            h4.text-xs.font-bold.text-base-content.opacity-70.uppercase.tracking-wider
+            h4.text-xs.font-bold.text-base-content.opacity-70.uppercase.tracking-wider.flex.items-center.gap-1
+              Activity.w-3.h-3
               | Хроника КПП
             .relative.w-full.flex-1.min-h-0
               LineChart(
                 :data="timelineChartData"
                 :options="timelineChartOptions"
               )
+              //- [Фаза 4] пустое состояние
+              .absolute.inset-0.flex.flex-col.items-center.justify-center.gap-1(
+                v-if="!hasEntries"
+                class="bg-base-100/80 rounded-box"
+              )
+                ChartLine.w-8.h-8(class="text-base-content/20")
+                p.text-xs.text-base-content/40 Нет данных за период
 
       //- ПРАВАЯ КОЛОНКА (Пиковые часы + Места + Транспорт)
       .col-span-12.flex.flex-col.gap-3(
@@ -112,20 +128,29 @@
           class="flex-2"
         )
           .card-body.p-3.gap-2.h-full.flex.flex-col
-            h4.text-xs.font-bold.text-base-content.opacity-70.uppercase.tracking-wider
-              | 📈 Пиковые часы
+            h4.text-xs.font-bold.text-base-content.opacity-70.uppercase.tracking-wider.flex.items-center.gap-1
+              ChartColumn.w-3.h-3
+              | Пиковые часы
             .relative.w-full.flex-1.min-h-0
               BarChart(
                 :data="peakHoursChartData"
                 :options="peakHoursOptions"
               )
+              //- [Фаза 4] пустое состояние
+              .absolute.inset-0.flex.flex-col.items-center.justify-center.gap-1(
+                v-if="!hasEntries"
+                class="bg-base-100/80 rounded-box"
+              )
+                ChartColumn.w-8.h-8(class="text-base-content/20")
+                p.text-xs.text-base-content/40 Нет данных за период
 
         .card.shadow-xl.bg-base-100.min-h-0.border.border-base-300(
           class="flex-1"
         )
           .card-body.p-3.gap-2.overflow-hidden
-            h4.text-xs.font-bold.text-base-content.opacity-70.uppercase.tracking-wider
-              | 🚗 Транспорт / Места
+            h4.text-xs.font-bold.text-base-content.opacity-70.uppercase.tracking-wider.flex.items-center.gap-1
+              MapPin.w-3.h-3
+              | Транспорт / Места
             .flex.flex-col.gap-1.overflow-y-auto.custom-scrollbar.text-sm
               .flex.justify-between.items-center(
                 v-for="v in activeVehicles"
@@ -142,7 +167,9 @@
                 :key="d.label"
                 class="hover:bg-base-200 p-1 rounded transition-colors"
               )
-                span.truncate 📍{{ d.label }}
+                span.truncate.inline-flex.items-center.gap-1
+                  MapPin.w-3.h-3(class="opacity-50")
+                  | {{ d.label }}
                 span.text-xs.opacity-50 {{ d.total }} раз
               .text-center.text-xs.opacity-40.py-2(
                 v-if="!activeVehicles.length && !topDestinations.length"
@@ -157,14 +184,21 @@
 <script setup lang="ts">
 // app/pages/reports.vue — script
 // Аналитика КПП: статистика, графики Chart.js, компактные списки.
+// [Фаза 4]: Lucide-иконки (стат-карточки, заголовки секций);
+// hasEntries — пустые состояния графиков.
 import { ref, computed, onMounted } from 'vue'
 import { Line as LineChart, Bar as BarChart, Doughnut as DoughnutChart } from 'vue-chartjs'
 import {
   Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, ArcElement, Title, Tooltip, Legend, Filler
 } from 'chart.js'
-// [ИСПРАВЛЕНО] аннотирование опций литеральным типом — строковые поля
-// (position/mode) иначе не проходят контравариантную проверку
+// Аннотирование опций литеральным типом — строковые поля (position/mode)
+// иначе не проходят контравариантную проверку
 import type { ChartOptions } from 'chart.js'
+// [Фаза 4] Lucide: стат-карточки, заголовки секций, пустые состояния
+import {
+  ClipboardList, LogOut, LogIn, Timer, Flame,
+  ChartPie, ChartLine, ChartColumn, Activity, Footprints, MapPin
+} from '@lucide/vue'
 import { useJournal } from '~/composables/useJournal'
 import { useShift } from '~/composables/useShift'
 import { useDatabase } from '~/composables/useDatabase'
@@ -218,8 +252,7 @@ const formatDuration = (ms: number) => {
 }
 
 // Проверка: является ли человек жителем.
-// БАГ БЫЛ: сравнение со строками 'вне территории'/'outside', которых нет в
-// проекте (реальные значения — 'На территории'/'В городе'/'Город')
+// Реальные значения location — 'На территории'/'В городе'/'Город'.
 const isResidentCheck = (person: any) => {
   const loc = (person?.location || '').trim().toLowerCase()
   if (!loc) return true
@@ -235,6 +268,9 @@ const filteredEntries = computed(() => {
     return Math.max(t1, t2) >= startTime
   })
 })
+
+// [Фаза 4] есть ли записи за выбранный период — управляет пустыми состояниями
+const hasEntries = computed(() => filteredEntries.value.length > 0)
 
 // --- Статистика ---
 const stats = computed(() => {
@@ -368,8 +404,7 @@ const timelineChartData = computed(() => {
   }
 })
 
-// [ИСПРАВЛЕНО] ChartOptions<'line'>: 'index'/'top'/'left'/'right' теперь
-// литеральные типы через контекстную типизацию
+// ChartOptions<'line'>: литеральные типы через контекстную типизацию
 const timelineChartOptions: ChartOptions<'line'> = {
   responsive: true,
   maintainAspectRatio: false,
@@ -420,7 +455,6 @@ const audienceChartData = computed(() => {
   }
 })
 
-// [ИСПРАВЛЕНО] ChartOptions<'doughnut'>
 const doughnutOptions: ChartOptions<'doughnut'> = {
   responsive: true,
   maintainAspectRatio: false,
@@ -449,8 +483,6 @@ const peakHoursChartData = computed(() => {
   }
 })
 
-// [ИСПРАВЛЕНО] ChartOptions<'bar'> — для единообразия (ошибок тут не было,
-// но аннотация защитит от будущих строковых литералов)
 const peakHoursOptions: ChartOptions<'bar'> = {
   responsive: true,
   maintainAspectRatio: false,
@@ -505,18 +537,3 @@ const topDestinations = computed(() => {
     .slice(0, 3)
 })
 </script>
-
-<style scoped>
-/* app/pages/reports.vue */
-/* Скрытие стандартного скроллбара для списка отсутствующих и транспорта */
-.custom-scrollbar::-webkit-scrollbar {
-  width: 4px;
-}
-.custom-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
-}
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.1);
-  border-radius: 2px;
-}
-</style>
