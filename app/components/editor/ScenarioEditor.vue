@@ -15,8 +15,9 @@
         span.trigger-icon.text-xs.opacity-70(v-if="s.trigger === 'scene_start'") ▶️
         span.trigger-icon.text-xs.opacity-70(v-else) ⏸️
         span.truncate {{ s.name }}
-        button.close-btn.ml-1.opacity-50.hover_opacity-100(
+        button.close-btn.ml-1.opacity-50(
           v-if="selectedScriptId === s.id"
+          class="hover:opacity-100"
           @click.stop="$emit('delete:script', s.id)"
         ) ✕
 

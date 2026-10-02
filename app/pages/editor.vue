@@ -112,16 +112,70 @@
       )
 
   //- МОДАЛКА ЗАГРУЗКИ СЦЕН
+  //- [Фаза 5] единый паттерн: шапка (иконка + тайтл + X), список с датами,
+  //- пустое состояние, footer
   dialog.modal(:class="isLoadModalOpen ? 'modal-open' : ''")
-    .modal-box.bg-gray-800.rounded-lg.p-6.max-w-md.w-full
-      h3.text-lg.font-bold.mb-4 📂 Загрузить сцену
-      .max-h-96.overflow-y-auto.mb-4
-        div(v-if="savedScenes.length === 0" class="text-gray-400") Нет сохранённых сцен
-        div(v-for="scene in savedScenes" :key="scene.id" class="py-2.border-b.border-gray-700.cursor-pointer.hover:bg-gray-700" @click="loadSelectedScene(scene.id)")
-          .font-medium {{ scene.name }}
-          .text-xs.text-gray-400 {{ new Date(scene.updatedAt || scene.createdAt).toLocaleString() }}
-      .flex.justify-end
-        button.btn.btn-sm(@click="isLoadModalOpen = false") Закрыть    
+    .modal-box.p-0.overflow-hidden.rounded-xl.max-w-md.w-full(
+      class="bg-base-100 shadow-2xl border border-base-200/50"
+    )
+      //- Header — единый паттерн
+      .flex.justify-between.items-center.p-3(
+        class="bg-base-200/50 border-base-200 border-b"
+      )
+        .flex.items-center.gap-2
+          .w-8.h-8.rounded-full.flex.items-center.justify-center(
+            class="bg-primary/10 text-primary"
+          )
+            FolderOpen.w-4.h-4
+          h3.text-base.font-bold Загрузить сцену
+        button.btn.btn-ghost.btn-circle.btn-xs(
+          type="button"
+          @click="isLoadModalOpen = false"
+          aria-label="Закрыть"
+        )
+          X.w-4.h-4
+
+      //- Body: список сцен
+      .max-h-96.overflow-y-auto.p-2
+        .flex.flex-col.gap-1
+          .flex.justify-between.items-center.p-2.rounded-lg.cursor-pointer.transition-colors(
+            v-for="scene in savedScenes"
+            :key="scene.id"
+            class="hover:bg-base-200 border border-transparent hover:border-base-300"
+            @click="loadSelectedScene(scene.id)"
+          )
+            .flex.items-center.gap-2.min-w-0
+              .w-8.h-8.rounded-lg.flex.items-center.justify-center.shrink-0(
+                class="bg-base-200"
+              )
+                Boxes.w-4.h-4(class="text-base-content/50")
+              .min-w-0
+                .font-medium.text-sm.truncate {{ scene.name }}
+                .text-xs(
+                  class="text-base-content/50"
+                ) {{ formatSceneDate(scene) }}
+            ChevronRight.w-4.h-4.shrink-0(class="text-base-content/30")
+
+        //- Пустое состояние
+        .flex.flex-col.items-center.justify-center.py-8(
+          v-if="savedScenes.length === 0"
+        )
+          FolderOpen.w-8.h-8.mb-2(class="text-base-content/20")
+          p.text-sm(
+            class="text-base-content/50"
+          ) Нет сохранённых сцен
+          p.text-xs(
+            class="text-base-content/40"
+          ) Создайте сцену и нажмите «Сохранить»
+
+      //- Footer
+      .flex.justify-end.p-3(
+        class="bg-base-200/30 border-base-200 border-t"
+      )
+        button.btn.btn-ghost.btn-sm(
+          type="button"
+          @click="isLoadModalOpen = false"
+        ) Закрыть
 </template>
 
 <script setup lang="ts">
@@ -141,6 +195,7 @@ import EditorSidebarLeft from '../components/editor/EditorSidebarLeft.vue'
 import EditorSidebarRight from '../components/editor/EditorSidebarRight.vue'
 import EditorCanvas from '../components/editor/EditorCanvas.vue'
 import SimulatorWidget from '../components/SimulatorWidget.vue'
+import { FolderOpen, X, Boxes, ChevronRight } from '@lucide/vue'
 
 definePageMeta({ layout: false })
 
@@ -248,6 +303,17 @@ const handleExport = () => {
   a.download = `${sceneConfig.value.name || 'scene'}.json`
   a.click()
   URL.revokeObjectURL(url)
+}
+
+// Дата сцены с guard'ом: старые сцены могут не иметь обеих меток
+const formatSceneDate = (scene: any): string => {
+  const ts = scene?.updatedAt || scene?.createdAt
+  if (!ts) return '—'
+  try {
+    return new Date(ts).toLocaleString('ru-RU')
+  } catch {
+    return '—'
+  }
 }
 
 const selectedControl = computed(() => {

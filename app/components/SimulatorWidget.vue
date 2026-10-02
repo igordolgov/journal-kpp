@@ -1,57 +1,90 @@
-<!-- app/components/SimulatorWidget.vue -->
 <template lang="pug">
-.simulator-widget.relative.flex.flex-col.w-full.h-full.bg-gray-950.overflow-hidden
+.simulator-widget.relative.flex.flex-col.w-full.h-full.overflow-hidden(
+  class="bg-gray-950"
+)
   //- Хедер симулятора
-  header.flex.flex-none.justify-between.items-center.h-8.px-2.border-b.border-gray-700.bg-gray-900
+  //- [Фаза 5] h-10 (было 8 — тесно), токены темы, Lucide-кнопки
+  header.flex.flex-none.justify-between.items-center.h-10.px-2(
+    class="bg-gray-900 border-white/10 border-b"
+  )
     .flex.items-center.gap-1
       span.relative.flex.h-2.w-2
-        span.animate-ping.absolute.inline-flex.h-full.w-full.rounded-full.bg-green-400(
+        span.animate-ping.absolute.inline-flex.h-full.w-full.rounded-full.bg-success(
           class="opacity-75"
         )
-        span.relative.inline-flex.rounded-full.h-2.w-2.bg-green-500
-      span.text-xs.font-bold.text-green-400 СИМУЛЯЦИЯ
+        span.relative.inline-flex.rounded-full.h-2.w-2.bg-success
+      span.text-xs.font-bold.text-success СИМУЛЯЦИЯ
 
-    .text-xxs.text-gray-500
+    .text-xxs(
+      class="text-base-content/50"
+    )
       | Режим: {{ isRunning ? 'Запущен' : 'Пауза' }}
-      span.ml-2.text-cyan-400(v-if="aiAgents.length > 0") (Агентов: {{ aiAgents.length }})
-      //- usedPeopleIds — реф, в шаблоне читается напрямую (разворачивается)
-      span.ml-2.text-green-400(v-if="usedPeopleIds.size > 0") (Уникальных: {{ usedPeopleIds.size }})
+      span.ml-2.text-info(v-if="aiAgents.length > 0") (Агентов: {{ aiAgents.length }})
+      span.ml-2.text-success(v-if="usedPeopleIds.size > 0") (Уникальных: {{ usedPeopleIds.size }})
 
-    .flex.items-center.gap-2
-      button.btn.btn-xs.btn-ghost(
+    .flex.items-center.gap-1
+      //- [Фаза 5] Lucide-кнопки вместо эмодзи; активное состояние — через bg-primary/20
+      button.btn.btn-xs.btn-ghost.btn-square(
         @click="enableVisualRotation = !enableVisualRotation"
-        :class="enableVisualRotation ? 'text-blue-400 bg-blue-900' : 'text-gray-500'"
+        :class="enableVisualRotation ? 'text-primary bg-primary/20' : 'text-base-content/40'"
         title="Поворот спрайтов"
-      ) 🚗↻
-      button.btn.btn-xs.btn-ghost(
+      )
+        CarFront.w-4.h-4
+      button.btn.btn-xs.btn-ghost.btn-square(
         @click="showDebug = !showDebug"
-        :class="showDebug ? 'text-yellow-400 bg-yellow-900' : 'text-gray-500'"
+        :class="showDebug ? 'text-warning bg-warning/20' : 'text-base-content/40'"
         title="Показать физику"
-      ) 🔭
-      button.btn.btn-xs.btn-ghost(@click="showSettings = !showSettings" :class="showSettings ? 'text-yellow-400' : ''")
-        | ⚙️
-      button.btn.btn-xs.btn-ghost.text-gray-400(@click="$emit('close')") ✕
+      )
+        Activity.w-4.h-4
+      button.btn.btn-xs.btn-ghost.btn-square(
+        @click="showSettings = !showSettings"
+        :class="showSettings ? 'text-warning bg-warning/20' : 'text-base-content/40'"
+        title="Настройки"
+      )
+        SlidersHorizontal.w-4.h-4
+      button.btn.btn-xs.btn-ghost.btn-square(
+        class="hover:text-error text-base-content/40"
+        @click="$emit('close')"
+        title="Закрыть"
+      )
+        X.w-4.h-4
 
-    .absolute.top-8.right-2.z-50.bg-gray-900.border.border-gray-700.rounded-lg.p-3.shadow-xl.w-56(v-if="showSettings")
-      .text-xs.font-bold.mb-2.text-gray-300 НАСТРОЙКИ
+    //- Панель настроек (поп-овер)
+    .absolute.top-11.right-2.z-50.w-56.rounded-lg.p-3.shadow-xl(
+      v-if="showSettings"
+      class="bg-gray-900 border border-white/10"
+    )
+      .text-xs.font-bold.mb-2(
+        class="text-base-content/70"
+      ) НАСТРОЙКИ
       .flex.flex-col.gap-2
-        label.flex.flex-col.text-xs.text-gray-400
+        label.flex.flex-col.text-xs(
+          class="text-base-content/60"
+        )
           span Макс. агентов
           input.input.input-xs(type="number" v-model.number="userMaxAgents" min="1" max="50" placeholder="20")
-        label.flex.flex-col.text-xs.text-gray-400
+        label.flex.flex-col.text-xs(
+          class="text-base-content/60"
+        )
           span Интервал пеших (мин-макс)
           .flex.gap-1
             input.input.input-xs.w-16(type="number" v-model.number="userPersonIntervalMin" min="1" placeholder="10")
             input.input.input-xs.w-16(type="number" v-model.number="userPersonIntervalMax" min="1" placeholder="30")
-        label.flex.flex-col.text-xs.text-gray-400
+        label.flex.flex-col.text-xs(
+          class="text-base-content/60"
+        )
           span Интервал авто (мин-макс)
           .flex.gap-1
             input.input.input-xs.w-16(type="number" v-model.number="userCarIntervalMin" min="1" placeholder="5")
             input.input.input-xs.w-16(type="number" v-model.number="userCarIntervalMax" min="1" placeholder="15")
-        label.flex.flex-col.text-xs.text-gray-400
+        label.flex.flex-col.text-xs(
+          class="text-base-content/60"
+        )
           span Размер группы
           input.input.input-xs(type="number" v-model.number="userMaxGroupSize" min="1" max="6" placeholder="4")
-        label.flex.flex-col.text-xs.text-gray-400
+        label.flex.flex-col.text-xs(
+          class="text-base-content/60"
+        )
           span Макс. чужих в группе
           input.input.input-xs(type="number" v-model.number="userMaxNonFamily" min="0" max="4" placeholder="1")
         button.btn.btn-xs.btn-outline.btn-error.mt-2(@click="resetSettings") Сбросить
@@ -67,7 +100,6 @@
           class="hover:z-50"
           @click="onElementClick(el)"
         )
-          //- fallback размеров: width/height опциональны
           TrafficRoad.w-full.h-full(
             v-if="el.asset?.type === 'traffic_road'"
             :width="el.width || 400"
@@ -153,7 +185,6 @@
           )
 
       .absolute.inset-0.pointer-events-none(style="z-index: 1000")
-        //- [ИСПРАВЛЕНО] добавлен :key (был отсутствует — warning компилятора)
         template(v-for="el in simElements" :key="'label_' + el.id")
           .absolute.text-label(
             v-if="(el.asset?.type === 'person' || el.asset?.type === 'car') && visibleAgentLabels.has(el.id)"
@@ -163,15 +194,31 @@
               template(v-if="el.asset?.type === 'car'")
                 span.font-bold {{ el.asset?.plate }}
                 .text-xxs(v-if="el.occupants && el.occupants.length > 0")
-                  //- [ИСПРАВЛЕНО] без TS-cast (as any[] ломал компиляцию шаблона):
-                  //- v-for над any даёт индекс string | number, сравнение
-                  //- через Number(idx) — чистый JS
                   span(v-for="(occ, idx) in el.occupants" :key="occ.id")
                     | {{ occ.fio }}
                     span(v-if="Number(idx) < el.occupants.length - 1") , 
               template(v-else)
                 span.font-bold {{ el.name }}
                 span.text-sm(v-if="el.groupLabel") {{ el.groupLabel }}
+
+    //- [Фаза 5] Empty state с CTA: сцена не загружена — прямая дорога в Редактор
+    .absolute.inset-0.flex.items-center.justify-center(
+      v-if="!config || simElements.length === 0"
+      class="bg-gray-800"
+    )
+      .text-center.p-4
+        MonitorX.w-10.h-10.mx-auto.mb-3(class="text-base-content/30")
+        p.text-lg.mb-1(
+          class="text-base-content/60"
+        ) Сцена не загружена
+        p.text-xs.mb-4(
+          class="text-base-content/40"
+        ) Создайте или сохраните сцену в Редакторе
+        button.btn.btn-sm.btn-primary(
+          @click="$router.push('/editor')"
+        )
+          PencilRuler.w-4.h-4.mr-1
+          | Открыть Редактор
 </template>
 
 <script setup lang="ts">
@@ -199,6 +246,11 @@ import {
   CAR_WIDTH,
   CAR_HEIGHT
 } from '~/utils/simulatorConstants'
+// [Фаза 5] Lucide: хедер и empty state
+import {
+  CarFront, Activity, SlidersHorizontal, X,
+  MonitorX, PencilRuler
+} from '@lucide/vue'
 
 const audio = useAudioEngine()
 

@@ -1,4 +1,10 @@
 <!-- app/components/editor/EditorSidebarLeft.vue -->
+<!-- Назначение: левый сайдбар редактора — библиотека объектов, слои, пульты.
+     [Фаза 5]:
+      1. [FIX] PUG:NO_END_BRACKET — в строке слоя остался хвост старого :class;
+      2. [FIX] мёртвые классы (hover:bg-white/3 не существует) -> /5;
+      3. Разделитель: bg-linear-to-b (канон v4);
+      4. Тёмная палитра ОСОЗНАННО сохранена — рабочий стол инструмента. -->
 <template lang="pug">
 aside.flex.flex-col.overflow-hidden.flex-shrink-0.h-full.border-r(
   class="bg-gray-950 shadow-2xl shadow-black/50 border-white/5"
@@ -74,7 +80,9 @@ aside.flex.flex-col.overflow-hidden.flex-shrink-0.h-full.border-r(
                   ) {{ item.name }}
 
       //- Разделитель
-      .flex-shrink-0.bg-gradient-to-b.from-transparent.via-gray-800.to-transparent.w-px.mx-2
+      .flex-shrink-0.bg-linear-to-b.from-transparent.to-transparent.w-px.mx-2(
+        class="via-base-content/10"
+      )
 
       //- ПРАВАЯ КОЛОНКА: Слои
       .flex.flex-col.overflow-hidden.flex-shrink-0.w-56(
@@ -87,7 +95,7 @@ aside.flex.flex-col.overflow-hidden.flex-shrink-0.h-full.border-r(
           template(v-if="elements && elements.length > 0")
             .group.layer-row.relative.flex.items-center.gap-2.cursor-pointer(
               class="px-3 py-2 border-l-2 rounded-lg transition-all duration-150 layer-item"
-              :class="selectedElementId === el.id ? 'bg-blue-500/10 text-white border-l-blue-400' : 'border-l-transparent text-gray-500 hover:bg-white/3 hover:text-gray-200'"
+              :class="selectedElementId === el.id ? 'bg-blue-500/10 text-white border-l-blue-400' : 'border-l-transparent text-gray-500 hover:bg-white/5 hover:text-gray-200'"
               v-for="(el, index) in elements" :key="el.id" @click="$emit('select-element', el.id)"
             )
               .flex.flex-col.mr-1.flex-shrink-0(
@@ -103,16 +111,16 @@ aside.flex.flex-col.overflow-hidden.flex-shrink-0.h-full.border-r(
                   :class="index === 0 ? 'text-gray-700 cursor-default' : 'text-gray-600 hover:text-blue-400 hover:bg-blue-500/10'"
                   :disabled="index === 0" title="На задний план" @click.stop="$emit('move-element', el.id, 1)"
                 ) ▼
-              
+
               .opacity-70.flex-shrink-0.w-4.h-4.layer-preview
                 div.layer-preview-inner(v-html="getPreview(el)")
               span.flex-1.truncate.ml-1.text-xs.layer-name {{ el.name || 'Элемент' }}
-              
+
               button.layer-delete.absolute.right-2.flex.items-center.justify-center.rounded-md.text-gray-700.opacity-0.transition-all.duration-150.w-5.h-5(
                 class="hover:bg-red-500/10 hover:text-red-400"
                 title="Удалить" @click.stop="$emit('delete-element', el.id)"
               ) ✕
-          
+
           .flex.flex-col.items-center.justify-center.h-full.text-gray-700(v-else)
             span.text-3xl.mb-2(
               class="opacity-30"
@@ -171,13 +179,13 @@ aside.flex.flex-col.overflow-hidden.flex-shrink-0.h-full.border-r(
               class="hover:bg-green-500/10 border-white/5 hover:border-green-500/30 hover:text-green-400 active:scale-90"
               title="Создать панель" @click="$emit('add-panel')"
             ) +
-        
+
         .flex-1.overflow-y-auto.scrollbar-thin.px-2.pb-2
           template(v-if="panels && panels.length > 0")
             .mb-1(v-for="p in panels" :key="p.id")
               .flex.items-center.justify-between.cursor-pointer.border.border-transparent.rounded-lg(
                 class="px-3 py-2 transition-all duration-150"
-                :class="selectedPanelId === p.id ? 'bg-purple-500/10 text-purple-200 border-purple-500/20' : 'text-gray-400 hover:bg-white/3 hover:text-gray-200'"
+                :class="selectedPanelId === p.id ? 'bg-purple-500/10 text-purple-200 border-purple-500/20' : 'text-gray-400 hover:bg-white/5 hover:text-gray-200'"
                 @click="$emit('select-panel', p.id)"
               )
                 .flex.items-center.gap-2(
@@ -218,7 +226,7 @@ aside.flex.flex-col.overflow-hidden.flex-shrink-0.h-full.border-r(
                       v-if="c.settings?.hotkey"
                       :title="'Горячая клавиша: ' + c.settings.hotkey"
                     ) [{{ c.settings.hotkey }}]
-                  
+
                   button.ctrl-delete.flex.items-center.justify-center.rounded-md.text-gray-700.opacity-0.transition-all.duration-150.flex-shrink-0.w-4.h-4(
                     class="hover:bg-red-500/10 hover:text-red-400"
                     title="Удалить кнопку" @click.stop="$emit('delete-control', {pId: p.id, cId: c.id})"
@@ -234,6 +242,7 @@ aside.flex.flex-col.overflow-hidden.flex-shrink-0.h-full.border-r(
 </template>
 
 <script setup lang="ts">
+// app/components/editor/EditorSidebarLeft.vue — script
 import { ref, onMounted, onUnmounted } from 'vue'
 import { LIBRARY_GROUPS } from '../../constants/library'
 import { useCustomAssets } from '../../composables/useCustomAssets'
@@ -242,8 +251,6 @@ import SimulatorPersonAvatar from '../simulator/PersonAvatar.vue'
 
 // [ИСПРАВЛЕНО] тип элемента библиотеки пультов: settings — свободный словарь,
 // т.к. разные типы контролов несут разные наборы полей (у shape-rect нет label).
-// Раньше массив выводился в union из 7 литералов, и item.settings?.label
-// не проходил проверку (свойство есть не у всех членов union).
 interface PanelLibraryItem {
   type: string
   name: string
@@ -369,10 +376,11 @@ const getPreviewColorStyle = (item: any) => {
   }
 }
 
+// [FIX] hover:bg-white/3 не существует (Tailwind) — заменён на /5
 const getCtrlClasses = (c: any) => {
   const base = props.selectedCtrlIds && props.selectedCtrlIds.includes(c.id)
     ? 'bg-amber-500/10 text-amber-200 border-amber-500/20'
-    : 'text-gray-500 hover:bg-white/3 hover:text-gray-300'
+    : 'text-gray-500 hover:bg-white/5 hover:text-gray-300'
   const drag = draggedCtrlId.value === c.id
     ? 'opacity-40 scale-95 border-dashed border-blue-400'
     : ''
@@ -522,7 +530,7 @@ onUnmounted(() => {
   object-fit: contain;
 }
 
-/* Hover-эффекты для групп (замена group-hover/name:) */
+/* Hover-эффекты для групп */
 .layer-row:hover .layer-delete { opacity: 1; }
 .ctrl-row:hover .ctrl-delete { opacity: 1; }
 </style>

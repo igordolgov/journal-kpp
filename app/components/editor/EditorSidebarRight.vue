@@ -51,11 +51,7 @@ aside.flex.flex-col.h-full.overflow-hidden.border-l.border-gray-700.bg-gray-900(
   .flex-1.text-xs(
     class="space-y-4 px-3 py-3 min-h-0 overflow-x-hidden overflow-y-auto"
   )
-    //- ==========================================
-    //- ЭЛЕМЕНТ СЦЕНЫ
-    //- ==========================================
     template(v-if="selectedElement")
-      //- Секция: Основное
       section
         .section-title Основное
         .grid.grid-cols-6(
@@ -79,7 +75,6 @@ aside.flex.flex-col.h-full.overflow-hidden.border-l.border-gray-700.bg-gray-900(
               option(value="gate") Ворота
               option(value="zone") Зона
 
-      //- Секция: Позиция и размер
       section
         .section-title Позиция и размер
         .grid.grid-cols-2(
@@ -143,9 +138,6 @@ aside.flex.flex-col.h-full.overflow-hidden.border-l.border-gray-700.bg-gray-900(
             title="На передний план"
           ) ⬆ Вперёд
 
-      //- ==========================================
-      //- ВОРОТА / КАЛИТКА
-      //- ==========================================
       template(v-if="isGateElement")
         section
           .section-title Ворота / Калитка
@@ -280,9 +272,6 @@ aside.flex.flex-col.h-full.overflow-hidden.border-l.border-gray-700.bg-gray-900(
             @update:settings="onTrajectoryUpdate"
           )
 
-    //- ==========================================
-    //- ПАНЕЛЬ
-    //- ==========================================
     template(v-else-if="selectedPanel && !selectedControl")
       section
         .section-title Основное
@@ -323,9 +312,6 @@ aside.flex.flex-col.h-full.overflow-hidden.border-l.border-gray-700.bg-gray-900(
 
       .hint Перетаскивайте углы панели на холсте.
 
-    //- ==========================================
-    //- КОНТРОЛ
-    //- ==========================================
     template(v-else-if="selectedControl")
       section
         .section-title Информация
@@ -486,9 +472,6 @@ aside.flex.flex-col.h-full.overflow-hidden.border-l.border-gray-700.bg-gray-900(
         @click="$emit('delete-control', { pId: selectedControlPanelId, cId: selectedControl.id })"
       ) Удалить кнопку
 
-    //- ==========================================
-    //- СЦЕНА
-    //- ==========================================
     template(v-else)
       section
         .section-title Размер холста
@@ -593,8 +576,6 @@ aside.flex.flex-col.h-full.overflow-hidden.border-l.border-gray-700.bg-gray-900(
 <script setup lang="ts">
 // app/components/editor/EditorSidebarRight.vue — script
 // Инспектор редактора: свойства элемента / панели / контрола / сцены.
-// [ИСПРАВЛЕНО] evValue/evNumber: $event.target в шаблоне типизируется как
-// EventTarget | null без .value — все обработчики переведены на хелперы.
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import type { SceneElement, SceneSettings, Control, Panel } from '../../types/scene'
 import TrajectoryEditor from './TrajectoryEditor.vue'
@@ -618,9 +599,7 @@ const emit = defineEmits([
 ])
 
 // --- Хелперы событий (замена $event.target.value из шаблона) ---
-// Читает строковое значение из события input/change
 const evValue = (e: Event): string => (e.target as HTMLInputElement | HTMLSelectElement | null)?.value ?? ''
-// Читает числовое значение из события
 const evNumber = (e: Event): number => Number(evValue(e))
 
 const isListeningHotkey = ref(false)
@@ -697,7 +676,6 @@ let currentRatio: number | null = null
 const toggleLock = () => {
   aspectRatioLocked.value = !aspectRatioLocked.value
   if (aspectRatioLocked.value && props.selectedElement) {
-    // [ИСПРАВЛЕНО] width/height опциональны — явный fallback до арифметики
     const w = props.selectedElement.width ?? 0
     const h = props.selectedElement.height ?? 0
     currentRatio = (h > 0) ? w / h : 1
@@ -857,6 +835,7 @@ const getGateDisplayName = (gate: SceneElement) => {
   outline: none;
   transition: border-color 0.15s;
   min-width: 0;
+  -moz-appearance: textfield;
 }
 .field-input::-webkit-outer-spin-button,
 .field-input::-webkit-inner-spin-button {
@@ -872,7 +851,7 @@ const getGateDisplayName = (gate: SceneElement) => {
 }
 
 /* ==========================================
-    ЦВЕТОВЫЕ ПОЛЯ
+   ЦВЕТОВЫЕ ПОЛЯ
    ========================================== */
 .color-input {
   width: 100%;
@@ -887,7 +866,7 @@ const getGateDisplayName = (gate: SceneElement) => {
 .color-input::-webkit-color-swatch { border: none; border-radius: 3px; }
 
 /* ==========================================
-    КНОПКИ
+   КНОПКИ
    ========================================== */
 .z-btn {
   flex: 1;
@@ -968,7 +947,7 @@ const getGateDisplayName = (gate: SceneElement) => {
 }
 
 /* ==========================================
-    ПОДСКАЗКА
+   ПОДСКАЗКА
    ========================================== */
 .hint {
   font-size: 11px;
@@ -982,7 +961,7 @@ const getGateDisplayName = (gate: SceneElement) => {
 }
 
 /* ==========================================
-    СКРОЛЛБАР
+   СКРОЛЛБАР
    ========================================== */
 aside ::-webkit-scrollbar {
   width: 4px;
