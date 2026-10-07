@@ -1,17 +1,13 @@
 // nuxt.config.ts
 // Назначение: конфигурация Nuxt.
-// [ОЧИСТКА] Удалён блок PWA (@vite-pwa/nuxt, manifest, workbox) — приложение
-// доставляется как Electron-exe, браузерная установка не используется.
-// [ОЧИСТКА] Удалены meta apple-mobile-web-app-* и theme-color (PWA-хвосты),
-// из viewport убран maximum-scale=1 — пользователь снова может зумить (a11y).
-// prerender ОСТАВЛЕН: exe загружает именно статические страницы из
-// .output/public — это фундамент Electron-сборки, а не PWA.
+// prerender и routeRules отключены — они требуют appManifest, а он конфликтует
+// с текущей версией Nuxt 4.5.2 (ошибка NUXT_E5001).
+// Для Electron-сборки вернуть эти блоки после проверки на конкретной версии Nuxt.
 
 import { defineNuxtConfig } from 'nuxt/config'
 import tailwindcss from '@tailwindcss/vite'
 
 export default defineNuxtConfig({
-  // Базовые настройки
   devServer: {
     port: 3001
   },
@@ -23,7 +19,6 @@ export default defineNuxtConfig({
   },
 
   app: {
-    baseURL: '/',
     head: {
       charset: 'utf-8',
       viewport: 'width=device-width, initial-scale=1',
@@ -34,7 +29,6 @@ export default defineNuxtConfig({
       ],
       link: [
         { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' },
-        // fallback для контекстов без поддержки SVG
         { rel: 'icon', type: 'image/x-icon', href: '/favicon.ico' },
       ],
     },
@@ -47,22 +41,15 @@ export default defineNuxtConfig({
   vite: {
     optimizeDeps: {
       include: [
-        '@vue/devtools-core',
-        '@vue/devtools-kit',
         'fuse.js',
         'gsap',
       ],
+      exclude: [
+        '@vue/devtools-core',
+        '@vue/devtools-kit',
+      ],
     },
     plugins: [tailwindcss()],
-  },
-
-  nitro: {
-    prerender: {
-      routes: ['/', '/editor', '/database', '/settings', '/reports'],
-    },
-    routeRules: {
-      '/': { ssr: true }
-    }
   },
 
   devtools: { enabled: false },

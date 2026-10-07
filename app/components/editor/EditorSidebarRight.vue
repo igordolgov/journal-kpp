@@ -577,8 +577,9 @@ aside.flex.flex-col.h-full.overflow-hidden.border-l.border-gray-700.bg-gray-900(
 // app/components/editor/EditorSidebarRight.vue — script
 // Инспектор редактора: свойства элемента / панели / контрола / сцены.
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import type { SceneElement, SceneSettings, Control, Panel } from '../../types/scene'
+import type { SceneSettings, Control, Panel } from '../../types/scene'
 import TrajectoryEditor from './TrajectoryEditor.vue'
+import type { SceneElement } from '~/types/simulator'
 
 const props = withDefaults(defineProps<{
   selectedElement: SceneElement | null
@@ -835,6 +836,7 @@ const getGateDisplayName = (gate: SceneElement) => {
   outline: none;
   transition: border-color 0.15s;
   min-width: 0;
+  appearance: textfield;
   -moz-appearance: textfield;
 }
 .field-input::-webkit-outer-spin-button,

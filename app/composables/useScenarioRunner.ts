@@ -4,7 +4,8 @@
 // [ИСПРАВЛЕНО v3]: parseFloat получает fallback (split даёт string | undefined);
 // rect — fallback размеров; elementId покрыт типом LogicBlock (types/scene v5).
 import { reactive } from 'vue'
-import type { SceneElement, LogicBlock } from '../types/scene'
+import type { LogicBlock } from '../types/scene'
+import type { SceneElement } from '~/types/simulator'
 
 // Константы для физики движения
 const SAFETY_GAP = 40

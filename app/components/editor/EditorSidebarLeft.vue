@@ -246,8 +246,9 @@ aside.flex.flex-col.overflow-hidden.flex-shrink-0.h-full.border-r(
 import { ref, onMounted, onUnmounted } from 'vue'
 import { LIBRARY_GROUPS } from '../../constants/library'
 import { useCustomAssets } from '../../composables/useCustomAssets'
-import type { Panel, SceneElement } from '../../types/scene'
+import type { Panel } from '../../types/scene'
 import SimulatorPersonAvatar from '../simulator/PersonAvatar.vue'
+import type { SceneElement } from '~/types/simulator'
 
 // [ИСПРАВЛЕНО] тип элемента библиотеки пультов: settings — свободный словарь,
 // т.к. разные типы контролов несут разные наборы полей (у shape-rect нет label).

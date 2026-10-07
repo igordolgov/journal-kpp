@@ -61,8 +61,8 @@ const sceneConfig = reactive<SceneConfig>({
   id: 'scene_main', name: 'Моя сцена',
   settings: { width: 1280, height: 720, bgColor: '#111111' },
   elements: [
-    { id: 'car_1', name: 'Машина 1', type: 'actor', x: 100, y: 100, rotation: 0 },
-    { id: 'gate_exit', name: 'Выезд', type: 'gate', x: 500, y: 100 }
+    { id: 'car_1',    name: 'Машина 1', type: 'actor', x: 100, y: 100, rotation: 0, width: 0, height: 0 },
+    { id: 'gate_exit', name: 'Выезд',   type: 'gate',  x: 500, y: 100, width: 0, height: 0 }
   ],
   scripts: [], variables: [],
   panels: [], // [ДОБАВЛЕНО] обязательное поле SceneConfig

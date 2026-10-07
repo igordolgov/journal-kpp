@@ -232,7 +232,8 @@
 // [ИСПРАВЛЕНО]: editingBlock -> any (блок свободно мутируется в модалке),
 // kindMap -> Record<string, string> (kind может быть 'logic' вне BlockKind).
 import { ref, computed, reactive, nextTick } from 'vue'
-import type { Script, ScriptTrack, LogicBlock, BlockKind, SceneElement } from '../../types/scene'
+import type { Script, ScriptTrack, LogicBlock, BlockKind } from '../../types/scene'
+import type { SceneElement } from '~/types/simulator'
 
 const props = defineProps<{
   scripts: Script[]

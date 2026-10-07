@@ -323,11 +323,12 @@
 // до string и не проходят CSSProperties в биндингах :style).
 import { ref, computed, onMounted } from 'vue'
 import type { CSSProperties } from 'vue'
-import type { SceneElement, SceneSettings, Panel, Control } from '../../types/scene'
+import type { SceneSettings, Panel, Control } from '../../types/scene'
 import TrafficRoad from './TrafficRoad.vue'
 import SimulatorPersonAvatar from '../simulator/PersonAvatar.vue'
 import { PERSON_WIDTH, PERSON_HEIGHT, CAR_WIDTH, CAR_HEIGHT } from '~/utils/simulatorConstants'
 import { generateSlidingGateSVG, generateWicketSVG } from '~/constants/library'
+import type { SceneElement } from '~/types/simulator'
 
 const props = defineProps<{
   elements: SceneElement[]

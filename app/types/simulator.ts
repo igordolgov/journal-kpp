@@ -1,65 +1,56 @@
 // app/types/simulator.ts
-// Назначение: доменные типы симулятора КПП — элементы сцены, ИИ-агенты,
-// скриптовые команды, конфигурация трафика.
+// Типы для симулятора: элементы сцены, AI-агенты, конфигурация
 
 export type Direction = 'enter' | 'exit'
 export type TravelMode = 'walk' | 'car'
+export type SubState = 'to_gate' | 'to_exit' | 'moving_away'
 
-// [ТЕХДОЛГ] SubState не используется актуальной физикой — legacy, кандидат
-// на удаление после прогона npx knip.
-export type SubState = 'to_gate' | 'to_exit'
-
-// Реальный набор состояний из useSimulatorPhysics.
-// 'waiting'/'passing' — legacy-значения; убрать, когда typecheck подтвердит,
-// что они нигде не присваиваются.
 export type AgentState =
   | 'to_gate'
+  | 'waiting'
   | 'waiting_before'
   | 'waiting_after'
   | 'crossing'
+  | 'passing'
   | 'moving_away'
-  | 'waiting'   // legacy
-  | 'passing'   // legacy
   | 'done'
 
-// [ДОБАВЛЕНО v3] Сведённая информация о человеке в машине (водитель/пассажиры).
-// Используется useSimulatorSpawn (createPersonInfo) и журналом событий.
 export interface PersonInfo {
   id: number
-  fio?: string
-  // Индексная подпись: createPersonInfo копирует произвольные поля записи БД
-  [key: string]: any
+  fio: string
+  isChild: boolean
+  canGoAlone: boolean
 }
 
 export interface SceneElement {
-  id: string | number
+  id: string
+  name?: string
+  type?: string // 'actor' | 'gate' | 'element' | 'zone'
   x: number
   y: number
   width: number
   height: number
   rotation?: number
+  zoneType?: string
   category?: string
-  type?: string // 'actor' | 'gate' | 'element' | 'zone'
   asset?: any
   settings?: any
   velocity?: number
   zIndex?: number
-  name?: string
   personId?: number
   direction?: Direction
   travelMode?: TravelMode
-  // --- поля территории ---
-  zonePolygon?: { x: number; y: number }[]   // полигон зоны (если элемент — зона)
-  belongsToGateId?: string                    // ID калитки/ворот, к которым относится зона
-  territoryRect?: { x: number; y: number; width: number; height: number } // упрощённый прямоугольник территории
-  // --- [ДОБАВЛЕНО v3] групповое поведение (пишется в useSimulatorSpawn) ---
+  opacity?: number
+
+  // --- Поля симулятора ---
+  occupants?: PersonInfo[]                                       // экипаж машины
+  zonePolygon?: { x: number; y: number }[]                       // полигон зоны
+  territoryRect?: { x: number; y: number; width: number; height: number }
+  belongsToGateId?: string                                       // привязка зоны к воротам
   groupId?: string
-  isLeader?: boolean
   groupIndex?: number
-  /** Подпись группы над лидером (имена членов семьи) */
   groupLabel?: string
-  /** Люди в машине (водитель + пассажиры) */
-  occupants?: PersonInfo[]
+  isLeader?: boolean
 }
 
 export interface AiAgent {
@@ -69,27 +60,21 @@ export interface AiAgent {
   subState?: SubState
   target: { x: number; y: number; width: number; height: number }
   afterTarget: { x: number; y: number; width: number; height: number }
-  // [ИЗМЕНЕНО v3] форма приведена к target/afterTarget — spawn кладёт сюда
-  // объект с width/height, прежний тип {x,y} давал excess property
-  exitPoint?: { x: number; y: number; width: number; height: number }
   speed: number
   type: 'car' | 'person'
   direction: Direction
   travelMode: TravelMode
-  entryPoint?: { x: number; y: number }
-  // --- групповое поведение ---
-  groupId?: string
-  /** Агент — лидер группы (идёт первым, показывает метку переговорника) */
-  isLeader?: boolean
-  /** Порядковый номер в группе */
-  groupIndex?: number
-  /** Участники группы (используются в useSimulatorPhysics) */
-  groupMembers?: AiAgent[]
-  // --- [ДОБАВЛЕНО v3] ---
-  /** ID ворот, к которым привязан агент */
-  gateId?: string
-  /** Люди в машине (водитель + пассажиры) */
+
+  entryPoint?: { x: number; y: number; width?: number; height?: number }
+  exitPoint?: { x: number; y: number; width?: number; height?: number }
+
   occupants?: PersonInfo[]
+  groupId?: string
+  groupIndex?: number
+  groupLabel?: string
+  isLeader?: boolean
+  groupMembers?: AiAgent[]
+  gateId?: string
 }
 
 export interface ScriptCommand {
@@ -112,15 +97,12 @@ export interface TrafficConfig {
   carSpeed: number
   carGateId: string
   personGateId: string
-  gateCloseDelay?: number
-  wicketCloseDelay?: number
-  maxAgents?: number
   stepAudibleDistance?: number
   engineAudibleDistance?: number
 }
 
 export interface SimulatorConfig {
-  elements?: any[]
+  elements?: SceneElement[]
   settings?: {
     width?: number
     height?: number

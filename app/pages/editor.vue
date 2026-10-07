@@ -512,7 +512,7 @@ const handleAddElement = (item: any) => {
   newEl.height = finalH
   newEl.x = (settings.width / 2) - (finalW / 2)
   newEl.y = (settings.height / 2) - (finalH / 2)
-  selectedId.value = newEl.id
+  selectedId.value = String(newEl.id)
 
   panelSelectedId.value = null
   controlSelectedId.value = null

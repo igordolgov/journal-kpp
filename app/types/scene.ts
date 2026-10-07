@@ -1,6 +1,8 @@
 // app/types/scene.ts
-// Назначение: типы редактора сцен — конфиг сцены, панели, скрипты, переменные.
 import type { TrafficConfig, Direction, TravelMode } from './simulator'
+
+// Реэкспорт локально импортированного (без `from`) — не создаёт второй провайдер
+// export type { SceneElement }
 
 export interface SceneConfig {
   id: string
@@ -30,30 +32,6 @@ export interface SceneSettings {
   // Настройки трафика/симулятора сцены, перекрывающие глобальные из useConfig.
   // Record<string, any> — simOpts (ACCEL, REACTION_TIME и т.п.) шире TrafficConfig.
   traffic?: Partial<TrafficConfig> & Record<string, any>
-}
-
-// Полный набор полей редактора. Полное слияние с SceneElement из simulator.ts —
-// отдельным шагом после ревизии потребителей.
-export interface SceneElement {
-  id: string
-  name: string
-  type: string // 'actor' | 'gate' | 'zone' | 'element'
-  x: number
-  y: number
-  rotation?: number
-  zoneType?: string
-  category?: string
-  width?: number
-  height?: number
-  asset?: any
-  settings?: any
-  velocity?: number
-  zIndex?: number
-  personId?: number
-  direction?: Direction
-  travelMode?: TravelMode
-  // Прозрачность — используется сценариями (эффект fade в useScenarioRunner)
-  opacity?: number
 }
 
 export interface Script {

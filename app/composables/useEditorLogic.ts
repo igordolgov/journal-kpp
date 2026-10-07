@@ -7,7 +7,8 @@
 import { ref, computed, watch } from 'vue'
 import { useSceneBuilder } from './useSceneBuilder'
 import { useToast } from './useToast'
-import type { SceneConfig, SceneElement, Panel, Script } from '../types/scene'
+import type { SceneConfig, Panel, Script } from '../types/scene'
+import type { SceneElement } from '~/types/simulator'
 
 function debounce<T extends (...args: any[]) => void>(fn: T, delay: number) {
   let timer: ReturnType<typeof setTimeout>
@@ -159,7 +160,7 @@ export const useEditorLogic = () => {
     }
     if (initialProps) Object.assign(newEl, initialProps)
     sceneConfig.value.elements.push(newEl)
-    selectedId.value = newEl.id
+    selectedId.value = String(newEl.id)
     selectedPanelId.value = null
     selectedCtrlIds.value = []
     saveHistory()
