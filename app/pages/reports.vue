@@ -76,7 +76,7 @@
                 class="bg-base-100/80 rounded-box"
               )
                 ChartPie.w-8.h-8(class="text-base-content/20")
-                p.text-xs.text-base-content/40 Нет данных за период
+                p.text-xs(class="text-base-content/40") Нет данных за период
 
         .card.shadow-xl.bg-base-100.min-h-0.border.border-base-300(
           class="flex-1"
@@ -118,7 +118,7 @@
                 class="bg-base-100/80 rounded-box"
               )
                 ChartLine.w-8.h-8(class="text-base-content/20")
-                p.text-xs.text-base-content/40 Нет данных за период
+                p.text-xs(class="text-base-content/40") Нет данных за период
 
       //- ПРАВАЯ КОЛОНКА (Пиковые часы + Места + Транспорт)
       .col-span-12.flex.flex-col.gap-3(
@@ -142,7 +142,7 @@
                 class="bg-base-100/80 rounded-box"
               )
                 ChartColumn.w-8.h-8(class="text-base-content/20")
-                p.text-xs.text-base-content/40 Нет данных за период
+                p.text-xs(class="text-base-content/40") Нет данных за период
 
         .card.shadow-xl.bg-base-100.min-h-0.border.border-base-300(
           class="flex-1"
@@ -300,6 +300,7 @@ const stats = computed(() => {
     const checkTime = (ts: any) => {
       if (!ts) return
       const hour = new Date(ts).getHours()
+      // (hourCounts[hour] || 0) — корректно при noUncheckedIndexedAccess
       hourCounts[hour] = (hourCounts[hour] || 0) + 1
     }
     checkTime(entry.timestamp_out)
@@ -424,7 +425,7 @@ const timelineChartOptions: ChartOptions<'line'> = {
             const names = context.dataset.names[context.dataIndex] || []
             return names.length ? names.map((n: string) => `👮 ${n}`) : ['❌ Нет охраны']
           }
-          return `${context.dataset.label}: ${context.raw}`;
+          return `${context.dataset.label}: ${context.raw}`
         }
       }
     }
@@ -468,11 +469,19 @@ const doughnutOptions: ChartOptions<'doughnut'> = {
 // --- 3. Пиковые часы ---
 const peakHoursChartData = computed(() => {
   const hours = Array.from({ length: 24 }, (_, i) => i)
-  const outs = new Array(24).fill(0)
-  const ins = new Array(24).fill(0)
+  const outs = Array.from({ length: 24 }, () => 0)
+  const ins = Array.from({ length: 24 }, () => 0)
   filteredEntries.value.forEach(e => {
-    if (e.timestamp_out) outs[new Date(e.timestamp_out).getHours()]++
-    if (e.timestamp_in) ins[new Date(e.timestamp_in).getHours()]++
+    // Исправлено: `outs[h]++` не проходит noUncheckedIndexedAccess
+    // (outs[h] выводится как number | undefined) — явное присваивание с ?? 0
+    if (e.timestamp_out) {
+      const h = new Date(e.timestamp_out).getHours()
+      outs[h] = (outs[h] ?? 0) + 1
+    }
+    if (e.timestamp_in) {
+      const h = new Date(e.timestamp_in).getHours()
+      ins[h] = (ins[h] ?? 0) + 1
+    }
   })
   return {
     labels: hours.map(h => `${String(h).padStart(2, '0')}`),
