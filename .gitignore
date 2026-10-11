@@ -71,3 +71,4 @@ coverage/
 *.pid
 *.seed
 package-lock.jsondist/
+dist/
