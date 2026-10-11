@@ -9,7 +9,6 @@ node_modules/
 # ===========================================
 .nuxt/
 .output/
-dist/
 dist-electron/
 
 # ===========================================
@@ -70,7 +69,6 @@ Thumbs.db
 coverage/
 *.pid
 *.seed
-package-lock.jsondist/
-dist/
-dist/
-dist/
+package-lock.json
+
+dist
