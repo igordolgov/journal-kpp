@@ -70,4 +70,4 @@ Thumbs.db
 coverage/
 *.pid
 *.seed
-package-lock.json
+package-lock.jsondist/
