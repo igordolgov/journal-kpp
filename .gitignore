@@ -72,3 +72,4 @@ coverage/
 *.seed
 package-lock.jsondist/
 dist/
+dist/
