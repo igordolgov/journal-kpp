@@ -1,0 +1,10 @@
+{
+  "plugins": ["typescript", "import", "unicorn", "vue"],
+  "rules": {
+    "@typescript-eslint/no-unused-vars": "warn",
+    // "no-console": ["warn", { "allow": ["warn", "error"] }],
+    "no-console": "off",
+    "no-debugger": "error"
+  },
+  "ignorePatterns": ["node_modules", ".nuxt", ".output", "dist", "**/*.pug"]
+}

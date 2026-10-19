@@ -1,23 +1,45 @@
-onlyBuiltDependencies:
-  - '@parcel/watcher'
-  - electron-winstaller
-  - esbuild
-
 overrides:
   '@types/node': '24.1.0'
 
 minimumReleaseAgeExclude:
-  - knip@6.40.0
+  - knip@6.40.0 || 6.41.0 || 6.42.0
   - nanoid@6.0.2
-  - nuxt@4.1.3
-  - '@nuxt/kit@4.1.3'
-  - '@nuxt/schema@4.1.3'
-  - '@nuxt/nitro-server@4.1.3'
-  - '@nuxt/vite-builder@4.1.3'
-  - '@nuxt/vite-server@4.1.3'
+  - nuxt@4.1.3 || 4.6.1
+  - '@nuxt/kit@4.1.3 || 4.6.1'
+  - '@nuxt/schema@4.1.3 || 4.6.1'
+  - '@nuxt/nitro-server@4.1.3 || 4.6.1'
+  - '@nuxt/vite-builder@4.1.3 || 4.6.1'
+  - '@nuxt/vite-server@4.1.3 || 4.6.1'
   - electron@44.6.0
+  - vue-router@5.4.0
+  - '@lucide/vue@1.54.0 || 1.55.0'
+  - '@markuplint/html-parser@5.1.0 || 5.1.1'
+  - '@markuplint/ml-ast@5.1.0 || 5.1.1'
+  - '@markuplint/ml-spec@5.1.0 || 5.1.1'
+  - '@markuplint/parser-utils@5.1.0 || 5.1.1'
+  - '@markuplint/shared@5.1.0 || 5.1.1'
+  - '@markuplint/types@5.1.0 || 5.1.1'
+  - '@markuplint/vue-parser@5.1.0 || 5.1.1'
+  - '@markuplint/vue-spec@5.1.0 || 5.1.1'
+  - '@markuplint/astro-parser@5.1.0 || 5.1.1'
+  - '@markuplint/cli-utils@5.1.0 || 5.1.1'
+  - '@markuplint/config-presets@5.1.0 || 5.1.1'
+  - '@markuplint/file-resolver@5.1.0 || 5.1.1'
+  - '@markuplint/html-spec@5.1.0 || 5.1.1'
+  - '@markuplint/i18n@5.1.0 || 5.1.1'
+  - '@markuplint/ml-config@5.1.0 || 5.1.1'
+  - '@markuplint/ml-core@5.1.0 || 5.1.1'
+  - '@markuplint/pretenders@5.1.0 || 5.1.1'
+  - '@markuplint/rules@5.1.0 || 5.1.1'
+  - '@markuplint/selector@5.1.0 || 5.1.1'
+  - '@markuplint/svelte-parser@5.1.0 || 5.1.1'
+  - markuplint@5.1.0 || 5.1.1
+  - '@markuplint/pug-parser@5.1.1'
+  - '@vue/language-plugin-pug@3.3.13'
+  - '@vue/language-core@3.3.13'
+  - vue-tsc@3.3.13
 
 allowBuilds:
-  '@parcel/watcher': set this to true or false
-  electron-winstaller: set this to true or false
-  esbuild: set this to true or false
+  '@parcel/watcher': true
+  electron-winstaller: true
+  esbuild: true

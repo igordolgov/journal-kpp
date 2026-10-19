@@ -1,23 +1,24 @@
-
 {
-  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "$schema": "https://unpkg.com/knip@6/schema.json",
   "workspaces": {
     ".": {
       "entry": [
         "app/pages/**/*.vue",
         "app/layouts/**/*.vue",
+        "app/middleware/**/*.{ts,js}",
+        "app/plugins/**/*.{ts,js}",
         "app/components/**/*.vue",
-        "server/**/*.ts"
+        "app/composables/**/*.{ts,js}",
+        "server/**/*.{ts,js}"
       ],
-      "project": [
-        "app/**/*.{js,ts,vue}"
-      ],
-      "ignore": [
-      ],
+      "project": ["app/**/*.{js,ts,vue,css}"],
       "ignoreDependencies": [
-        "@tailwindcss/forms",
-        "@tailwindcss/typography",
-        "h3"
+        "@markuplint/pug-parser",
+        "@markuplint/vue-parser",
+        "@markuplint/vue-spec",
+        "@iconify-json/heroicons",
+        "@iconify-json/mdi",
+        "pug"
       ]
     }
   }

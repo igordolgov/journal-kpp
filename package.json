@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Журнал КПП",
   "author": "Igor",
-  "main": "main.js",
+  "main": "main.cjs",
   "private": true,
   "type": "module",
   "scripts": {
@@ -12,35 +12,52 @@
     "generate": "nuxt generate",
     "preview": "nuxt preview",
     "postinstall": "nuxt prepare",
-    "electron:build": "electron-builder --win portable"
+    "electron:build": "nuxt generate && node scripts/fix-electron-paths.mjs && electron-builder --win portable",
+    "lint": "oxlint && markuplint \"app/**/*.vue\" && nuxt typecheck",
+    "lint:oxlint": "oxlint",
+    "lint:markup": "markuplint \"app/**/*.vue\"",
+    "lint:typecheck": "nuxt typecheck",
+    "fmt": "oxfmt",
+    "fmt:check": "oxfmt --check",
+    "knip": "cross-env KNIP_DISABLE_RAW_TRANSFER=1 knip"
   },
   "dependencies": {
-    "@lucide/vue": "^1.52.0",
+    "@lucide/vue": "1.59.0",
     "chart.js": "^4.5.1",
     "fuse.js": "^7.5.0",
     "gsap": "^3.15.0",
     "nanoid": "^6.0.2",
-    "nuxt": "4.5.2",
-    "vue": "^3.5.43",
+    "nuxt": "4.6.2",
+    "vue": "3.5.44",
     "vue-chartjs": "^5.3.4",
-    "vue-router": "^5.3.1"
+    "vue-router": "^5.4.0"
   },
   "devDependencies": {
-    "@markuplint/vue-parser": "^5.0.1",
-    "@markuplint/vue-spec": "^5.0.1",
+    "@baptistecrouzet/nuxt-oxlint": "^1.1.5",
+    "@markuplint/pug-parser": "5.2.0",
+    "@markuplint/vue-parser": "5.2.0",
+    "@markuplint/vue-spec": "5.2.0",
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "24.1.0",
-    "@vue/language-plugin-pug": "^3.3.12",
-    "daisyui": "^5.7.47",
-    "electron": "^44.6.0",
+    "@vue/language-plugin-pug": "3.3.13",
+    "cross-env": "^10.1.0",
+    "daisyui": "5.7.50",
+    "electron": "44.9.0",
     "electron-builder": "^26.17.0",
-    "knip": "^6.40.0",
-    "markuplint": "^5.0.1",
+    "knip": "6.42.0",
+    "markuplint": "5.2.0",
+    "oxfmt": "0.73.0",
+    "oxlint": "1.88.0",
     "pug": "^3.0.4",
-    "sass": "^1.105.1",
+    "sass": "1.105.2",
     "tailwindcss": "^4.3.3",
     "typescript": "~5.9.3",
-    "vue-tsc": "^3.3.12"
+    "vue-tsc": "3.3.13"
+  },
+  "allowScripts": {
+    "@parcel/watcher@2.6.0": true,
+    "esbuild@0.28.1": true,
+    "electron-winstaller@5.4.0": true
   },
   "build": {
     "appId": "com.journalkpp.app",
@@ -49,7 +66,7 @@
       "output": "dist-electron"
     },
     "files": [
-      "main.js",
+      "main.cjs",
       ".output/public/**/*"
     ],
     "win": {
