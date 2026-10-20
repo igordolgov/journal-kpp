@@ -190,6 +190,7 @@ export function useSimulatorPhysics(
       const bt = (dirBlockByAgentId.get(agent.id) ?? 0) + dt
       dirBlockByAgentId.set(agent.id, bt)
       if (bt >= DIR_BLOCK_MAX) {
+        console.warn('[direction-queue] предохранитель', DIR_BLOCK_MAX, 'с — проходим принудительно:', agent.id)
         dirBlockByAgentId.delete(agent.id)
         return false
       }
@@ -250,6 +251,7 @@ export function useSimulatorPhysics(
               return f > 0 && f < 80 && Math.abs(ox * uy - oy * ux) < 30
             })
             if (!mateAhead) {
+              console.warn('[watchdog] агент стоял', STALL_LIMIT, 'с — телепорт на цель:', agent.state, agent.id)
               // [WATCHDOG] дистанция в физике считается центр-к-центру,
               // поэтому выравниваем ЦЕНТР элемента на центр цели,
               // иначе остаточная дистанция (h/2) не даст прибытию сработать
@@ -263,6 +265,7 @@ export function useSimulatorPhysics(
           // [ФИКС-висяки-2] мусорная/NaN-цель: раньше watchdog молчал вечно.
           // Восстанавливаем конечную цель из afterTarget или выталкиваем за
           // ближайший боковой край (штатный деспавн за границей сцены).
+          console.warn('[watchdog] NaN-цель — восстановление из afterTarget:', agent.id)
           const at = agent.afterTarget
           if (Number.isFinite(at?.x) && Number.isFinite(at?.y)) {
             agent.target = { x: at.x, y: at.y, width: 0, height: 0 }
@@ -305,6 +308,7 @@ export function useSimulatorPhysics(
           const missingWait = (waitOpenByAgentId.get(agent.id) ?? 0) + dt
           waitOpenByAgentId.set(agent.id, missingWait)
           if (missingWait >= (agent.isLeader || !agent.groupId ? FORCE_CROSS_AFTER : FORCE_CROSS_GROUP_AFTER)) {
+            console.warn('[gate-missing] ворот нет — принудительный проход:', agent.id)
             waitOpenByAgentId.delete(agent.id)
             startCrossing(agent)
           }
@@ -390,6 +394,7 @@ export function useSimulatorPhysics(
           crossTrack.set(agent.id, crossAge)
           const crossLimit = agent.type === 'car' ? CROSS_MAX_CAR : CROSS_MAX_PERSON
           if (crossAge >= crossLimit) {
+            console.warn('[crossing-cap] crossing дольше', crossLimit, 'с — перенос в конец прохода:', agent.type, agent.id)
             const exitT = (agent.exitPoint && Number.isFinite(agent.exitPoint.x) && Number.isFinite(agent.exitPoint.y))
               ? agent.exitPoint
               : agent.target
@@ -404,6 +409,7 @@ export function useSimulatorPhysics(
           crossTrack.delete(agent.id)
         }
         if (gateAge >= POST_GATE_MAX) {
+          console.warn('[post-gate-cap] агент завершён принудительно:', agent.state, agent.id)
           const atF = agent.afterTarget
           if (Number.isFinite(atF?.x) && Number.isFinite(atF?.y)) {
             el.x = atF.x - el.width / 2

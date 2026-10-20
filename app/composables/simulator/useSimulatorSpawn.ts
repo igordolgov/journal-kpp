@@ -533,10 +533,12 @@ export function useSimulatorSpawn(
 
       return createGroup(direction, person, members, cfg, gate, gateId)
     } else {
-      const hasPassengers = Math.random() < 0.5
+      // [ФИКС-флуд-4] пассажиры реже и мельче: машина с 3-4 пассажирами
+      // = 4-5 журнальных записей разом, при ручном журнале не успевать
+      const hasPassengers = Math.random() < 0.3
       let passengers: any[] = []
       if (hasPassengers) {
-        const count = Math.floor(Math.random() * 4) + 1
+        const count = Math.floor(Math.random() * 2) + 1
         passengers = getRandomOccupants(person, direction, count, activePersonIdsSet.value, extraExcludeIds)
           .filter(occ => integration.canBeWith(person, occ))
       }

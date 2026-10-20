@@ -68,15 +68,15 @@
         )
           span Интервал пеших (мин-макс)
           .flex.gap-1
-            input.input.input-xs.w-16(type="number" v-model.number="userPersonIntervalMin" min="30" placeholder="40")
-            input.input.input-xs.w-16(type="number" v-model.number="userPersonIntervalMax" min="30" placeholder="90")
+            input.input.input-xs.w-16(type="number" v-model.number="userPersonIntervalMin" min="45" placeholder="60")
+            input.input.input-xs.w-16(type="number" v-model.number="userPersonIntervalMax" min="45" placeholder="120")
         label.flex.flex-col.text-xs(
           class="text-base-content/60"
         )
           span Интервал авто (мин-макс)
           .flex.gap-1
-            input.input.input-xs.w-16(type="number" v-model.number="userCarIntervalMin" min="45" placeholder="60")
-            input.input.input-xs.w-16(type="number" v-model.number="userCarIntervalMax" min="45" placeholder="120")
+            input.input.input-xs.w-16(type="number" v-model.number="userCarIntervalMin" min="60" placeholder="90")
+            input.input.input-xs.w-16(type="number" v-model.number="userCarIntervalMax" min="60" placeholder="180")
         label.flex.flex-col.text-xs(
           class="text-base-content/60"
         )
@@ -270,6 +270,8 @@ import { generateSlidingGateSVG, generateWicketSVG } from '../constants/library'
 import { useAudioEngine } from '../composables/useAudioEngine'
 // [ФИКС-НАСТРОЙКИ] сохранение настроек поповера симулятора между запусками
 import { loadWidgetSettings, saveWidgetSettings } from '~/utils/widgetSettings'
+// [ФИКС-флуд-4] чистая санитизация интервалов спавна
+import { sanitizeSpawnInterval } from '~/utils/simTuning'
 // [СМЕНА] напоминание о принятии смены при запуске симуляции
 import { useShift } from '~/composables/useShift'
 import {
@@ -383,13 +385,15 @@ const { getElementStyle: _getElementStyle, getGateStyle, ...core } = useSimulato
 const getElementStyle = (el: any, enableRotation: boolean): CSSProperties =>
   _getElementStyle(el, enableRotation) as CSSProperties
 
-// [ФИКС-флуд-3] интервалы машин тоже санитарны: раньше шли в спавн как есть
-// (поповер допускает 1с, старые сцены — любые значения), поток машин душит
-// ручной журнал. Дефолты подняты 30-60 -> 60-120с, пол 45с, потолок 300с.
+// [ФИКС-флуд-4] интервалы машин: дефолт 90-180с (было 60-120с), пол 60с,
+// потолок минимума 180с. Санитизация — чистая функция
+// sanitizeSpawnInterval (tests/sim-tuning.test.ts).
 const simOpts = computed(() => {
-  const rawCarMin = Number(userCarIntervalMin.value ?? props.simSettings?.carSpawnIntervalMin ?? 60) || 60
-  const rawCarMax = Number(userCarIntervalMax.value ?? props.simSettings?.carSpawnIntervalMax ?? 120) || 120
-  const carMin = Math.min(180, Math.max(45, rawCarMin))
+  const car = sanitizeSpawnInterval(
+    userCarIntervalMin.value ?? props.simSettings?.carSpawnIntervalMin,
+    userCarIntervalMax.value ?? props.simSettings?.carSpawnIntervalMax,
+    60, 180, 90, 180,
+  )
   return {
     ...props.simSettings,
     maxGroupSize: userMaxGroupSize.value ?? 4,
@@ -398,8 +402,8 @@ const simOpts = computed(() => {
     personHeight: PERSON_HEIGHT,
     carWidth: CAR_WIDTH,
     carHeight: CAR_HEIGHT,
-    carSpawnIntervalMin: carMin,
-    carSpawnIntervalMax: Math.min(300, Math.max(carMin + 15, rawCarMax)),
+    carSpawnIntervalMin: car.min,
+    carSpawnIntervalMax: car.max,
   }
 })
 
@@ -605,14 +609,14 @@ const getTrafficConfig = () => {
   // [ФИКС-флуд-2] санитарные пределы темпа: старые сцены хранят агрессивные
   // интервалы (4-10с) и перекрывали глобальные настройки; пол не даёт потоку
   // душить ручной журнал, потолок отсекает бессмысленные значения
-  // [ФИКС-флуд-3] темп поднят: два пеших потока по 25-60с давали нового
-  // пешехода в среднем каждые ~10с — ручной журнал не успевал. Новые
-  // дефолты 40-90с, пол 30с (старые сцены с агрессивными интервалами),
-  // потолок минимума 150с, максимум расширен до 300с.
-  const rawPMin = Number(userPersonIntervalMin.value ?? st.intervalMin ?? st.spawnIntervalMin ?? props.simSettings?.spawnIntervalMin ?? 40) || 40
-  const rawPMax = Number(userPersonIntervalMax.value ?? st.intervalMax ?? st.spawnIntervalMax ?? props.simSettings?.spawnIntervalMax ?? 90) || 90
-  const personIntervalMin = Math.min(150, Math.max(30, rawPMin))
-  const personIntervalMax = Math.min(300, Math.max(personIntervalMin + 15, rawPMax))
+  // [ФИКС-флуд-4] темп снижен ещё вдвое: пешие 60-120с (было 40-90с),
+  // пол 45с, потолок минимума 150с, максимум до 300с. Санитизация —
+  // чистая функция sanitizeSpawnInterval (tests/sim-tuning.test.ts).
+  const person = sanitizeSpawnInterval(
+    userPersonIntervalMin.value ?? st.intervalMin ?? st.spawnIntervalMin ?? props.simSettings?.spawnIntervalMin,
+    userPersonIntervalMax.value ?? st.intervalMax ?? st.spawnIntervalMax ?? props.simSettings?.spawnIntervalMax,
+    45, 150, 60, 120,
+  )
 
   return {
     enabled: st.enabled ?? true,
@@ -620,8 +624,8 @@ const getTrafficConfig = () => {
     // intervalMin — ключи не совпадали, интервал пешеходов всегда был
     // дефолтным 10-30с независимо от настроек. Цепочка: оверрайд поповера
     // -> сцена (оба ключа) -> глобальные настройки -> безопасный дефолт.
-    intervalMin: personIntervalMin,
-    intervalMax: personIntervalMax,
+    intervalMin: person.min,
+    intervalMax: person.max,
     personSpeed: st.personSpeed ?? 40,
     carSpeed: st.carSpeed ?? 100,
     carGateId: (st.carGateId ?? carGate?.id) || '',
