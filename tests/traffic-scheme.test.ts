@@ -20,6 +20,7 @@ import {
   trafficPointsFor,
   deriveTrafficPoints,
   isValidPoint,
+  CAR_EXIT_PULL_PAST,
 } from '~/utils/simulatorTraffic'
 import { PERSON_WIDTH, PERSON_HEIGHT } from '~/utils/simulatorConstants'
 import { useSimulatorPhysics } from '~/composables/simulator/useSimulatorPhysics'
@@ -110,11 +111,28 @@ describe('simulatorTraffic: каноническая схема — вход', (
     const exit = deriveTrafficPoints(gate, CAR, 'exit', SCENE)
     expect(exit.spawn.y - CH).toBeGreaterThanOrEqual(SCENE.height)
     expect(exit.stop.y + CH).toBeCloseTo(220 + OFF_CAR, 5)
-    expect(exit.cross.y + CH).toBeCloseTo(220, 5)
-    // уезжает ВБОК за правый край на линии дороги
+    // [БАГ-РЕПОРТ-5] ждёт закрытия и уезжает ВЫШЕ линии дороги
+    // (CAR_EXIT_PULL_PAST): за шлагбаумом, на своей полосе
+    expect(exit.cross.y + CH).toBeCloseTo(220 - CAR_EXIT_PULL_PAST, 5)
+    // уезжает ВБОК за правый край по своей полосе выше дороги
     expect(exit.after.x - CH).toBeGreaterThanOrEqual(SCENE.width)
-    expect(exit.after.y + CH).toBeCloseTo(220, 5)
+    expect(exit.after.y + CH).toBeCloseTo(220 - CAR_EXIT_PULL_PAST, 5)
     expect(ROAD).toBeCloseTo(200, 5) // санити вычисления дороги
+  })
+
+  it('машина: side=left — спавн за ЛЕВЫМ краем и уход влево (двустороннее движение)', () => {
+    const gate = makeCarGate()
+    const CW = CAR.width / 2
+    const enterL = deriveTrafficPoints(gate, CAR, 'enter', SCENE, 'left')
+    expect(enterL.spawn.x + CW).toBeLessThanOrEqual(0) // за левым краем
+    expect(enterL.spawn.y + CAR.height / 2).toBeCloseTo(220, 5) // на линии дороги
+    expect(enterL.stop.x).toBeCloseTo(580, 5) // стоп не зависит от стороны
+    const exitL = deriveTrafficPoints(gate, CAR, 'exit', SCENE, 'left')
+    expect(exitL.after.x + CW).toBeLessThanOrEqual(0) // уезжает влево
+    expect(exitL.after.y + CAR.height / 2).toBeCloseTo(220 - CAR_EXIT_PULL_PAST, 5)
+    // правая сторона — по умолчанию (совместимость)
+    const enterR = deriveTrafficPoints(gate, CAR, 'enter', SCENE)
+    expect(enterR.spawn.x - CW).toBeGreaterThanOrEqual(SCENE.width)
   })
 })
 
@@ -232,22 +250,95 @@ const mkCar = (id: string, direction: 'enter' | 'exit', state: string, pos: { x:
 })
 
 describe('поведение: машина после ворот', () => {
-  it('машина в waiting_after уезжает за ~2с, даже если ворота открыты', () => {
+  it('машина в waiting_after ждёт ПОЛНОГО закрытия ворот (не уезжает при открытом шлагбауме)', () => {
     const h = buildCarHarness()
-    // входящая машина уже проехала ворота: стоит в waiting_after под ними
+    // входящая машина уже проехала ворота: стоит в waiting_after под ними,
+    // ворота ОТКРЫТЫ (шлагбаум поднят)
     const car = mkCar('car-1', 'enter', 'waiting_after', { x: 540, y: 250 }, { x: 540, y: 250 })
     h.aiAgents.value = [car as any]
 
-    let frames = 0
-    for (; frames < 120; frames++) { // 6с максимум
+    // 6с при открытых воротах — машина обязана стоять и ждать
+    for (let i = 0; i < 120; i++) {
+      h.physics.updateAiMovement(DT, { carGateId: 'car-gate-1', personGateId: 'wicket-1' })
+    }
+    expect(car.state).toBe('waiting_after')
+
+    // ворота полностью закрылись — машина уезжает
+    h.carGate.settings.isOpen = false
+    h.carGate.settings.isAnimating = false
+    for (let i = 0; i < 60; i++) {
       h.physics.updateAiMovement(DT, { carGateId: 'car-gate-1', personGateId: 'wicket-1' })
       if (car.state === 'moving_away') break
     }
     expect(car.state).toBe('moving_away')
-    // CAR_LEAVE_DELAY = 1.6с -> 32 кадра; допуск на пару кадров
-    expect(frames).toBeLessThanOrEqual(40)
-    // цель — точка ухода за нижний край
+  })
+
+  it('машина в waiting_after уезжает по канонической схеме, не дожидаясь свободной стороны', () => {
+    const h = buildCarHarness()
+    h.carGate.settings.isOpen = false
+    h.carGate.settings.isAnimating = false
+    // въехавшая машина: afterTarget из спавна — за НИЖНИМ краем (уезд вниз)
+    const car = mkCar('car-1', 'enter', 'waiting_after', { x: 540, y: 250 }, { x: 540, y: 250 })
+    // другая машина стоит на дороге СПРАВА — раньше это заставляло ждать
+    const other = mkCar('car-2', 'enter', 'waiting_before', { x: 900, y: 250 }, { x: 580, y: 250 })
+    h.aiAgents.value = [car as any, other as any]
+
+    for (let i = 0; i < 120; i++) {
+      h.physics.updateAiMovement(DT, { carGateId: 'car-gate-1', personGateId: 'wicket-1' })
+      if (car.state === 'moving_away') break
+    }
+    expect(car.state).toBe('moving_away')
+    // [БАГ-РЕПОРТ-5-РАЗЪЕЗД] уезд ВНИЗ по afterTarget, несмотря на занятую дорогу
     expect(car.target.y).toBeGreaterThanOrEqual(SCENE.height)
+
+    // выехавшая машина уезжает ВБОК по afterTarget (своя полоса выше дороги)
+    const exitCar = mkCar('car-3', 'exit', 'waiting_after', { x: 580, y: 160 }, { x: 580, y: 160 })
+    exitCar.afterTarget = { x: -60 - CAR.width / 2, y: 160, width: 0, height: 0 }
+    h.aiAgents.value = [exitCar as any]
+    for (let i = 0; i < 120; i++) {
+      h.physics.updateAiMovement(DT, { carGateId: 'car-gate-1', personGateId: 'wicket-1' })
+      if (exitCar.state === 'moving_away') break
+    }
+    expect(exitCar.state).toBe('moving_away')
+    expect(exitCar.target.x + CAR.width / 2).toBeLessThanOrEqual(0)
+  })
+
+
+  it('входящая машина тормозит перед стоящей на дороге машиной, а не проезжает сквозь', () => {
+    const h = buildCarHarness()
+    // выезжающая машина стоит на линии дороги у центра ворот (ждёт закрытия)
+    const parked = mkCar('car-p', 'exit', 'waiting_after', { x: 580, y: 200 }, { x: 580, y: 200 })
+    // входящая едет справа к той же остановке
+    const enter = mkCar('car-e', 'enter', 'to_gate', { x: 1000, y: 200 }, { x: 580, y: 200 })
+    h.aiAgents.value = [parked as any, enter as any]
+
+    let minDist = Infinity
+    for (let i = 0; i < 240; i++) { // 12с
+      h.physics.updateAiMovement(DT, { carGateId: 'car-gate-1', personGateId: 'wicket-1' })
+      const dx = (enter.element.x + CAR.width / 2) - (parked.element.x + CAR.width / 2)
+      const dy = (enter.element.y + CAR.height / 2) - (parked.element.y + CAR.height / 2)
+      minDist = Math.min(minDist, Math.hypot(dx, dy))
+    }
+    // корпуса не пересеклись: центры двух машин (по 80 длиной) не ближе 80px
+    expect(minDist).toBeGreaterThan(80)
+  })
+
+  it('две входящие машины с разных сторон занимают остановку по очереди (без лобового замерзания)', () => {
+    const h = buildCarHarness()
+    const fromRight = mkCar('car-r', 'enter', 'to_gate', { x: 1000, y: 200 }, { x: 580, y: 200 })
+    const fromLeft = mkCar('car-l', 'enter', 'to_gate', { x: 200, y: 200 }, { x: 580, y: 200 })
+    h.aiAgents.value = [fromRight as any, fromLeft as any]
+
+    // машины проходят waiting_before за 1 кадр (ворота открыты — сразу
+    // crossing), поэтому проверяем (а) отсутствие столкновений на всём пути
+    // и (б) что ОБЕ progressed дальше to_gate (никто не замерз на полпути)
+    for (let i = 0; i < 400; i++) { // 20с
+      h.physics.updateAiMovement(DT, { carGateId: 'car-gate-1', personGateId: 'wicket-1' })
+      const dx = Math.abs(fromRight.element.x - fromLeft.element.x)
+      expect(dx).toBeGreaterThan(76) // корпуса не пересеклись
+    }
+    expect(fromRight.state).not.toBe('to_gate')
+    expect(fromLeft.state).not.toBe('to_gate')
   })
 
   it('машина в to_gate: ретаргет приводит цель остановки к геометрии ворот (бампер на нижней линии)', () => {
@@ -354,5 +445,30 @@ describe('поведение: уступание ждущего', () => {
       if (!h.aiAgents.value.some(a => a.id === 'passer')) break
     }
     expect(Math.hypot(waiter.element.x - startX, waiter.element.y - startY)).toBeLessThan(0.5)
+  })
+
+  it('входящий останавливается перед стоящим выходящим, не толкает его; стоящий отходит вбок', () => {
+    const h = buildPersonHarness()
+    // выходящий стоит ровно на точке остановки входящего (конец прохода)
+    const waiter = mkPerson('waiter', 'waiting_before', { x: 800, y: 194.5 }, { x: 800, y: 194.5 }, 'exit')
+    // входящий идёт к той же точке
+    const passer = mkPerson('passer', 'to_gate', { x: 1100, y: 194.5 }, { x: 800, y: 194.5 }, 'enter')
+    h.aiAgents.value = [waiter as any, passer as any]
+    const startX = waiter.element.x
+    const startY = waiter.element.y
+
+    let minDist = Infinity
+    for (let i = 0; i < 600; i++) { // 30с максимум
+      h.physics.updateAiMovement(DT, { carGateId: '', personGateId: 'wicket-1' })
+      if (!h.aiAgents.value.some(a => a.id === 'passer')) break
+      const dx = (passer.element.x + PERSON.width / 2) - (waiter.element.x + PERSON.width / 2)
+      const dy = (passer.element.y + PERSON.height / 2) - (waiter.element.y + PERSON.height / 2)
+      minDist = Math.min(minDist, Math.hypot(dx, dy))
+    }
+    // корпуса не столкнулись (минимальная дистанция центров > 30px; при
+    // «толкании» она падает до ~0-10px)
+    expect(minDist).toBeGreaterThan(30)
+    // стоящий уступил заранее — отошёл от исходной точки минимум на 8px
+    expect(Math.hypot(waiter.element.x - startX, waiter.element.y - startY)).toBeGreaterThan(8)
   })
 })

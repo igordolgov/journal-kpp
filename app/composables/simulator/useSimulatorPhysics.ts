@@ -70,21 +70,36 @@ export function useSimulatorPhysics(
   const DIR_BLOCK_MAX = 25        // сек
   const GATE_ZONE_PERSON = 70     // px: радиус зоны прохода для пешеходов
   const GATE_ZONE_CAR = 160       // px: радиус зоны прохода для машин
+  // [БАГ-РЕПОРТ-5-ЗОНЫ] уступание (торможение перед чужим корпусом, боковое
+  // расхождение, «держись правее») работает ТОЛЬКО при входе/выходе — у
+  // СВОИХ ворот. Вдали от ворот (горизонтальное движение по дороге) агенты
+  // проезжают/проходят сквозь друг друга, «как раньше»: взаимные остановки
+  // посреди дороги давали «машины не могут разъехаться» и лишние
+  // подёргивания при горизонтальном ходу.
+  const PERSON_GATE_ZONE = 130   // px от центра калитки
+  const CAR_GATE_ZONE = 240      // px от центра автомобильных ворот
+
   // [ФИКС-УСТУПИ-ДОРОГУ] параметры мягкого расхождения пешеходов: ближе
   // PERSON_SEP_RADIUS движущиеся пешеходы плавно смещаются друг от друга
   // (встречные — каждый в свою сторону), вместо прохода «сквозь» друг друга
   const PERSON_SEP_RADIUS = 40   // px: дистанция начала расхождения
   const PERSON_SEP_SPEED = 34    // px/с: темп бокового смещения
   const PERSON_YIELD_SPEED = 22  // px/с: постоянный дрейф «держись правее» при соседе по курсу
+  // [БАГ-РЕПОРТ-4-ТОЛЧОК] ждущий у прохода уступает ЗАРАНЕЕ: реагирует на
+  // любого встречного проходного состояния в этом радиусе (а не только на
+  // движущегося быстрее 0.5) и отходит в сторону от линии его курса
+  const PERSON_WAIT_YIELD_RADIUS = 66 // px
   // [ФИКС-ЗАСТРЯЛ-ВНИЗУ] «тихая зона» прибытия: на последнем отрезке к точке
   // остановки расталкивание и дрейф отключены — именно они дёргали агента
-  // перед остановкой (толчок вбок -> коррекция курса -> новый толчок)
-  const ARRIVE_QUIET_ZONE = 34   // px
-  // [ФИКС-ЗАСТРЯЛ-МАШИНЫ] машина после проезда ворот больше не ждёт их
-  // закрытия: короткая пауза (шлагбаум закрывается параллельно своим
-  // таймером) и дальше в путь. Прежнее ожидание closeDelay+15с (до 25с)
-  // выглядело как «машина застряла после ворот».
-  const CAR_LEAVE_DELAY = simOpts.carLeaveDelay ?? 1.6
+  // перед остановкой (толчок вбок -> коррекция курса -> новый толчок).
+  // [БАГ-РЕПОРТ-4-ДЁРГАНИЕ] зона расширена 34 -> 70: покрывает весь
+  // тормозной отрезок (dist < 80), поэтому подход к линии ворот плавный
+  const ARRIVE_QUIET_ZONE = 70   // px
+  // [БАГ-РЕПОРТ-4-ЗАКРЫТИЕ] приехавшая машина ждёт ПОЛНОГО закрытия ворот
+  // (и свободной стороны выезда — уступание машин).
+  // Предохранитель: если ворота не закрылись/не освободилась дорога за
+  // WAIT_AFTER_MAX секунд — уезжаем принудительно (не виснем навечно)
+  const WAIT_AFTER_MAX = simOpts.waitAfterMax ?? 30  // сек
   const FORCE_CROSS_AFTER = 5        // сек: одиночка / лидер группы
   const FORCE_CROSS_GROUP_AFTER = 12 // сек: член группы, даже если предыдущий не прошёл
   
@@ -101,6 +116,16 @@ export function useSimulatorPhysics(
   onScopeDispose(() => {
     clearAllTimers()
   })
+
+  // [БАГ-РЕПОРТ-5-ЗОНЫ] дистанция от центра агента до центра ЕГО ворот
+  // (калитки для людей, автомобильных ворот для машин)
+  const distToGateCenter = (a: AiAgent, gate: SceneElement | undefined): number => {
+    if (!gate) return Infinity
+    return Math.hypot(
+      a.element.x + a.element.width / 2 - (gate.x + gate.width / 2),
+      a.element.y + a.element.height / 2 - (gate.y + gate.height / 2),
+    )
+  }
 
   const updateAiMovement = (dt: number, cfg: { carGateId: string; personGateId: string }) => {
     const ACCEL = simOpts.ACCEL ?? 100
@@ -175,6 +200,20 @@ export function useSimulatorPhysics(
         if (a.type !== agent.type || a.direction !== agent.direction || a.state !== 'waiting_before') continue
         const t = waitStartByAgentId.get(a.id)
         if (t != null && t < myEarliest) myEarliest = t
+      }
+      // [БАГ-РЕПОРТ-4-ОЧЕРЕДЬ] СВОЯ машина в зоне прохода (crossing /
+      // waiting_after) тоже занимает ворота: она стоит/едет ровно на линии
+      // выезда, и вторая машина въезжала в неё. Ворота обслуживают по одной
+      // машине, независимо от направления потока.
+      if (agent.type === 'car') {
+        for (const o of aiAgents.value) {
+          if (o.id === agent.id || o.type !== 'car' || o.direction !== agent.direction || o.state === 'done') continue
+          if (o.state !== 'crossing' && o.state !== 'waiting_after') continue
+          const ocx = o.element.x + o.element.width / 2
+          const ocy = o.element.y + o.element.height / 2
+          if (Math.abs(ocx - gcx) > 100 || Math.abs(ocy - gcy) > 140) continue
+          return true
+        }
       }
       for (const o of aiAgents.value) {
         if (o.id === agent.id || o.type !== agent.type || o.direction !== opp || o.state === 'done') continue
@@ -267,12 +306,17 @@ export function useSimulatorPhysics(
             // moving_away стоячих мест нет: раньше застрявший в проходе
             // агент вечно «ждал» идущего впереди и не спасался сторожем.
             const mateAhead = agent.state === 'to_gate' && aiAgents.value.some(o => {
-              if (o.id === agent.id || o.type !== agent.type || o.direction !== agent.direction || o.state === 'done') return false
+              if (o.id === agent.id || o.type !== agent.type || o.state === 'done') return false
+              // [БАГ-РЕПОРТ-4] помеха на курсе может быть ВСТРЕЧНОЙ (машина,
+              // выезжающая с ворот, или человек, отходящий в сторону) —
+              // фильтр по direction снят.
               // [ФИКС-взаимная-блокировка] «свой» впереди — законная причина
-              // ждать, только если он реально движется или стоит у прохода
-              // (waiting_before). Два СТОЯЩИХ агента с пересекающимися целями
-              // иначе спасают друг друга вечно: каждый в конусе другого.
-              if (o.state !== 'waiting_before' && (o.element.velocity || 0) <= 0.5) return false
+              // ждать, если он реально движется или стоит на ЛЕГАЛЬНОЙ
+              // стоянке (waiting_before — уступит и разойдётся; waiting_after
+              // — машина, ждущая закрытия ворот, уедет). Два СТОЯЩИХ to_gate
+              // с пересекающимися целями иначе спасают друг друга вечно.
+              const oMoving = (o.element.velocity || 0) > 0.5
+              if (!oMoving && o.state !== 'waiting_before' && o.state !== 'waiting_after') return false
               const ox = o.element.x + o.element.width / 2 - cx0
               const oy = o.element.y + o.element.height / 2 - cy0
               const f = ox * ux + oy * uy
@@ -313,6 +357,13 @@ export function useSimulatorPhysics(
       const isWicket = gate?.settings?.gateType === 'wicket' || (gate?.width && gate.width <= 60)
       const closeDelay = isWicket ? wicketCloseDelay : gateCloseDelay
 
+      // [БАГ-РЕПОРТ-5-ЗОНЫ] я в зоне прохода (вход/выход)? Сам фазa crossing
+      // (проход сквозь ворота/калитку) — всегда зона уступания, где бы ни
+      // находился агент: уступать обязан именно в момент входа/выхода.
+      const zoneR = agent.type === 'car' ? CAR_GATE_ZONE : PERSON_GATE_ZONE
+      const inGateZone = distToGateCenter(agent, gate) <= zoneR
+      const yieldActive = inGateZone || agent.state === 'crossing'
+
       if (agent.state === 'to_gate' && gate && !agent.groupId) {
         // [СХЕМА-ТРАЕКТОРИЙ] цель остановки пересчитывается из ТЕКУЩЕЙ
         // геометрии ворот (те же формулы, что у спавна): перетаскивание ворот
@@ -325,36 +376,69 @@ export function useSimulatorPhysics(
 
       if (agent.state === 'waiting_before') {
         el.velocity = 0
-        // [ФИКС-УСТУПАНИЕ-ОБЕИМИ] ждущий у прохода тоже отходит в сторону,
-        // если мимо проходит человек: раньше в сторону отходил только
-        // ДВИЖУЩИЙСЯ (входящий обходил стоящего выходящего), а ждущий
-        // оставался стеной на пути. Стоящих не сдвигаем — очередь и строй
-        // групп не расползаются; своих по группе исключаем.
+        // [БАГ-РЕПОРТ-4-ТОЛЧОК] ждущий у прохода уступает ЗАРАНЕЕ и НАСТИГАЮЩЕ:
+        //  1) триггер — проходное СОСТОЯНИЕ соседа (to_gate/crossing/
+        //     moving_away) в радиусе PERSON_WAIT_YIELD_RADIUS, а не его
+        //     текущая скорость: входящий, уже затормозивший перед стоящим
+        //     выходящим (или вставший в упор), раньше замораживал пару
+        //     «оба стоят» — никто не отходил;
+        //  2) боковой шаг идёт от ЛИНИИ КУРСА встречного — ждущий отходит
+        //     вбок, освобождая полосу, ещё ДО контакта (раньше отходил
+        //     радиально «назад» с дистанции 40px, и входящий успевал его
+        //     толкнуть, прежде чем они расходились).
+        // Стоящих (waiting_before/waiting_after) не сдвигаем — очередь и
+        // строй групп не расползаются; своих по группе исключаем.
         if (agent.type === 'person') {
           const mcx = el.x + el.width / 2
           const mcy = el.y + el.height / 2
-          let wx = 0, wy = 0, wMax = 0
+          let gx = 0, gy = 0, wMax = 0
           for (const other of aiAgents.value) {
             if (other.id === agent.id || other.type !== 'person' || other.state === 'done') continue
             if (agent.groupId && other.groupId === agent.groupId) continue
-            if ((other.element.velocity || 0) <= 0.5) continue
+            if (other.state === 'waiting_before' || other.state === 'waiting_after') continue
             const ocx = other.element.x + other.element.width / 2
             const ocy = other.element.y + other.element.height / 2
             const ax = mcx - ocx
             const ay = mcy - ocy
             const d = Math.hypot(ax, ay)
-            if (d < 0.01 || d >= PERSON_SEP_RADIUS) continue
-            const w = (PERSON_SEP_RADIUS - d) / PERSON_SEP_RADIUS
-            wx += (ax / d) * w
-            wy += (ay / d) * w
+            if (d < 0.01 || d >= PERSON_WAIT_YIELD_RADIUS) continue
+            const w = Math.max(0.45, (PERSON_WAIT_YIELD_RADIUS - d) / PERSON_WAIT_YIELD_RADIUS)
+            // радиальная составляющая «от соседа» (как раньше, но шире)
+            gx += (ax / d) * w
+            gy += (ay / d) * w
+            // боковой шаг от линии курса встречного (основа уступания)
+            const rot = other.element.rotation || 0
+            const hx = Math.cos(rot)
+            const hy = Math.sin(rot)
+            const ahead = ax * hx + ay * hy
+            if (ahead < -24) continue // он уже проехал мимо — не пятимся
+            const par = ahead
+            const px = ax - hx * par
+            const py = ay - hy * par
+            const lat = Math.hypot(px, py)
+            if (lat > 34) continue    // я не на его пути
+            if (lat < 0.5) {
+              // точная лобовая: отходим в сторону, ПРОТИВОПОЛОЖНУЮ дрейфу
+              // встречного («держись правее»), — освобождаем именно его полосу
+              gx += hy * 1.2
+              gy += -hx * 1.2
+            } else {
+              gx += (px / lat) * 1.2
+              gy += (py / lat) * 1.2
+            }
             wMax = Math.max(wMax, w)
           }
           if (wMax > 0) {
-            const wm = Math.hypot(wx, wy)
-            if (wm > 0.01) {
+            const gm = Math.hypot(gx, gy)
+            if (gm > 0.01) {
               const push = wMax * PERSON_SEP_SPEED * dt
-              el.x += (wx / wm) * push
-              el.y += (wy / wm) * push
+              el.x += (gx / gm) * push
+              el.y += (gy / gm) * push
+              // [БАГ-РЕПОРТ-5-АНИМАЦИЯ] уступающий ШАГАЕТ в сторону, а не
+              // скользит: боковой шаг фиксируется как скорость, чтобы
+              // гистерезис is-paused не замораживал анимацию рук/ног.
+              // Шаг закончился — velocity снова 0, агент «встаёт».
+              el.velocity = Math.max(el.velocity || 0, Math.min(PERSON_SEP_SPEED, push / Math.max(dt, 1e-4)))
             }
           }
         }
@@ -415,28 +499,32 @@ export function useSimulatorPhysics(
         // во дворе бесконечно, а следующая замирала в очереди за ней.
         const waitedAfter = (waitAfterByAgentId.get(agent.id) ?? 0) + dt
         waitAfterByAgentId.set(agent.id, waitedAfter)
-        // [ФИКС-ЗАСТРЯЛ-МАШИНЫ] выход из waiting_after: раньше машина ждала
-        // закрытия ворот (closeDelay 10с + страховка 15с — до 25с стойла
-        // «застрявшей» машиной). Теперь: сосед приближается — уезжаем сразу;
-        // ворота начали закрываться — уезжаем; иначе — короткая пауза
-        // CAR_LEAVE_DELAY и уезжаем (ворота закрываются параллельно).
-        const hasOtherCarNear = aiAgents.value.some(a =>
-          a !== agent &&
-          a.type === 'car' &&
-          (a.state === 'waiting_before' || a.state === 'to_gate' || a.state === 'crossing') &&
-          String(gate?.id) === cfg.carGateId
-        )
-        if (hasOtherCarNear) {
+        // [БАГ-РЕПОРТ-4-ЗАКРЫТИЕ] приехавшая машина стоит, пока ворота НЕ
+        // закроются ПОЛНОСТЬЮ (шлагбаум опущен, анимация закончена): раньше
+        // CAR_LEAVE_DELAY 1.6с выпроваживал её при ещё поднименном шлагбауме.
+        // [БАГ-РЕПОРТ-4-УСТУПАНИЕ-МАШИН] выезжаем только на СВОБОДНУЮ
+        // сторону дороги: раньше машина выезжала направо «в лоб» очереди
+        // встречных машин (они вообще не тормозили перед ней). Занятая
+        // сторона => ждём освобождения; обе заняты => ждём (предохранитель
+        // WAIT_AFTER_MAX уводит в менее загруженную сторону).
+        const gateFullyClosed = !gate ||
+          (!gate.settings?.isOpen && !gate.settings?.isAnimating && !gate.settings?.isStopping)
+        // [БАГ-РЕПОРТ-5-РАЗЪЕЗД] уезд по КАНОНИЧЕСКОЙ схеме, без выбора
+        // «свободной стороны»: ожидание свободной стороны при занятой дороге
+        // взаимно блокировало машины («не могут разъехаться»). Въехавшая
+        // уезжает ВНИЗ за нижний край (afterTarget из спавна), выехавшая —
+        // ВБОК по СВОЕЙ полосе выше дороги (CAR_EXIT_PULL_PAST): её путь не
+        // пересекает полосу дороги, уступать встречным/попутным не нужно —
+        // на дороге машины расходятся «сквозь» (уступание только у ворот).
+        if (gateFullyClosed && waitedAfter > 0.8) {
           agent.state = 'moving_away'
-          agent.target = { ...agent.afterTarget, width: 0, height: 0 }
-        } else if (gate && !gate.settings?.isOpen && !gate.settings?.isAnimating) {
+          agent.target = { x: agent.afterTarget.x, y: agent.afterTarget.y, width: 0, height: 0 }
+        } else if (waitedAfter > WAIT_AFTER_MAX) {
+          // [ПРЕДОХРАНИТЕЛЬ] ворота так и не закрылись — уезжаем
           agent.state = 'moving_away'
-          agent.target = { ...agent.afterTarget, width: 0, height: 0 }
-        } else if (waitedAfter > CAR_LEAVE_DELAY) {
-          // уезжаем, даже если ворота ещё открыты — их закроет свой таймер
-          agent.state = 'moving_away'
-          agent.target = { ...agent.afterTarget, width: 0, height: 0 }
+          agent.target = { x: agent.afterTarget.x, y: agent.afterTarget.y, width: 0, height: 0 }
         }
+
         if (agent.state !== 'waiting_after') waitAfterByAgentId.delete(agent.id)
         continue
       }
@@ -638,11 +726,26 @@ export function useSimulatorPhysics(
       let leaderSpeed = Infinity
       const myLen = Math.max(el.width, el.height)
       const myWid = Math.min(el.width, el.height)
+      // [БАГ-РЕПОРТ-4-ЛОБОВЫЕ] уступи встречной to_gate-машине: приоритет у той,
+      // что КЛИЧЕ к своей цели (при равенстве — меньший id). Уступающая
+      // останавливается ЗАРАНЕЕ (по обнаружению в коридоре), поэтому приоритетная
+      // доезжает до общей остановки, не встречая препятствия на своём пути.
+      let yieldToOncoming = false
 
       for (const other of sorted) {
         if (other.id === agent.id) continue
         if (other.type !== agent.type) continue
-        if (other.direction !== agent.direction) continue
+        // [БАГ-РЕПОРТ-4-УСТУПАНИЕ-МАШИН] машины притормаживают перед ЛЮБОЙ
+        // машиной в коридоре курса — встречной и стоящей тоже: раньше фильтр
+        // по direction пропускал встречные/стоящие, и машины проезжали
+        // сквозь друг друга. Люди остаются на старом правиле (свой поток):
+        // встречных они обходят шагом в сторону, а не тормозят.
+        if (agent.type === 'person' && other.direction !== agent.direction) continue
+        // [БАГ-РЕПОРТ-5-ЗОНЫ] торможение/приоритет — только у ворот (вход/
+        // выход) и только если ПРЕПЯТСТВИЕ тоже в зоне; в фазе crossing
+        // (сам проход) препятствия на курсе учитываются всегда. Вдали от
+        // ворот — едем/идём сквозь, «как раньше».
+        if (!(yieldActive && (agent.state === 'crossing' || distToGateCenter(other, gate) <= zoneR))) continue
         const ox = other.element.x + other.element.width / 2
         const oy = other.element.y + other.element.height / 2
         const toX = ox - cx
@@ -655,6 +758,37 @@ export function useSimulatorPhysics(
         const lateral = Math.abs(cross({ x: toX, y: toY }, { x: dirX, y: dirY }))
         const otherWid = Math.min(other.element.width, other.element.height)
         if (lateral > myWid / 2 + otherWid / 2 + 15) continue
+
+        if (agent.type === 'car') {
+          const myFacingLeft = dirX < 0
+          const oSettings = (other.element.settings || {}) as Record<string, unknown>
+          const otherFacingLeft = typeof oSettings._facingLeft === 'boolean'
+            ? (oSettings._facingLeft as boolean)
+            : other.direction === 'enter'
+          const oncoming = myFacingLeft ? !otherFacingLeft : otherFacingLeft
+          if (oncoming && other.state === 'to_gate') {
+            // две машины едут к общей остановке с разных сторон: уступает
+            // та, что дальше от цели; приоритетная игнорирует встречную
+            const otherTarget = other.target
+            const otherDist = Number.isFinite(otherTarget?.x) && Number.isFinite(otherTarget?.y)
+              ? Math.hypot(
+                  otherTarget.x + (otherTarget.width || 0) / 2 - ox,
+                  otherTarget.y + (otherTarget.height || 0) / 2 - oy,
+                )
+              : Infinity
+            const iYield = otherDist < dist - 4 ||
+              (Math.abs(otherDist - dist) <= 4 && String(agent.id) > String(other.id))
+            if (iYield) {
+              yieldToOncoming = true
+              continue
+            }
+            continue // у меня приоритет — еду, встречная уступит
+          }
+          // [ЛОБОВЫЕ] препятствие ЗА моей целью не мешает, но только если оно
+          // не едет НАВСТРЕЧУ (стоящее/попутное не войдёт в мой отрезок пути;
+          // встречное — войдёт, и проехать сквозь него нельзя)
+          if (!oncoming && forward > dist + 4) continue
+        }
         const otherLen = Math.max(other.element.width, other.element.height)
         const gap = forward - (myLen / 2 + otherLen / 2)
         // [ФИКС-СКВОЗЬ] gap <= 0 — корпуса уже пересеклись: раньше такой
@@ -684,7 +818,8 @@ export function useSimulatorPhysics(
       // прохода насквозь. Math.min — никогда не УВЕЛИЧИВАЕТ скорость,
       // поэтому очереди leader-follow (targetSpeed = 0) не ломаются.
       let personNearAhead = Infinity
-      if (agent.type === 'person') {
+      let standingAhead = false
+      if (agent.type === 'person' && (inGateZone || agent.state === 'crossing')) {
         let near2 = Infinity
         for (const other of aiAgents.value) {
           if (other.id === agent.id || other.type !== 'person' || other.state === 'done') continue
@@ -699,9 +834,26 @@ export function useSimulatorPhysics(
           if (lateral > 30) continue
           const d2 = ahead * ahead + lateral * lateral
           if (d2 < near2) near2 = d2
+          // [БАГ-РЕПОРТ-4-ТОЛЧОК] стоящий человек прямо на курсе — ПОЛНАЯ
+          // остановка на безопасной дистанции: раньше пол 14 px/с
+          // проталкивал входящего прямо в стоящего выходящего (контакт
+          // раньше, чем успевало сработать расхождение). Стоящий уступит
+          // (проактивное отхождение ждущих) — и путь освободится.
+          // ahead > 8: совпавшие/почти совпавшие центры (двойной спавн в
+          // одну точку) НЕ замораживаем — их разводит ветка сепарации,
+          // иначе взаимный стоп всей очереди позади.
+          // [БАГ-РЕПОРТ-5-АНИМАЦИЯ] уступающий ждущий теперь «идёт» боком
+          // (velocity > 0), поэтому признак стоящего дополнен состоянием:
+          // waiting_before с боковым шагом — всё ещё препятствие на курсе.
+          if (ahead > 8 && ahead < 54 && lateral < 26 &&
+              ((other.element.velocity || 0) <= 0.5 || other.state === 'waiting_before')) {
+            standingAhead = true
+          }
         }
         personNearAhead = Math.sqrt(near2)
-        if (personNearAhead < PERSON_SEP_RADIUS * 1.6) {
+        if (standingAhead) {
+          targetSpeed = 0
+        } else if (personNearAhead < PERSON_SEP_RADIUS * 1.6) {
           targetSpeed = Math.min(targetSpeed, Math.max(14, personNearAhead * 0.5))
         }
       }
@@ -709,9 +861,17 @@ export function useSimulatorPhysics(
       // пропорциональна остатку пути (с нижним порогом), а не ступенька
       // «dist<80 -> сразу 30». Подход к цели заканчивается мягко,
       // скорость к моменту прибытия уже сопоставима с шагом кадра.
+      // [БАГ-РЕПОРТ-4-ДЁРГАНИЕ] у людей порог снижен 12 -> 8: меньше ползущий
+      // шаг — меньше видимый «доводящий толчок» в момент точной посадки.
+      // У машин порог поднят 12 -> 20: ползти последние метры на 12 px/с
+      // неестественно (4с на 50px) — машина подкатывает живее.
       if (dist < 80) {
-        targetSpeed = Math.min(targetSpeed, Math.max(12, dist * 0.55))
+        const brakeFloor = agent.type === 'person' ? 8 : 20
+        targetSpeed = Math.min(targetSpeed, Math.max(brakeFloor, dist * 0.55))
       }
+      // [БАГ-РЕПОРТ-4-ЛОБОВЫЕ] уступаю встречной to_gate-машине —
+      // останавливаюсь заранее, не доезжая до зоны встречи
+      if (yieldToOncoming) targetSpeed = 0
 
       if ((el.velocity || 0) < targetSpeed) {
         el.velocity = Math.min(targetSpeed, (el.velocity || 0) + ACCEL * dt)
@@ -756,58 +916,70 @@ export function useSimulatorPhysics(
       // Стоящих не толкаем: строй группы и очереди у прохода не расползаются.
       // [ФИКС-ДЁРГАНИЕ] в тихой зоне прибытия (dist < ARRIVE_QUIET_ZONE)
       // расталкивание и дрейф отключены — подход к точке остановки плавный.
-      if (agent.type === 'person' && (el.velocity || 0) > 0.5 && dist >= ARRIVE_QUIET_ZONE) {
+      // [БАГ-РЕПОРТ-4-ТОЛЧОК] клапан: если чужой человек ВПЛОТНУЮ (< 42px,
+      // например стоит прямо на моей цели), расталкивание работает и в
+      // тихой зоне — иначе проходим сквозь стоящего.
+      // [БАГ-РЕПОРТ-5-ЗОНЫ] расхождение — только у ворот (вход/выход) и НЕ
+      // в тихой зоне финального подхода (to_gate, dist < QUIET): боковые
+      // подталкивания на последних метрах были главным источником
+      // «дёргания перед остановкой». Уступает СТОЯЩИЙ (проактивный шаг
+      // ждущего), идущий к цели двигается по прямой. Клапан «nearestD < 42»
+      // снят — именно он возвращал подталкивания в тихую зону.
+      if (agent.type === 'person' && (el.velocity || 0) > 0.5 && (inGateZone || agent.state === 'crossing') &&
+          !(agent.state === 'to_gate' && dist < ARRIVE_QUIET_ZONE)) {
         const ccx = el.x + el.width / 2
         const ccy = el.y + el.height / 2
-        let sepX = 0, sepY = 0, maxW = 0
-        for (const other of aiAgents.value) {
-          if (other.id === agent.id || other.type !== 'person' || other.state === 'done') continue
-          // своих по группе не раскидываем — колонна/строй сохраняется
-          if (agent.groupId && other.groupId === agent.groupId) continue
-          const ocx = other.element.x + other.element.width / 2
-          const ocy = other.element.y + other.element.height / 2
-          const ax = ccx - ocx
-          const ay = ccy - ocy
-          const d = Math.hypot(ax, ay)
-          if (d < 0.01) {
-            // центры совпали (спавн в одной точке): детерминированно разводим
-            // по разные стороны от курса по порядку id — иначе взаимный стоп
-            const s = String(agent.id) < String(other.id) ? 1 : -1
-            sepX += -dirY * s
-            sepY += dirX * s
-            maxW = Math.max(maxW, 0.6)
-            continue
+        {
+          let sepX = 0, sepY = 0, maxW = 0
+          for (const other of aiAgents.value) {
+            if (other.id === agent.id || other.type !== 'person' || other.state === 'done') continue
+            // своих по группе не раскидываем — колонна/строй сохраняется
+            if (agent.groupId && other.groupId === agent.groupId) continue
+            const ocx = other.element.x + other.element.width / 2
+            const ocy = other.element.y + other.element.height / 2
+            const ax = ccx - ocx
+            const ay = ccy - ocy
+            const d = Math.hypot(ax, ay)
+            if (d < 0.01) {
+              // центры совпали (спавн в одной точке): детерминированно разводим
+              // по разные стороны от курса по порядку id — иначе взаимный стоп
+              const s = String(agent.id) < String(other.id) ? 1 : -1
+              sepX += -dirY * s
+              sepY += dirX * s
+              maxW = Math.max(maxW, 0.6)
+              continue
+            }
+            if (d >= PERSON_SEP_RADIUS) continue
+            const w = (PERSON_SEP_RADIUS - d) / PERSON_SEP_RADIUS // 0..1
+            const nx = ax / d, ny = ay / d
+            // [ФИКС-ЕСТЕСТВЕННОСТЬ] только РАДИАЛЬНАЯ составляющая «от соседа»:
+            // боковая добавка (0.8) для лобовых встреч была противонаправлена
+            // дрейфу «держись правее» и гасила расхождение
+            sepX += nx * w
+            sepY += ny * w
+            maxW = Math.max(maxW, w)
           }
-          if (d >= PERSON_SEP_RADIUS) continue
-          const w = (PERSON_SEP_RADIUS - d) / PERSON_SEP_RADIUS // 0..1
-          const nx = ax / d, ny = ay / d
-          // [ФИКС-ЕСТЕСТВЕННОСТЬ] только РАДИАЛЬНАЯ составляющая «от соседа»:
-          // боковая добавка (0.8) для лобовых встреч была противонаправлена
-          // дрейфу «держись правее» и гасила расхождение
-          sepX += nx * w
-          sepY += ny * w
-          maxW = Math.max(maxW, w)
-        }
-        const mRaw = Math.hypot(sepX, sepY)
-        // [ФИКС-ЛОБОВЫЕ] правило «держись правее» работает НЕЗАВИСИМО от
-        // наличия перпендикулярной составляющей: при точном лобовом контакте
-        // радиальный «от соседа» проецируется на перпендикуляр в ноль, и без
-        // дрейфа встречные проходят друг сквозь друга
-        if (personNearAhead < PERSON_SEP_RADIUS) {
-          el.x += -dirY * PERSON_YIELD_SPEED * dt
-          el.y += dirX * PERSON_YIELD_SPEED * dt
-        }
-        if (mRaw > 0.01 && maxW > 0) {
-          // [ФИКС-ЕСТЕСТВЕННОСТЬ] оставляем только перпендикулярную к курсу
-          // составляющую: шаг ВБОК, без хода назад/вперёд от толчка
-          const par = sepX * dirX + sepY * dirY
-          const perpX = sepX - par * dirX
-          const perpY = sepY - par * dirY
-          const m = Math.hypot(perpX, perpY)
-          if (m > 0.01) {
-            const push = maxW * PERSON_SEP_SPEED * dt
-            el.x += (perpX / m) * push
-            el.y += (perpY / m) * push
+          const mRaw = Math.hypot(sepX, sepY)
+          // [ФИКС-ЛОБОВЫЕ] правило «держись правее» работает НЕЗАВИСИМО от
+          // наличия перпендикулярной составляющей: при точном лобовом контакте
+          // радиальный «от соседа» проецируется на перпендикуляр в ноль, и без
+          // дрейфа встречные проходят друг сквозь друга
+          if (personNearAhead < PERSON_SEP_RADIUS) {
+            el.x += -dirY * PERSON_YIELD_SPEED * dt
+            el.y += dirX * PERSON_YIELD_SPEED * dt
+          }
+          if (mRaw > 0.01 && maxW > 0) {
+            // [ФИКС-ЕСТЕСТВЕННОСТЬ] оставляем только перпендикулярную к курсу
+            // составляющую: шаг ВБОК, без хода назад/вперёд от толчка
+            const par = sepX * dirX + sepY * dirY
+            const perpX = sepX - par * dirX
+            const perpY = sepY - par * dirY
+            const m = Math.hypot(perpX, perpY)
+            if (m > 0.01) {
+              const push = maxW * PERSON_SEP_SPEED * dt
+              el.x += (perpX / m) * push
+              el.y += (perpY / m) * push
+            }
           }
         }
       }
@@ -834,4 +1006,4 @@ export function useSimulatorPhysics(
   }
 
   return { updateAiMovement, clearAllTimers, cancelCloseTimer }
-}
+}

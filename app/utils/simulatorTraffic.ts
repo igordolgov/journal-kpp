@@ -41,6 +41,11 @@ export interface TrafficPoint {
   y: number
 }
 
+// [БАГ-РЕПОРТ-4] сторона дороги для появления/уезда МАШИН: раньше все машины
+// приезжали только справа и уезжали только направо. Теперь сторона выбирается
+// случайно при спавне (люди остаются на канонической схеме «справа»).
+export type RoadSide = 'right' | 'left'
+
 export interface TrafficPoints {
   spawn: TrafficPoint   // ЦЕНТР агента в момент появления
   stop: TrafficPoint    // ЦЕНТР на остановке перед проходом (waiting_before)
@@ -68,6 +73,15 @@ export const FOOT_PAD_PERSON = 2
 // остановки (как в прежней схеме: cross = дорога + stopOffset).
 export const crossingOffset = (isPerson: boolean): number =>
   isPerson ? PERSON_STOP_OFFSET : CAR_STOP_OFFSET
+
+
+// [БАГ-РЕПОРТ-5-ВЫШЕ-ШЛАГБАУМА] выехавшая машина ждёт полного закрытия
+// ворот НЕ в проёме (раньше центр ровно на линии дороги — «в шлагбауме»,
+// где она блокировала проезд и выглядела стоящей НА переезде), а чуть
+// дальше по ходу выезда — выше линии дороги. 60px: корпус машины (40)
+// целиком выше дороги + зазор больше половины ширины коридора уступания
+// (55) — горизонтальный выезд с этой высоты не пересекает полосу дороги.
+export const CAR_EXIT_PULL_PAST = 60
 
 interface RawPoint { x?: number; y?: number }
 
@@ -157,28 +171,39 @@ export const deriveTrafficPoints = (
   size: { width: number; height: number },
   direction: 'enter' | 'exit',
   scene: { width: number; height: number },
+  side: RoadSide = 'right',
 ): TrafficPoints => {
   const isPerson = size.height > size.width   // человек 40x55, машина 80x40
   const footPad = isPerson ? FOOT_PAD_PERSON : 0
   const off = crossingOffset(isPerson)
   const cx = gate.x + gate.width / 2
   const roadY = gate.y + gate.height - size.height / 2 + footPad  // центр на дороге
+  // [БАГ-РЕПОРТ-4] боковой край по выбранной стороне: справа — за правым
+  // краем сцены, слева — за левым. Для людей вызывающий код оставляет 'right'.
+  const edgeX = side === 'right'
+    ? scene.width + 60 + size.width / 2
+    : -60 - size.width / 2
 
   if (direction === 'enter') {
     return {
       vertical: false,
-      spawn: { x: scene.width + 60 + size.width / 2, y: roadY },
+      spawn: { x: edgeX, y: roadY },
       stop:  { x: cx, y: roadY },
       cross: { x: cx, y: roadY + off },
       after: { x: cx, y: scene.height + 80 + size.height / 2 },
     }
   }
+  // [БАГ-РЕПОРТ-5] у машины и точка ожидания закрытия ворот, и линия уезда
+  // подняты выше дороги (CAR_EXIT_PULL_PAST): ждёт ЗА шлагбаумом, уезжает
+  // строго вбок по своей полосе, не пересекая дорогу. У человека без
+  // изменений: ноги на линии дороги.
+  const exitY = isPerson ? roadY : roadY - CAR_EXIT_PULL_PAST
   return {
     vertical: true,
     spawn: { x: cx, y: scene.height + 60 + size.height / 2 },
     stop:  { x: cx, y: roadY + off },
-    cross: { x: cx, y: roadY },
-    after: { x: scene.width + 60 + size.width / 2, y: roadY },
+    cross: { x: cx, y: exitY },
+    after: { x: edgeX, y: exitY },
   }
 }
 
@@ -196,8 +221,9 @@ export const trafficPointsFor = (
   size: { width: number; height: number },
   direction: 'enter' | 'exit',
   scene: { width: number; height: number },
+  side: RoadSide = 'right',
 ): TrafficPoints => {
-  const derived = deriveTrafficPoints(gate, size, direction, scene)
+  const derived = deriveTrafficPoints(gate, size, direction, scene, side)
   const ctx: ValidateCtx = { vertical: derived.vertical, gate, size, scene }
 
   const apply = (roleName: 'spawn' | 'stop' | 'cross' | 'after'): TrafficPoint => {

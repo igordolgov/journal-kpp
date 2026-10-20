@@ -90,7 +90,7 @@ export function useSimulatorSpawn(
 
   // [Фолбэк] ворот нет на сцене (битый gateId) — каноническая схема по ручным
   // координатам: вход сбоку по дороге -> проход вниз -> уход за нижний край;
-  // выход снизу -> проход вверх -> уход вбок за правый край. Штатные сцены
+  // выход снизу -> проход вверх -> уход вбок за выбранный край. Штатные сцены
   // сюда не попадают: точки выводятся из ворот.
   const fallbackPoints = (
     direction: Direction,
@@ -99,12 +99,14 @@ export function useSimulatorSpawn(
     stopOffset: number,
     fixedX: number,
     fixedY: number,
+    side: 'right' | 'left' = 'right',
   ): TrafficPoints => {
     const scene = sceneSize.value
+    const edgeX = side === 'right' ? scene.width + 60 + size.width / 2 : -60 - size.width / 2
     if (direction === 'enter') {
       return {
         vertical: false,
-        spawn: { x: scene.width + 60 + size.width / 2, y: fixedY },
+        spawn: { x: edgeX, y: fixedY },
         stop: { x: fixedX, y: fixedY },
         cross: { x: fixedX, y: fixedY + stopOffset },
         after: { x: fixedX, y: scene.height + EXIT_VERTICAL_DISTANCE },
@@ -116,7 +118,7 @@ export function useSimulatorSpawn(
       stop: { x: fixedX, y: fixedY + stopOffset },
       cross: { x: fixedX, y: fixedY },
       after: {
-        x: scene.width + 60 + size.width / 2,
+        x: edgeX,
         y: fixedY,
       },
     }
@@ -410,14 +412,17 @@ export function useSimulatorSpawn(
     const fixedY = fixedYCar.value
 
     // [СХЕМА-ТРАЕКТОРИЙ] точки машины — из геометрии автомобильных ворот
-    // (каноническая схема): вход спавнится за ПРАВЫМ краем на линии дороги
-    // (бампер на нижней линии ворот), едет влево, останавливается у ворот,
+    // (каноническая схема): вход спавнится за боковым краем на линии дороги
+    // (бампер на нижней линии ворот), едет к воротам, останавливается,
     // проезжает вниз и уходит за нижний край; выход — снизу вверх, уезжает
-    // ВБОК по дороге за правый край. Настроенные оффсеты применяются только
+    // ВБОК по дороге за боковой край. Настроенные оффсеты применяются только
     // с правильной стороны ворот.
+    // [БАГ-РЕПОРТ-4] сторона выбирается СЛУЧАЙНО: машины появляются и уезжают
+    // и справа, и слева (раньше — только справа).
+    const side: 'right' | 'left' = Math.random() < 0.5 ? 'left' : 'right'
     const pts: TrafficPoints = gate
-      ? trafficPointsFor(gate as any, { width, height }, direction, sceneSize.value)
-      : fallbackPoints(direction, 'Car', { width, height }, stopOffset, fixedX, fixedY)
+      ? trafficPointsFor(gate as any, { width, height }, direction, sceneSize.value, side)
+      : fallbackPoints(direction, 'Car', { width, height }, stopOffset, fixedX, fixedY, side)
 
     const carElement: SceneElement = {
       id: `${direction}_car_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
@@ -430,6 +435,10 @@ export function useSimulatorSpawn(
       // zIndex 1 — машина пряталась за декорациями базы.
       personId: driverPerson.id, direction, zIndex: direction === 'exit' ? 400 : 180,
       travelMode: 'car',
+      // [БАГ-РЕПОРТ-4] начальная ориентация по стороне появления/уезда, до
+      // первого тика физики: вход справа едет влево (зеркало), слева — вправо;
+      // выход уезжает в выбранную сторону. Дальше флаг ведёт физика.
+      settings: { _facingLeft: direction === 'enter' ? side === 'right' : side === 'left' },
       asset: { type: 'car', plate, color, svg: getCarSvg(color) }
     }
 
@@ -721,4 +730,4 @@ export function useSimulatorSpawn(
     resetSpawnTimers,
     handleAgentDone,
   }
-}
+}
