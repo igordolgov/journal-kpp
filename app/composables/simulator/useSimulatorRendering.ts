@@ -7,16 +7,19 @@ export function useSimulatorRendering(containerRef: Ref<HTMLElement | null>, sce
   const scale = ref(1)
   const enableVisualRotation = ref(false)
 
+  // Подгон масштаба холста под контейнер: вся сцена (её КОНФИГ-размер)
+  // уменьшается, чтобы поместиться целиком — без обрезки краёв
+  const updateScale = () => {
+    if (!containerRef.value) return
+    const cw = containerRef.value.clientWidth
+    const ch = containerRef.value.clientHeight
+    if (cw > 10 && ch > 10) {
+      scale.value = Math.min(cw / sceneSize.value.width, ch / sceneSize.value.height, 1)
+    }
+  }
+
   // Инициализация масштабирования с подпиской на resize
   const initScaling = () => {
-    const updateScale = () => {
-      if (!containerRef.value) return
-      const cw = containerRef.value.clientWidth
-      const ch = containerRef.value.clientHeight
-      if (cw > 10 && ch > 10) {
-        scale.value = Math.min(cw / sceneSize.value.width, ch / sceneSize.value.height, 1)
-      }
-    }
     window.addEventListener('resize', updateScale)
     updateScale()
     // Возвращаем функцию для очистки
@@ -58,6 +61,7 @@ export function useSimulatorRendering(containerRef: Ref<HTMLElement | null>, sce
 
   return {
     scale,
+    updateScale,
     enableVisualRotation,
     initScaling,
     cleanupScaling,

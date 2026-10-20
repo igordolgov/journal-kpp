@@ -91,8 +91,12 @@
 
   //- Основной холст симуляции
   .relative.flex.flex-1.items-center.justify-center.overflow-hidden.bg-gray-800(ref="containerRef")
-    .sim-canvas-wrapper.relative.overflow-hidden(
-      :style="{ width: sceneSize.width + 'px', height: sceneSize.height + 'px', transform: `scale(${scale})`, transformOrigin: 'top left' }"
+    //- [СХЕМА-ТРАЕКТОРИЙ] холст имеет КОНФИГ-размер сцены (например 1280x720)
+    //- и целиком масштабируется под контейнер (scale, origin center).
+    //- Раньше sceneSize перезаписывался размером контейнера: сцена обрезалась,
+    //- а точки спавна/деспавна (fallback от sceneSize) ползли за контейнером.
+    .sim-canvas-wrapper.relative.overflow-hidden.shrink-0(
+      :style="{ width: sceneSize.width + 'px', height: sceneSize.height + 'px', transform: `scale(${scale})`, transformOrigin: 'center center' }"
     )
       template(v-for="el in simElements" :key="el.id")
         .absolute.cursor-pointer(
@@ -529,7 +533,11 @@ const physics = useSimulatorPhysics(
 )
 
 const rendering = useSimulatorRendering(containerRef, sceneSize)
-const { scale, enableVisualRotation, initScaling, cleanupScaling } = rendering
+const { scale, updateScale, enableVisualRotation, initScaling, cleanupScaling } = rendering
+
+// [СХЕМА-ТРАЕКТОРИЙ] размер сцены задают настройки конфига — при их смене
+// пересчитываем масштаб подгонки
+watch(sceneSize, () => updateScale(), { deep: true })
 
 const scriptsHandler = useSimulatorScripts(simElements, activeCommands, ref(props.isRunning), props.scripts)
 
@@ -762,21 +770,18 @@ onMounted(async () => {
     core.updateFixedCoordinates(getTrafficConfig())
   }
 
+  // [СХЕМА-ТРАЕКТОРИЙ] autoResize больше НЕ подменяет размер сцены размером
+  // контейнера (это обрезало сцену и сдвигало fallback-точки спавна);
+  // вместо этого пересчитывается масштаб подгонки
   const autoResize = props.simSettings?.autoResize ?? true
   if (autoResize && containerRef.value) {
-    const updateSceneSize = () => {
-      if (!containerRef.value) return
-      const rect = containerRef.value.getBoundingClientRect()
-      if (rect.width > 0 && rect.height > 0) {
-        sceneSize.value = { width: rect.width - 16, height: rect.height - 16 }
-      }
-    }
-    updateSceneSize()
-    resizeObserver = new ResizeObserver(() => updateSceneSize())
+    resizeObserver = new ResizeObserver(() => updateScale())
     resizeObserver.observe(containerRef.value)
+    updateScale()
   } else {
     if (props.config?.settings?.width) sceneSize.value.width = props.config.settings.width
     if (props.config?.settings?.height) sceneSize.value.height = props.config.settings.height
+    updateScale()
   }
 
   const cleanupScale = initScaling()

@@ -12,6 +12,8 @@ import {
   PERSON_STOP_OFFSET,
   CAR_STOP_OFFSET,
 } from '~/utils/simulatorConstants'
+// [СХЕМА-ТРАЕКТОРИЙ] единый вывод точек спавна/остановки/прохода/ухода из геометрии ворот
+import { trafficPointsFor, type TrafficPoints } from '~/utils/simulatorTraffic'
 import { getCarSvg, generateRealPersonSvg } from '~/utils/simulatorSvg'
 import type { SceneElement, Direction, TravelMode, TrafficConfig, AiAgent, PersonInfo } from '~/types/simulator'
 // [PAYROLL] реестр проходов (ground truth) и шина событий оплаты
@@ -86,6 +88,38 @@ export function useSimulatorSpawn(
 
   const shouldSpawn = (timer: number, nextTime: number): boolean => timer >= nextTime
   const getNextInterval = (min: number, max: number): number => min + Math.random() * (max - min)
+
+  // [Фолбэк] ворот нет на сцене (битый gateId) — старая схема по ручным
+  // координатам. Штатные сцены сюда не попадают: точки выводятся из ворот.
+  const fallbackPoints = (
+    direction: Direction,
+    kind: 'Person' | 'Car',
+    size: { width: number; height: number },
+    stopOffset: number,
+    fixedX: number,
+    fixedY: number,
+  ): TrafficPoints => {
+    const scene = sceneSize.value
+    if (direction === 'enter') {
+      return {
+        vertical: true,
+        spawn: { x: kind === 'Person' ? scene.width + 50 : -size.width - 50, y: fixedY },
+        stop: { x: fixedX, y: fixedY },
+        cross: { x: fixedX, y: fixedY + stopOffset },
+        after: { x: fixedX, y: scene.height + EXIT_VERTICAL_DISTANCE },
+      }
+    }
+    return {
+      vertical: true,
+      spawn: { x: fixedX, y: scene.height + 50 },
+      stop: { x: fixedX, y: fixedY + stopOffset },
+      cross: { x: fixedX, y: fixedY },
+      after: {
+        x: kind === 'Person' ? scene.width + EXIT_HORIZONTAL_DISTANCE : -EXIT_HORIZONTAL_DISTANCE,
+        y: fixedY,
+      },
+    }
+  }
 
   // ----- Активные агенты (исключая завершённых) -----
   const activeAgents = computed(() => {
@@ -190,65 +224,34 @@ export function useSimulatorSpawn(
     const stopOffset = PERSON_STOP_OFFSET
     const fixedX = fixedXPerson.value
     const fixedY = fixedYPerson.value
-    const prefix = 'Person'
 
-    const getAbs = (key: string, axis: 'X' | 'Y', size: number): number | undefined => {
-      const off = gate?.settings?.[`${key}${axis}`]
-      if (off !== undefined && off !== null && !isNaN(off)) {
-        const center = axis === 'X' ? (gate!.x + gate!.width / 2) : (gate!.y + gate!.height / 2)
-        return center - size / 2 + off
-      }
-      return undefined
-    }
+    // [СХЕМА-ТРАЕКТОРИЙ] точки выводятся из геометрии ворот (канонический
+    // вертикальный поток: город сверху, база снизу). Настроенные в редакторе
+    // оффсеты применяются только если лежат на правильной стороне ворот —
+    // устаревшие точки больше не ломают сторону спавна/ухода.
+    const pts: TrafficPoints = gate
+      ? trafficPointsFor(gate as any, { width, height }, direction, sceneSize.value)
+      : fallbackPoints(direction, 'Person', { width, height }, stopOffset, fixedX, fixedY)
 
-    let spawnX: number, spawnY: number
-    let entryPointX: number, entryPointY: number
-    let exitPointX: number, exitPointY: number
-    let afterTargetX: number, afterTargetY: number
-
-    if (direction === 'enter') {
-      spawnX = getAbs(`spawnEnter${prefix}`, 'X', width) ?? (sceneSize.value.width + 50)
-      spawnY = getAbs(`spawnEnter${prefix}`, 'Y', height) ?? fixedY
-      entryPointX = getAbs(`stopEnter${prefix}`, 'X', width) ?? fixedX
-      entryPointY = getAbs(`stopEnter${prefix}`, 'Y', height) ?? fixedY
-      exitPointX = getAbs(`crossEnter${prefix}`, 'X', width) ?? fixedX
-      exitPointY = getAbs(`crossEnter${prefix}`, 'Y', height) ?? (fixedY + stopOffset)
-      afterTargetX = getAbs(`despawnEnter${prefix}`, 'X', width) ?? fixedX
-      afterTargetY = getAbs(`despawnEnter${prefix}`, 'Y', height) ?? (sceneSize.value.height + EXIT_VERTICAL_DISTANCE)
-    } else {
-      spawnX = getAbs(`spawnExit${prefix}`, 'X', width) ?? fixedX
-      spawnY = getAbs(`spawnExit${prefix}`, 'Y', height) ?? (sceneSize.value.height + 50)
-      entryPointX = getAbs(`stopExit${prefix}`, 'X', width) ?? fixedX
-      entryPointY = getAbs(`stopExit${prefix}`, 'Y', height) ?? (fixedY + stopOffset)
-      exitPointX = getAbs(`crossExit${prefix}`, 'X', width) ?? fixedX
-      exitPointY = getAbs(`crossExit${prefix}`, 'Y', height) ?? fixedY
-      afterTargetX = getAbs(`despawnExit${prefix}`, 'X', width) ?? (sceneSize.value.width + EXIT_HORIZONTAL_DISTANCE)
-      afterTargetY = getAbs(`despawnExit${prefix}`, 'Y', height) ?? fixedY
-    }
-
-    // [ФИКС-НОГИ-НИЖЕ-КАЛИТКИ] приходящие из города идут так, чтобы уровень
-    // ног (низ спрайта) не опускался ниже нижней линии калитки: раньше линия
-    // ходьбы бралась как есть (fixedY / оффсеты сцены) и люди корпусом
-    // «протыкали» забор. Выходящих не трогаем: они подходят с городской
-    // стороны — там ходить ниже линии забора естественно.
+    // [ФИКС-НОГИ-НИЖЕ-КАЛИТКИ] страховочный клэмп для приходящих (ЦЕНТР):
+    // низ спрайта (центр + h/2) не ниже нижней линии калитки
     const gateBottomY = gate ? gate.y + gate.height : Infinity
     const clampApproachY = (y: number): number =>
       direction === 'enter' && Number.isFinite(gateBottomY)
-        ? Math.min(y, gateBottomY - height)
+        ? Math.min(y, gateBottomY - height / 2)
         : y
-    spawnY = clampApproachY(spawnY)
-    entryPointY = clampApproachY(entryPointY)
 
     const groupId = `group_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`
     const allPersons = [leaderPerson, ...members]
     const groupAgents: AiAgent[] = []
 
-    const HORIZONTAL_STEP = 44
-    const VERTICAL_STEP = 58
-    // [ФИКС-СПОР-СПЛОШНЕНИЕ] шаги увеличены (35->44, 45->58): при старых
-    // значениях боксы соседей по группе перекрывались (ширина человека 40 >
-    // шага 35; высота 55 > шага 45) — члены группы визуально «слипались»
-    // и проходили друг сквозь друга на параллельных дорожках.
+    const HORIZONTAL_STEP = 90
+    const VERTICAL_STEP = 80
+    // [ФИКС-СПОР-СПЛОШНЕНИЕ] шаги колонны: центр-к-центру 80px по вертикали
+    // (человек 55 — зазор 25px > MIN_BUFFER 15): при 58px зазор был 3px,
+    // слот члена группы оказывался ВНУТРИ жёсткой стоп-зоны leader-follow
+    // и член группы замирал в паре пикселей от своего места (to_gate навсегда,
+    // пока лидер не пройдёт). 90px по горизонтали — для горизонтального потока.
 
     for (let idx = 0; idx < allPersons.length; idx++) {
       const person = allPersons[idx]
@@ -257,31 +260,39 @@ export function useSimulatorSpawn(
       let vOffset = 0
 
       if (!isLeader) {
-        if (direction === 'enter') {
-          hOffset = idx * HORIZONTAL_STEP
-          vOffset = (idx % 2 === 0 ? -12 : 12)
-        } else {
-          vOffset = idx * VERTICAL_STEP
+        // [СХЕМА-ТРАЕКТОРИЙ] группа строится КОЛОННОЙ позади лидера:
+        // вертикальный поток — по Y (приходящие над лидером, уходящие под ним),
+        // горизонтальный — по X. Боковой шаг ±10 разбивает прямую линию.
+        if (pts.vertical) {
+          vOffset = direction === 'enter' ? -(idx * VERTICAL_STEP) : idx * VERTICAL_STEP
           hOffset = (idx % 2 === 0 ? -10 : 10)
+        } else {
+          hOffset = direction === 'enter' ? -(idx * HORIZONTAL_STEP) : idx * HORIZONTAL_STEP
+          vOffset = (idx % 2 === 0 ? -10 : 10)
         }
       }
 
-      let zIndex = 190
+      // [СХЕМА-ТРАЕКТОРИЙ] z-слой по стороне забора: пришедшие идут ПО_city
+      // (за забором, 200-idx), выходящие стартуют у базы (перед забором,
+      // 400+idx — нижние на экране впереди). После прохода физика переводит
+      // входящих в 400, выходящих в 150.
+      let zIndex: number
       if (direction === 'enter') zIndex = 200 - idx
-      else zIndex = 190 + idx
+      else zIndex = 400 + idx
 
-      const posX = spawnX + hOffset
-      const posY = clampApproachY(spawnY + vOffset)
-      const stopX = entryPointX + hOffset
-      const stopY = clampApproachY(entryPointY + vOffset)
-      const afterX = afterTargetX + hOffset
-      const afterY = afterTargetY + vOffset
+      // точки — ЦЕНТРЫ агентов; элемент позиционируется левым-верхним углом
+      const posX = pts.spawn.x + hOffset - width / 2
+      const posY = clampApproachY(pts.spawn.y + vOffset) - height / 2
+      const stopCenterX = pts.stop.x + hOffset
+      const stopCenterY = clampApproachY(pts.stop.y + vOffset)
+      const afterX = pts.after.x + hOffset
+      const afterY = pts.after.y + vOffset
 
       try {
         const { element, agent } = createPersonAgent(
           person, posX, posY,
-          { x: stopX, y: stopY },
-          { x: exitPointX, y: exitPointY },
+          { x: stopCenterX, y: stopCenterY },
+          { x: pts.cross.x, y: pts.cross.y },
           { x: afterX, y: afterY },
           speed, direction, width, height,
           gateId,
@@ -334,59 +345,30 @@ export function useSimulatorSpawn(
     const stopOffset = PERSON_STOP_OFFSET
     const fixedX = fixedXPerson.value
     const fixedY = fixedYPerson.value
-    const prefix = 'Person'
 
-    const getAbs = (key: string, axis: 'X' | 'Y', size: number): number | undefined => {
-      const off = gate?.settings?.[`${key}${axis}`]
-      if (off !== undefined && off !== null && !isNaN(off)) {
-        const center = axis === 'X' ? (gate!.x + gate!.width / 2) : (gate!.y + gate!.height / 2)
-        return center - size / 2 + off
-      }
-      return undefined
-    }
+    // [СХЕМА-ТРАЕКТОРИЙ] см. createGroup: точки из геометрии ворот,
+    // настроенные оффсеты — только при правильной стороне
+    const pts: TrafficPoints = gate
+      ? trafficPointsFor(gate as any, { width, height }, direction, sceneSize.value)
+      : fallbackPoints(direction, 'Person', { width, height }, stopOffset, fixedX, fixedY)
 
-    let spawnX: number, spawnY: number
-    let entryPointX: number, entryPointY: number
-    let exitPointX: number, exitPointY: number
-    let afterTargetX: number, afterTargetY: number
-
-    if (direction === 'enter') {
-      spawnX = getAbs(`spawnEnter${prefix}`, 'X', width) ?? (sceneSize.value.width + 50)
-      spawnY = getAbs(`spawnEnter${prefix}`, 'Y', height) ?? fixedY
-      entryPointX = getAbs(`stopEnter${prefix}`, 'X', width) ?? fixedX
-      entryPointY = getAbs(`stopEnter${prefix}`, 'Y', height) ?? fixedY
-      exitPointX = getAbs(`crossEnter${prefix}`, 'X', width) ?? fixedX
-      exitPointY = getAbs(`crossEnter${prefix}`, 'Y', height) ?? (fixedY + stopOffset)
-      afterTargetX = getAbs(`despawnEnter${prefix}`, 'X', width) ?? fixedX
-      afterTargetY = getAbs(`despawnEnter${prefix}`, 'Y', height) ?? (sceneSize.value.height + EXIT_VERTICAL_DISTANCE)
-    } else {
-      spawnX = getAbs(`spawnExit${prefix}`, 'X', width) ?? fixedX
-      spawnY = getAbs(`spawnExit${prefix}`, 'Y', height) ?? (sceneSize.value.height + 50)
-      entryPointX = getAbs(`stopExit${prefix}`, 'X', width) ?? fixedX
-      entryPointY = getAbs(`stopExit${prefix}`, 'Y', height) ?? (fixedY + stopOffset)
-      exitPointX = getAbs(`crossExit${prefix}`, 'X', width) ?? fixedX
-      exitPointY = getAbs(`crossExit${prefix}`, 'Y', height) ?? fixedY
-      afterTargetX = getAbs(`despawnExit${prefix}`, 'X', width) ?? (sceneSize.value.width + EXIT_HORIZONTAL_DISTANCE)
-      afterTargetY = getAbs(`despawnExit${prefix}`, 'Y', height) ?? fixedY
-    }
-
-    // [ФИКС-НОГИ-НИЖЕ-КАЛИТКИ] см. createGroup: приходящие из города не
-    // опускают уровень ног ниже нижней линии калитки
+    // [ФИКС-НОГИ-НИЖЕ-КАЛИТКИ] страховочный клэмп приходящих (ЦЕНТР, см. createGroup)
     const gateBottomY = gate ? gate.y + gate.height : Infinity
     if (direction === 'enter' && Number.isFinite(gateBottomY)) {
-      const maxY = gateBottomY - height
-      spawnY = Math.min(spawnY, maxY)
-      entryPointY = Math.min(entryPointY, maxY)
+      const maxY = gateBottomY - height / 2
+      pts.spawn.y = Math.min(pts.spawn.y, maxY)
+      pts.stop.y = Math.min(pts.stop.y, maxY)
     }
 
     const { element, agent } = createPersonAgent(
-      person, spawnX, spawnY,
-      { x: entryPointX, y: entryPointY },
-      { x: exitPointX, y: exitPointY },
-      { x: afterTargetX, y: afterTargetY },
+      person,
+      pts.spawn.x - width / 2, pts.spawn.y - height / 2,
+      { x: pts.stop.x, y: pts.stop.y },
+      { x: pts.cross.x, y: pts.cross.y },
+      { x: pts.after.x, y: pts.after.y },
       speed, direction, width, height,
       gateId,
-      undefined, false, 0, 190
+      undefined, false, 0, direction === 'enter' ? 200 : 400
     )
     nextTick(() => {
       simElements.value.push(element)
@@ -420,47 +402,25 @@ export function useSimulatorSpawn(
     const stopOffset = CAR_STOP_OFFSET
     const fixedX = fixedXCar.value
     const fixedY = fixedYCar.value
-    const prefix = 'Car'
 
-    const getAbs = (key: string, axis: 'X' | 'Y', size: number): number | undefined => {
-      const off = gate?.settings?.[`${key}${axis}`]
-      if (off !== undefined && off !== null && !isNaN(off)) {
-        const center = axis === 'X' ? (gate!.x + gate!.width / 2) : (gate!.y + gate!.height / 2)
-        return center - size / 2 + off
-      }
-      return undefined
-    }
-
-    let spawnX: number, spawnY: number
-    let entryPointX: number, entryPointY: number
-    let exitPointX: number, exitPointY: number
-    let afterTargetX: number, afterTargetY: number
-
-    if (direction === 'enter') {
-      spawnX = getAbs(`spawnEnter${prefix}`, 'X', width) ?? -width - 50
-      spawnY = getAbs(`spawnEnter${prefix}`, 'Y', height) ?? fixedY
-      entryPointX = getAbs(`stopEnter${prefix}`, 'X', width) ?? fixedX
-      entryPointY = getAbs(`stopEnter${prefix}`, 'Y', height) ?? fixedY
-      exitPointX = getAbs(`crossEnter${prefix}`, 'X', width) ?? fixedX
-      exitPointY = getAbs(`crossEnter${prefix}`, 'Y', height) ?? (fixedY + stopOffset)
-      afterTargetX = getAbs(`despawnEnter${prefix}`, 'X', width) ?? fixedX
-      afterTargetY = getAbs(`despawnEnter${prefix}`, 'Y', height) ?? (sceneSize.value.height + EXIT_VERTICAL_DISTANCE)
-    } else {
-      spawnX = getAbs(`spawnExit${prefix}`, 'X', width) ?? fixedX
-      spawnY = getAbs(`spawnExit${prefix}`, 'Y', height) ?? (sceneSize.value.height + 50)
-      entryPointX = getAbs(`stopExit${prefix}`, 'X', width) ?? fixedX
-      entryPointY = getAbs(`stopExit${prefix}`, 'Y', height) ?? (fixedY + stopOffset)
-      exitPointX = getAbs(`crossExit${prefix}`, 'X', width) ?? fixedX
-      exitPointY = getAbs(`crossExit${prefix}`, 'Y', height) ?? fixedY
-      afterTargetX = getAbs(`despawnExit${prefix}`, 'X', width) ?? -EXIT_HORIZONTAL_DISTANCE
-      afterTargetY = getAbs(`despawnExit${prefix}`, 'Y', height) ?? fixedY
-    }
+    // [СХЕМА-ТРАЕКТОРИЙ] точки машины — из геометрии автомобильных ворот:
+    // вход спавнится за верхним краем, останавливается перед воротами,
+    // проезжает вниз и уходит за нижний край; выход — зеркально снизу вверх.
+    // Настроенные оффсеты применяются только с правильной стороны ворот.
+    const pts: TrafficPoints = gate
+      ? trafficPointsFor(gate as any, { width, height }, direction, sceneSize.value)
+      : fallbackPoints(direction, 'Car', { width, height }, stopOffset, fixedX, fixedY)
 
     const carElement: SceneElement = {
       id: `${direction}_car_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
-      x: spawnX, y: spawnY, width, height, rotation: 0, velocity: 0,
+      // pts.spawn — ЦЕНТР машины; элемент позиционируется левым-верхним углом
+      x: pts.spawn.x - width / 2, y: pts.spawn.y - height / 2,
+      width, height, rotation: 0, velocity: 0,
       category: 'car', type: 'actor', name: plate,
-      personId: driverPerson.id, direction, zIndex: direction === 'exit' ? 1 : 180,
+      // [СХЕМА-ТРАЕКТОРИЙ] выходящая машина стартует у базы — ПЕРЕД забором
+      // (400), после прохода физика переведёт её за забор (150). Раньше было
+      // zIndex 1 — машина пряталась за декорациями базы.
+      personId: driverPerson.id, direction, zIndex: direction === 'exit' ? 400 : 180,
       travelMode: 'car',
       asset: { type: 'car', plate, color, svg: getCarSvg(color) }
     }
@@ -475,9 +435,9 @@ export function useSimulatorSpawn(
       id: String(carElement.id),
       element: carElement,
       state: 'to_gate',
-      target: { x: entryPointX, y: entryPointY, width: 0, height: 0 },
-      afterTarget: { x: afterTargetX, y: afterTargetY, width: 0, height: 0 },
-      exitPoint: { x: exitPointX, y: exitPointY, width: 0, height: 0 },
+      target: { x: pts.stop.x, y: pts.stop.y, width: 0, height: 0 },
+      afterTarget: { x: pts.after.x, y: pts.after.y, width: 0, height: 0 },
+      exitPoint: { x: pts.cross.x, y: pts.cross.y, width: 0, height: 0 },
       speed,
       type: 'car',
       direction,

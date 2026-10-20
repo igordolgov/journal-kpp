@@ -7,6 +7,8 @@ import { useAudioEngine } from '~/composables/useAudioEngine'
 import type { SceneElement, AiAgent } from '~/types/simulator'
 import { DESPAWN_MARGIN } from '~/utils/simulatorConstants'
 import { dot, cross, normalizeAngle } from '~/utils/simulatorMath'
+// [СХЕМА-ТРАЕКТОРИЙ] единый с спавном пересчёт цели остановки из геометрии ворот
+import { trafficPointsFor } from '~/utils/simulatorTraffic'
 
 export function useSimulatorPhysics(
   simElements: Ref<SceneElement[]>,
@@ -74,6 +76,15 @@ export function useSimulatorPhysics(
   const PERSON_SEP_RADIUS = 40   // px: дистанция начала расхождения
   const PERSON_SEP_SPEED = 34    // px/с: темп бокового смещения
   const PERSON_YIELD_SPEED = 22  // px/с: постоянный дрейф «держись правее» при соседе по курсу
+  // [ФИКС-ЗАСТРЯЛ-ВНИЗУ] «тихая зона» прибытия: на последнем отрезке к точке
+  // остановки расталкивание и дрейф отключены — именно они дёргали агента
+  // перед остановкой (толчок вбок -> коррекция курса -> новый толчок)
+  const ARRIVE_QUIET_ZONE = 34   // px
+  // [ФИКС-ЗАСТРЯЛ-МАШИНЫ] машина после проезда ворот больше не ждёт их
+  // закрытия: короткая пауза (шлагбаум закрывается параллельно своим
+  // таймером) и дальше в путь. Прежнее ожидание closeDelay+15с (до 25с)
+  // выглядело как «машина застряла после ворот».
+  const CAR_LEAVE_DELAY = simOpts.carLeaveDelay ?? 1.6
   const FORCE_CROSS_AFTER = 5        // сек: одиночка / лидер группы
   const FORCE_CROSS_GROUP_AFTER = 12 // сек: член группы, даже если предыдущий не прошёл
   
@@ -303,17 +314,13 @@ export function useSimulatorPhysics(
       const closeDelay = isWicket ? wicketCloseDelay : gateCloseDelay
 
       if (agent.state === 'to_gate' && gate && !agent.groupId) {
-        const prefix = agent.direction === 'enter' 
-          ? (agent.type === 'person' ? 'stopEnterPerson' : 'stopEnterCar')
-          : (agent.type === 'person' ? 'stopExitPerson' : 'stopExitCar')
-        const offX = gate.settings?.[`${prefix}X`]
-        const offY = gate.settings?.[`${prefix}Y`]
-        if (offX !== undefined && offY !== undefined && !isNaN(offX) && !isNaN(offY)) {
-          const gateCenterX = gate.x + gate.width / 2
-          const gateCenterY = gate.y + gate.height / 2
-          agent.target.x = gateCenterX - el.width / 2 + offX
-          agent.target.y = gateCenterY - el.height / 2 + offY
-        }
+        // [СХЕМА-ТРАЕКТОРИЙ] цель остановки пересчитывается из ТЕКУЩЕЙ
+        // геометрии ворот (те же формулы, что у спавна): перетаскивание ворот
+        // на живой сцене не ломает подход, а настроенные оффсеты применяются
+        // только с правильной стороны — устаревшие больше не уводят агентов
+        const pts = trafficPointsFor(gate as any, { width: el.width, height: el.height }, agent.direction, sceneSize.value)
+        agent.target.x = pts.stop.x
+        agent.target.y = pts.stop.y
       }
 
       if (agent.state === 'waiting_before') {
@@ -375,6 +382,11 @@ export function useSimulatorPhysics(
         // во дворе бесконечно, а следующая замирала в очереди за ней.
         const waitedAfter = (waitAfterByAgentId.get(agent.id) ?? 0) + dt
         waitAfterByAgentId.set(agent.id, waitedAfter)
+        // [ФИКС-ЗАСТРЯЛ-МАШИНЫ] выход из waiting_after: раньше машина ждала
+        // закрытия ворот (closeDelay 10с + страховка 15с — до 25с стойла
+        // «застрявшей» машиной). Теперь: сосед приближается — уезжаем сразу;
+        // ворота начали закрываться — уезжаем; иначе — короткая пауза
+        // CAR_LEAVE_DELAY и уезжаем (ворота закрываются параллельно).
         const hasOtherCarNear = aiAgents.value.some(a =>
           a !== agent &&
           a.type === 'car' &&
@@ -387,8 +399,8 @@ export function useSimulatorPhysics(
         } else if (gate && !gate.settings?.isOpen && !gate.settings?.isAnimating) {
           agent.state = 'moving_away'
           agent.target = { ...agent.afterTarget, width: 0, height: 0 }
-        } else if (waitedAfter > closeDelay + 15) {
-          // уезжаем, даже если ворота так и не закрылись
+        } else if (waitedAfter > CAR_LEAVE_DELAY) {
+          // уезжаем, даже если ворота ещё открыты — их закроет свой таймер
           agent.state = 'moving_away'
           agent.target = { ...agent.afterTarget, width: 0, height: 0 }
         }
@@ -493,8 +505,12 @@ export function useSimulatorPhysics(
           // ходьбы на паузу (гистерезис is-paused) посреди шага — видимый
           // «дёрганчик» в точке останова после калитки. Пешеход продолжает
           // шаг с текущей скоростью; машину останавливает ветка waiting_after.
-          if (el.zIndex && el.zIndex < 400 && agent.direction === 'enter') {
-            el.zIndex = 400
+          // [СХЕМА-ТРАЕКТОРИЙ] после прохода агент оказывается на ПРОТИВОПОЛОЖНОЙ
+          // стороне забора: входящий — у базы (перед забором, 400),
+          // выходящий — в городе (за забором, 150)
+          const targetZ = agent.direction === 'enter' ? 400 : 150
+          if ((el.zIndex || 0) !== targetZ) {
+            el.zIndex = targetZ
             simElements.value = [...simElements.value]
           }
 
@@ -639,10 +655,13 @@ export function useSimulatorPhysics(
         let near2 = Infinity
         for (const other of aiAgents.value) {
           if (other.id === agent.id || other.type !== 'person' || other.state === 'done') continue
+          // [ФИКС-УСТУПИ-ДОРОГУ] своих по группе не считаем помехой:
+          // группа идёт строем и не тормозит сама перед собой
+          if (agent.groupId && other.groupId === agent.groupId) continue
           const ox = other.element.x + other.element.width / 2 - cx
           const oy = other.element.y + other.element.height / 2 - cy
           const ahead = ox * dirX + oy * dirY
-          if (ahead < -10 || ahead > 90) continue
+          if (ahead < 0 || ahead > 90) continue
           const lateral = Math.abs(ox * dirY - oy * dirX)
           if (lateral > 30) continue
           const d2 = ahead * ahead + lateral * lateral
@@ -682,17 +701,21 @@ export function useSimulatorPhysics(
 
       // [ФИКС-УСТУПИ-ДОРОГУ] мягкое расхождение пешеходов: в зоне радиуса
       // PERSON_SEP_RADIUS каждый ДВИЖУЩИЙСЯ пешеход смещается от соседа.
-      // Радиальная составляющая разводит в стороны; боковая (перпендикуляр
-      // «от соседа», одинаково ориентированная для обоих участников) разводит
-      // встречных на встречных курсах в противоположные стороны — расходятся,
-      // «уступая дорогу», вместо прохода насквозь. Стоящих не толкаем:
-      // строй группы (шаги 44-58px) и очереди у прохода не расползаются.
-      if (agent.type === 'person' && (el.velocity || 0) > 0.5) {
+      // [ФИКС-ЕСТЕСТВЕННОСТЬ] вектор отталкивания проецируется НА
+      // ПЕРПЕНДИКУЛЯР к своему курсу — человек ОТСТУПАЕТ ВБОК, уступая
+      // дорогу, а не пятится назад (радиальная «назад»-составляющая раньше
+      // гасила ход и разворачивала обход широкой дугой — «обошёл вокруг»).
+      // Стоящих не толкаем: строй группы и очереди у прохода не расползаются.
+      // [ФИКС-ДЁРГАНИЕ] в тихой зоне прибытия (dist < ARRIVE_QUIET_ZONE)
+      // расталкивание и дрейф отключены — подход к точке остановки плавный.
+      if (agent.type === 'person' && (el.velocity || 0) > 0.5 && dist >= ARRIVE_QUIET_ZONE) {
         const ccx = el.x + el.width / 2
         const ccy = el.y + el.height / 2
         let sepX = 0, sepY = 0, maxW = 0
         for (const other of aiAgents.value) {
           if (other.id === agent.id || other.type !== 'person' || other.state === 'done') continue
+          // своих по группе не раскидываем — колонна/строй сохраняется
+          if (agent.groupId && other.groupId === agent.groupId) continue
           const ocx = other.element.x + other.element.width / 2
           const ocy = other.element.y + other.element.height / 2
           const ax = ccx - ocx
@@ -710,23 +733,33 @@ export function useSimulatorPhysics(
           if (d >= PERSON_SEP_RADIUS) continue
           const w = (PERSON_SEP_RADIUS - d) / PERSON_SEP_RADIUS // 0..1
           const nx = ax / d, ny = ay / d
-          sepX += nx * w - ny * w * 0.8 // радиально от соседа + вбок
-          sepY += ny * w + nx * w * 0.8
+          // [ФИКС-ЕСТЕСТВЕННОСТЬ] только РАДИАЛЬНАЯ составляющая «от соседа»:
+          // боковая добавка (0.8) для лобовых встреч была противонаправлена
+          // дрейфу «держись правее» и гасила расхождение
+          sepX += nx * w
+          sepY += ny * w
           maxW = Math.max(maxW, w)
         }
-        const m = Math.hypot(sepX, sepY)
-        if (m > 0.01 && maxW > 0) {
-          // сила пропорциональна тесноте (maxW), направление — среднему
-          // вектору «от соседей»; скорость ограничена PERSON_SEP_SPEED
-          const push = maxW * PERSON_SEP_SPEED * dt
-          el.x += (sepX / m) * push
-          el.y += (sepY / m) * push
-          // Правило «держись правее»: при соседе по курсу — постоянный дрейф
-          // вправо от СВОЕГО курса. Для встречных правые стороны противоположны
-          // по экрану — расходятся гарантированно и детерминированно.
-          if (personNearAhead < PERSON_SEP_RADIUS * 1.6) {
-            el.x += -dirY * PERSON_YIELD_SPEED * dt
-            el.y += dirX * PERSON_YIELD_SPEED * dt
+        const mRaw = Math.hypot(sepX, sepY)
+        // [ФИКС-ЛОБОВЫЕ] правило «держись правее» работает НЕЗАВИСИМО от
+        // наличия перпендикулярной составляющей: при точном лобовом контакте
+        // радиальный «от соседа» проецируется на перпендикуляр в ноль, и без
+        // дрейфа встречные проходят друг сквозь друга
+        if (personNearAhead < PERSON_SEP_RADIUS) {
+          el.x += -dirY * PERSON_YIELD_SPEED * dt
+          el.y += dirX * PERSON_YIELD_SPEED * dt
+        }
+        if (mRaw > 0.01 && maxW > 0) {
+          // [ФИКС-ЕСТЕСТВЕННОСТЬ] оставляем только перпендикулярную к курсу
+          // составляющую: шаг ВБОК, без хода назад/вперёд от толчка
+          const par = sepX * dirX + sepY * dirY
+          const perpX = sepX - par * dirX
+          const perpY = sepY - par * dirY
+          const m = Math.hypot(perpX, perpY)
+          if (m > 0.01) {
+            const push = maxW * PERSON_SEP_SPEED * dt
+            el.x += (perpX / m) * push
+            el.y += (perpY / m) * push
           }
         }
       }

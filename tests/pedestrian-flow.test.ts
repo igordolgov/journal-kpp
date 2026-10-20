@@ -170,9 +170,11 @@ describe('доводка потока пешеходов', () => {
     }
     expect(agent.state).toBe('moving_away')
     const el = agent.element
-    // [ФИКС-РЫВОК] точная посадка: центр элемента на центре exitPoint (795, 187)
-    expect(Math.abs(el.x + el.width / 2 - 795)).toBeLessThan(0.02)
-    expect(Math.abs(el.y + el.height / 2 - 187)).toBeLessThan(0.02)
+    // [СХЕМА-ТРАЕКТОРИЙ] точная посадка в выведенную точку выхода:
+    // калитка (760,100,80,120) -> crossExit: ноги на 26px выше её верха
+    // (feet = 100 - 26 = 74 -> y = 74 - 55 + 2 = 21), X — центр калитки (800)
+    expect(Math.abs(el.x + el.width / 2 - 800)).toBeLessThan(0.02)
+    expect(Math.abs(el.y + el.height / 2 - (21 + PERSON_HEIGHT / 2))).toBeLessThan(0.02)
   })
 
   it('встречные на одной линии расходятся в стороны, а не проходят сквозь', () => {
@@ -213,7 +215,7 @@ describe('доводка потока пешеходов', () => {
     expect(minDist).toBeGreaterThan(20)
   })
 
-  it('приходящий из города подходит с ногами не ниже нижней линии калитки', async () => {
+  it('приходящий спавнится за верхним краем и подходит ногами к верхней линии калитки', async () => {
     // для направления enter нужен человек «В городе» (isOutsideLocation)
     const scene = buildScene([makePerson(1), { id: 2, fio: 'Городской 2', gender: 'male', location: 'В городе' }])
     const agent = await spawnEnterPerson(scene)
@@ -221,12 +223,16 @@ describe('доводка потока пешеходов', () => {
     expect(agent.direction).toBe('enter')
 
     const wicket = scene.simElements.value[0]
+    const gateTop = wicket.y // 100
     const gateBottom = wicket.y + wicket.height // 220
     const el = agent.element
-    // [ФИКС-НОГИ-НИЖЕ-КАЛИТКИ] спавн и стоп-точка: низ спрайта <= низа калитки
-    expect(el.y + PERSON_HEIGHT).toBeLessThanOrEqual(gateBottom + 0.01)
-    expect(agent.target.y + PERSON_HEIGHT).toBeLessThanOrEqual(gateBottom + 0.01)
-    // без клэмпа было бы 187 + 55 = 242 > 220
-    expect(el.y).toBeCloseTo(165, 5)
+    // [СХЕМА-ТРАЕКТОРИЙ] спавн — за ВЕРХНИМ краем сцены (выходит сверху вниз)
+    expect(el.y + PERSON_HEIGHT).toBeLessThanOrEqual(0)
+    // стоп-точка (ЦЕНТР агента): визуальные ноги чуть выше верхней линии
+    // калитки (centerY + h/2 - pad2 = gateTop - 10), и не ниже низа калитки
+    expect(agent.target.y + PERSON_HEIGHT / 2 - 2).toBeCloseTo(gateTop - 10, 0)
+    expect(agent.target.y + PERSON_HEIGHT / 2).toBeLessThanOrEqual(gateBottom + 0.01)
+    // X выровнен по центру калитки (760 + 80/2 = 800)
+    expect(agent.target.x).toBeCloseTo(800, 5)
   })
 })
