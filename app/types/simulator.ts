@@ -36,6 +36,8 @@ export interface SceneElement {
   asset?: any
   settings?: any
   velocity?: number
+  // [ФИКС-ДЁРГАНИЕ] считается физикой с гистерезисом (пауза < 0.1, пуск > 1.5)
+  isPaused?: boolean
   zIndex?: number
   personId?: number
   direction?: Direction

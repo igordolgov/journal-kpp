@@ -112,7 +112,7 @@
           )
           .person-avatar.w-full.h-full.relative(
             v-else-if="el.asset?.type === 'person'"
-            :class="{ 'is-paused': (el.velocity || 0) < 0.1, 'is-exit': el.direction === 'exit' }"
+            :class="{ 'is-paused': el.isPaused ?? ((el.velocity || 0) < 0.1), 'is-exit': el.direction === 'exit' }"
           )
             .person-svg-container(v-html="el.asset.svg || ' '")
           .w-full.h-full.relative(v-else-if="el.asset?.type === 'car'")
