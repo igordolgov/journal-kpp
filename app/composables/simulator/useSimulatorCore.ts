@@ -102,6 +102,14 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
     if (category === 'gate' || category === 'barrier') {
       calculatedZIndex = 300
       correctType = 'gate'
+      // [ФИКС-висяки] gateType обязан быть у каждой калитки/ворот ДО того,
+      // как его прочитают физика, маршрутизация потоков и оплата: калитка
+      // шире 60px без метки не считалась пешеходной — люди замирали у прохода.
+      // Имя надёжнее ширины (стебель «калитк» ловит все падежи).
+      if (!settings.gateType) {
+        const nm = String(el.name || '').toLowerCase()
+        settings.gateType = (nm.includes('калитк') || nm.includes('wicket') || (el.width && el.width <= 60)) ? 'wicket' : 'sliding'
+      }
       const isWicket = settings.gateType === 'wicket' || (el.width && el.width <= 60)
       if (settings.openDuration === undefined) settings.openDuration = isWicket ? 0.5 : 2
       if (settings.closeDuration === undefined) settings.closeDuration = isWicket ? 0.5 : 2
@@ -259,6 +267,44 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
     gateTweens.set(gateId, tween)
   }
 
+  // [ФИКС-ЗАСТРЯНИЕ] сторож ворот. Две аномалии, из-за которых люди стояли
+  // у открытой калитки:
+  //  1) settings.isAnimating=true при убитом (tween.kill()) или паузированном
+  //     твине — onComplete не вызывается, флаг зависает, waiting_before
+  //     блокируется навсегда. Лечим: твин не активен — флаг сбрасываем.
+  //  2) калитка ВИЗУАЛЬНО открыта (_animScaleX ~ 0 после убитой анимации
+  //     открытия), но флаг isOpen=false — люди ждут «закрытую» калитку,
+  //     которую пользователь видит открытой. Синхронизируем флаг с визуалом.
+  const updateGateWatchdog = (_dt: number) => {
+    if (gateTweens.size) {
+      for (const [gateId, tween] of Array.from(gateTweens.entries())) {
+        if (tween && tween.isActive()) continue
+        gateTweens.delete(gateId)
+        const gate = simElements.value.find(g => String(g.id) === gateId)
+        if (gate?.settings?.isAnimating) {
+          gate.settings.isAnimating = false
+          console.warn('[gate-watchdog] isAnimating сброшен (твин убит/завершён):', gateId)
+        }
+      }
+    }
+    for (const gate of simElements.value) {
+      if ((gate.category !== 'gate' && gate.category !== 'barrier') || !gate.settings?.isAnimating) continue
+      if (gateTweens.has(String(gate.id))) continue
+      gate.settings.isAnimating = false
+      console.warn('[gate-watchdog] isAnimating сброшен (твина нет в реестре):', String(gate.id))
+    }
+    for (const gate of simElements.value) {
+      if ((gate.category !== 'gate' && gate.category !== 'barrier') || !gate.settings) continue
+      const s = gate.settings
+      const isWicket = s.gateType === 'wicket' || (gate.width && gate.width <= 60)
+      if (!isWicket || s.isAnimating || s.isOpen) continue
+      if (Number.isFinite(s._animScaleX) && (s._animScaleX as number) <= 0.2) {
+        s.isOpen = true
+        console.warn('[gate-watchdog] калитка визуально открыта — синхронизирован isOpen:', String(gate.id))
+      }
+    }
+  }
+
   const handleGateClick = (el: SceneElement) => {
     if (!GATES_LIST.includes(el.category || '')) return false
     if (!el.settings) el.settings = {}
@@ -346,6 +392,7 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
     closeGateWithSound,
     initManualCoords,
     killAllGateTweens,
+    updateGateWatchdog,
     gateTweens,
   }
 }

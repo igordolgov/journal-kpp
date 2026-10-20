@@ -14,7 +14,7 @@ aside.flex.flex-col.overflow-hidden.flex-shrink-0.h-full.border-r(
     class="bg-gray-900/80 p-1.5 border-white/5"
   )
     button.flex-1(
-      class="hover:bg-white/5 py-1.5 border border-transparent rounded-lg font-semibold text-gray-500 hover:text-gray-300 text-xs transition-all duration-200"
+      class="hover:bg-white/5 py-1 border border-transparent rounded-lg font-semibold text-gray-500 hover:text-gray-300 text-xs transition-all duration-200"
       :class="modelValue === 'scene' ? 'bg-blue-600/20 text-blue-400 shadow-sm shadow-blue-500/10 border-blue-500/20' : ''"
       @click="$emit('update:modelValue', 'scene')"
     )
@@ -22,7 +22,7 @@ aside.flex.flex-col.overflow-hidden.flex-shrink-0.h-full.border-r(
       span Объекты
 
     button.flex-1(
-      class="hover:bg-white/5 py-1.5 border border-transparent rounded-lg font-semibold text-gray-500 hover:text-gray-300 text-xs transition-all duration-200"
+      class="hover:bg-white/5 py-1 border border-transparent rounded-lg font-semibold text-gray-500 hover:text-gray-300 text-xs transition-all duration-200"
       :class="modelValue === 'panels' ? 'bg-purple-600/20 text-purple-400 shadow-sm shadow-purple-500/10 border-purple-500/20' : ''"
       @click="$emit('update:modelValue', 'panels')"
     )
@@ -203,7 +203,7 @@ aside.flex.flex-col.overflow-hidden.flex-shrink-0.h-full.border-r(
                 v-if="selectedPanelId === p.id && p.controls && p.controls.length > 0"
               )
                 .group.ctrl-row.flex.items-center.justify-between.cursor-grab.border.border-transparent.rounded-md(
-                  class="my-0.5 px-2 py-1.5 transition-all duration-150 ctrl-list"
+                  class="my-0.5 px-2 py-1 transition-all duration-150 ctrl-list"
                   :class="getCtrlClasses(c)"
                   v-for="c in p.controls" :key="c.id"
                   draggable="true"

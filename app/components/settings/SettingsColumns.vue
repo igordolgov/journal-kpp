@@ -12,7 +12,7 @@
       tbody
         tr(v-for="(col, index) in columns" :key="col.key")
           td
-            input.checkbox(type="checkbox" v-model="col.visible")
+            input.toggle.toggle-sm.toggle-primary(type="checkbox" v-model="col.visible")
           td {{ configStore.getLabel(col.key) }}
           td
             .join

@@ -12,7 +12,7 @@
       tbody
         tr(v-for="(btn, index) in buttons" :key="btn.key")
           td
-            input.checkbox(type="checkbox" v-model="btn.visible")
+            input.toggle.toggle-sm.toggle-primary(type="checkbox" v-model="btn.visible")
           td
             input.input.w-full.input-sm.input-bordered(v-model="btn.label")
           td

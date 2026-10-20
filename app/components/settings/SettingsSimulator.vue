@@ -76,7 +76,7 @@
             .form-control
               label.label
                 span.label-text Включить трафик
-                input.toggle.toggle-sm.toggle-primary(v-model="simSettings.enabled")
+                input.toggle.toggle-sm.toggle-primary(type="checkbox" v-model="simSettings.enabled")
             .form-control
               label.label
                 span.label-text Макс. агентов
@@ -164,11 +164,15 @@
             .form-control
               label.label.cursor-pointer
                 span.label-text Автооткрытие ворот
-                input.toggle.toggle-sm.toggle-primary(v-model="simSettings.autoOpenGates")
+                input.toggle.toggle-sm.toggle-primary(type="checkbox" v-model="simSettings.autoOpenGates")
             .form-control
               label.label.cursor-pointer
                 span.label-text Автооткрытие калитки
-                input.toggle.toggle-sm.toggle-primary(v-model="simSettings.autoOpenWicket")
+                input.toggle.toggle-sm.toggle-primary(type="checkbox" v-model="simSettings.autoOpenWicket")
+            .form-control
+              label.label.cursor-pointer(title="Выключите, чтобы журнал заполнялся вручную — заработают бонусы и штрафы за записи")
+                span.label-text Автозапись журнала
+                input.toggle.toggle-sm.toggle-primary(type="checkbox" v-model="simSettings.autoJournal")
         .border.border-base-300.rounded-xl.p-4.bg-base-200
           .flex.items-center.gap-2.mb-3
             span.text-xl ⚙️

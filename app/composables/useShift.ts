@@ -2,8 +2,12 @@
 // Назначение: состояние смены охранника (начало/конец, перерыв, история).
 // [ИСПРАВЛЕНО]: добавлен isOnBreak (ShiftManager деструктурировал его,
 // но композабл не возвращал) + состояние перерыва; сигнатуры типизированы явно.
+// [PAYROLL] Смена = расчётный период движка оплаты: старт -> setActiveShift,
+// финиш -> setActiveShift(null), перерыв -> setPaused (штраф «долгое удержание»
+// не должен капать, пока пост пуст — подменяющий не привязан к проводкам).
 import { ref, computed } from 'vue'
 import { useDatabase } from './useDatabase'
+import { usePayroll } from './usePayroll'
 
 // Глобальное состояние смены (модульный уровень — синглтон на сессию)
 const currentShift = ref<any>(null)
@@ -40,6 +44,22 @@ export const useShift = () => {
   const startShift = async (guardName: string) => {
     if (!guardName.trim()) throw new Error('Введите имя охранника')
 
+    // [СМЕНА] «Принять смену» при незакрытой предыдущей: предыдущая
+    // закрывается автоматически. Иначе в store 'shifts' копятся вечные
+    // активные смены — loadCurrentShift берёт первую без end_time, и
+    // фактически принятая смена «не считается» принятой.
+    if (currentShift.value && !currentShift.value.end_time) {
+      try {
+        await updateItem('shifts', {
+          ...currentShift.value,
+          end_time: Date.now(),
+          notes: currentShift.value.notes || 'Автозакрытие при принятии новой смены'
+        })
+      } catch (e) {
+        console.error('[useShift] не удалось закрыть предыдущую смену:', e)
+      }
+    }
+
     const now = Date.now()
     const newShift = {
       guard_name: guardName,
@@ -49,6 +69,12 @@ export const useShift = () => {
 
     const id = await addItem('shifts', newShift)
     currentShift.value = { ...newShift, id }
+
+    // [PAYROLL] init() идемпотентен (перестраховка, если app.vue не успел);
+    // без активной смены движок начислений не ведёт — это его предохранитель
+    const payroll = usePayroll()
+    await payroll.init()
+    payroll.setActiveShift(id)
 
     // Новая смена — сбрасываем перерыв
     isOnBreak.value = false
@@ -61,6 +87,9 @@ export const useShift = () => {
     if (!currentShift.value) return
     isOnBreak.value = true
     breakCover.value = coverName
+    // [PAYROLL] начисления на паузу: события шины продолжают идти,
+    // но движок их игнорирует до возвращения с перерыва
+    usePayroll().setPaused(true)
     // [НАСТРОЙКА] при необходимости — персист перерыва в БД
   }
 
@@ -69,6 +98,7 @@ export const useShift = () => {
     if (!currentShift.value) return
     isOnBreak.value = false
     breakCover.value = null
+    usePayroll().setPaused(false)
   }
 
   const endShift = async (notes: string) => {
@@ -90,6 +120,10 @@ export const useShift = () => {
     currentShift.value = null
     isOnBreak.value = false
     breakCover.value = null
+
+    // [PAYROLL] смена закрыта — начисления прекращаются; итог достаётся
+    // через getShiftSummary(shiftId) (расчётный лист, этап 7)
+    usePayroll().setActiveShift(null)
   }
 
   // Кто реально сейчас на посту: во время перерыва — подменяющий (если указан)

@@ -512,7 +512,7 @@ aside.flex.flex-col.h-full.overflow-hidden.border-l.border-gray-700.bg-gray-900(
               type="number"
               min="1"
               max="100"
-              :value="settings.traffic?.maxAgents ?? 4"
+              :value="settings.traffic?.maxAgents ?? 10"
               @input="updateTraffic('maxAgents', evNumber($event))"
             )
           .field
@@ -540,7 +540,7 @@ aside.flex.flex-col.h-full.overflow-hidden.border-l.border-gray-700.bg-gray-900(
             input.field-input(
               type="number"
               min="1"
-              :value="settings.traffic?.spawnIntervalMin || 10"
+              :value="settings.traffic?.spawnIntervalMin || 25"
               @input="updateTraffic('spawnIntervalMin', evNumber($event))"
             )
           .field
@@ -548,7 +548,7 @@ aside.flex.flex-col.h-full.overflow-hidden.border-l.border-gray-700.bg-gray-900(
             input.field-input(
               type="number"
               min="1"
-              :value="settings.traffic?.spawnIntervalMax || 30"
+              :value="settings.traffic?.spawnIntervalMax || 60"
               @input="updateTraffic('spawnIntervalMax', evNumber($event))"
             )
 
@@ -560,7 +560,7 @@ aside.flex.flex-col.h-full.overflow-hidden.border-l.border-gray-700.bg-gray-900(
             input.field-input(
               type="number"
               min="1"
-              :value="settings.traffic?.carSpawnIntervalMin || 5"
+              :value="settings.traffic?.carSpawnIntervalMin || 30"
               @input="updateTraffic('carSpawnIntervalMin', evNumber($event))"
             )
           .field
@@ -568,7 +568,7 @@ aside.flex.flex-col.h-full.overflow-hidden.border-l.border-gray-700.bg-gray-900(
             input.field-input(
               type="number"
               min="1"
-              :value="settings.traffic?.carSpawnIntervalMax || 15"
+              :value="settings.traffic?.carSpawnIntervalMax || 60"
               @input="updateTraffic('carSpawnIntervalMax', evNumber($event))"
             )
 </template>

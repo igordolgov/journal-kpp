@@ -25,6 +25,10 @@ import { useSimulatorIntegration } from './useSimulatorIntegration'
 import { useConfirm } from './useConfirm'
 import { useToast } from './useToast'
 import { useShift } from './useShift'
+import { useConfig } from './useConfig'
+// [PAYROLL stage-7.1] сверка записей со следами прохода + шина оплаты
+import { peekPayrollPassFor, hasPayrollSeen, addPendingRecord } from '~/utils/payrollPass'
+import { publishEntryAdded } from '~/utils/payrollBus'
 
 const STORAGE_KEY_WIDTHS = 'journal-column-widths'
 
@@ -39,6 +43,74 @@ export const useJournalPage = () => {
 
   /** Автор действия — дежурный текущей смены (null, если смена не принята) */
   const currentAuthor = () => currentShift.value?.guard_name || null
+
+  // --- [PAYROLL stage-7.1] Сверка журнальных записей со следами прохода ---
+  // Ручной режим (автозапись выкл): каждая запись о человеке сверяется с
+  // реестром проходов симулятора (utils/payrollPass). Есть след — движок
+  // оценивает верность и скорость записи (entry_added: бонус/штраф). Нет
+  // следа и человек за сессию ни разу не подходил к калитке/воротам —
+  // «запись без прохода» (entry_phantom): движок штрафует по одноимённому
+  // правилу. Суммы считает только движок: при выключенной оплате, без
+  // открытой смены или на перерыве события игнорируются им самим.
+  // Пассажиры/члены группы берутся из следа лидера (companionIds) — запись
+  // по реальному пассажиру не «липовая». При включённой автозаписи журнал
+  // ведётся как раньше — без оценки.
+  const { config: appConfig } = useConfig()
+  const isManualJournalMode = () => appConfig.value?.simulator?.autoJournal === false
+
+  const normPlateValue = (raw: any): string =>
+    String(raw || '').replace('🚶 Пеш.', '').trim()
+
+  const evaluateRecordAgainstPass = (
+    personId: number | string | null | undefined,
+    direction: 'enter' | 'exit',
+    plate: string,
+    entryId?: number,
+  ): void => {
+    try {
+      if (!personId || !isManualJournalMode()) return
+      const pass = peekPayrollPassFor(personId)
+      if (!pass) {
+        // След мог уже уйти (агент деспавнился, takePayrollPass) — пропуск
+        // записи уже наказан entry_missing при деспавне, повторно не штрафуем
+        if (hasPayrollSeen(personId)) return
+        const person = peopleList.value.find((pl: any) => String(pl.id) === String(personId))
+        // [stage-8.1] запись могла быть сделана РАНЬШЕ подхода (человек ещё
+        // идёт к воротам) — не штрафуем сразу: pending ждёт подхода 90 сек
+        // и либо оценит запись как обычную, либо превратится в entry_phantom
+        addPendingRecord(personId, {
+          fio: person?.fio || '',
+          plate,
+          direction,
+          entryId,
+        })
+        return
+      }
+      // Один след оценивается один раз на человека: повторная запись по
+      // тому же проходу не должна фармить бонусы или дублировать штрафы
+      const recordedIds = pass.recordedIds || (pass.recordedIds = [])
+      if (recordedIds.includes(Number(personId))) return
+      recordedIds.push(Number(personId))
+      // Своя запись водителя/лидера гасит gate_no_entry и entry_missing
+      if (Number(pass.personId) === Number(personId)) pass.recordedTs = Date.now()
+      const directionOk = pass.direction === direction
+      const expectedPlate = String(pass.plate || '').trim()
+      // Номер проверяем только у автомобильного прохода: пешком — любой
+      // транспорт в записи не ошибка
+      const plateOk = !expectedPlate ? true : normPlateValue(plate) === expectedPlate
+      publishEntryAdded({
+        entryId,
+        personId: Number(personId),
+        fio: pass.fio,
+        plate: pass.plate,
+        direction: pass.direction,
+        correct: directionOk && plateOk,
+        lateSeconds: Math.max(0, Math.round((Date.now() - pass.ts) / 1000)),
+      })
+    } catch (e) {
+      console.error('[useJournalPage] оценка записи (payroll) упала', e)
+    }
+  }
 
   // --- Состояния модальных окон ---
   const isExitModalOpen = ref(false)
@@ -222,6 +294,7 @@ export const useJournalPage = () => {
         const activeEntry = processedJournal.value.find(
           (e: any) => String(e.person_id) === String(personId) && e.timestamp_in && !e.timestamp_out
         )
+        let savedEntryId: number | undefined
         if (activeEntry) {
           // Закрываем её – добавляем timestamp_out и транспорт выезда
           await updateItem('journal', {
@@ -231,9 +304,10 @@ export const useJournalPage = () => {
             destination: destination || activeEntry.destination,
             created_by: activeEntry.created_by || author,   // [FIX] если вход создан без автора — дописываем
           })
+          savedEntryId = activeEntry.id
         } else {
           // Нет активного входа – создаём запись только с выходом
-          await addItem('journal', {
+          savedEntryId = await addItem('journal', {
             person_id: personId,
             timestamp_out: timestamp,
             vehicle_out: vehiclePlate,
@@ -242,6 +316,8 @@ export const useJournalPage = () => {
             created_at: timestamp,   // [FIX] дата (для группировки «По дням»)
           })
         }
+        // [PAYROLL] сверка записи со следом прохода (бонус/штраф назначит движок)
+        evaluateRecordAgainstPass(personId, 'exit', vehiclePlate, savedEntryId)
       }
 
       // Сохраняем выход для основного человека
@@ -329,8 +405,11 @@ export const useJournalPage = () => {
         updated_by: author,    // [FIX] редактор
         updated_at: timestamp, // [FIX] время правки
       })
+      // [PAYROLL] сверка записи со следом прохода
+      evaluateRecordAgainstPass(returnForm.person_id, 'enter', vehicle, returnForm.id ?? undefined)
 
       for (const companionJournalId of returnForm.selectedGroupIds) {
+        const companionEntry = processedJournal.value.find((e: any) => e.id === companionJournalId)
         await updateItem('journal', {
           id: companionJournalId,
           timestamp_in: timestamp,
@@ -338,6 +417,10 @@ export const useJournalPage = () => {
           updated_by: author,    // [FIX]
           updated_at: timestamp, // [FIX]
         })
+        if (companionEntry) {
+          // [PAYROLL] попутчик оценивается по следу водителя/лидера
+          evaluateRecordAgainstPass(companionEntry.person_id, 'enter', vehicle, companionJournalId)
+        }
       }
 
       isReturnModalOpen.value = false
@@ -503,6 +586,8 @@ export const useJournalPage = () => {
               destination: destination || existingExit.destination,
               created_by: existingExit.created_by || author,   // [FIX] автор выхода
             })
+            // [PAYROLL] сверка записи со следом прохода
+            evaluateRecordAgainstPass(person.id, 'exit', vehiclePlate, existingExit.id)
           } else {
             const newEntry = {
               person_id: person.id,
@@ -513,7 +598,9 @@ export const useJournalPage = () => {
               created_by: author,    // [FIX] автор
               created_at: timestamp, // [FIX] дата (группировка «По дням»)
             }
-            await addItem('journal', newEntry)
+            const savedEntryId = await addItem('journal', newEntry)
+            // [PAYROLL] сверка записи со следом прохода
+            evaluateRecordAgainstPass(person.id, 'exit', vehiclePlate, savedEntryId)
           }
         }
       } else if (actionKey === 'enter') {
@@ -531,8 +618,10 @@ export const useJournalPage = () => {
               updated_by: author,    // [FIX] редактор
               updated_at: timestamp, // [FIX]
             })
+            // [PAYROLL] сверка записи со следом прохода
+            evaluateRecordAgainstPass(person.id, 'enter', vehiclePlate, activeEntry.id)
           } else {
-            await addItem('journal', {
+            const savedEntryId = await addItem('journal', {
               person_id: person.id,
               timestamp_in: timestamp,
               vehicle_in: vehiclePlate,
@@ -541,6 +630,8 @@ export const useJournalPage = () => {
               created_by: author,    // [FIX] автор
               created_at: timestamp, // [FIX]
             })
+            // [PAYROLL] сверка записи со следом прохода
+            evaluateRecordAgainstPass(person.id, 'enter', vehiclePlate, savedEntryId)
           }
         }
       }

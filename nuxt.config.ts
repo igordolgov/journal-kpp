@@ -33,6 +33,14 @@ import { defineNuxtConfig } from 'nuxt/config'
 import tailwindcss from '@tailwindcss/vite'
 
 export default defineNuxtConfig({
+  ssr: false,
+
+  router: {
+    options: {
+      hashMode: true,
+    },
+  },
+
   devServer: {
     port: 3001
   },
@@ -75,7 +83,7 @@ export default defineNuxtConfig({
 
   vite: {
     // Относительный base сборки Vite: делает ОТНОСИТЕЛЬНЫМИ импорты чанков
-    // внутри JS ("./chunk.js" вместо "/​_nuxt/chunk.js") — без этого ленивые
+    // внутри JS ("./chunk.js" вместо "/ _nuxt/chunk.js") — без этого ленивые
     // страницы (БД, редактор...) не загрузятся под file://.
     // На теги в HTML vite.base НЕ влияет — их чинит fix-electron-paths.mjs.
     base: './',

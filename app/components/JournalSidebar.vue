@@ -347,8 +347,8 @@
                   @click="deselectVehicle"
                   class="bg-linear-to-br from-base-100 to-base-200 shadow-sm hover:shadow-md border border-base-300 rounded-full"
                 )
-                  span.px-1.font-semibold.border.border-base-content/20.rounded-md(
-                    class="bg-neutral text-neutral-content"
+                  span.px-1.font-semibold.border.rounded-md(
+                    class="bg-neutral border-base-content/20 text-neutral-content"
                   )
                     | {{ selectedVehicle.plate }}
                   X.w-4.w-4.opacity-60(
@@ -820,28 +820,27 @@ const validationError = computed(() => {
 
 const isTripValid = computed(() => validationError.value === null)
 
+// [НАДПИСИ] кнопка поездки на машине — глагол прошедшего времени, как в
+// журнале: выехал/въехал (пешие варианты — в walkingButtonLabel)
 const actionButtonLabel = computed(() => {
-  if (isResidentInside.value || isGuestInside.value) return 'Выезд'
-  if (isResidentOutside.value || isGuestOutside.value) return 'Въезд'
+  if (isResidentInside.value || isGuestInside.value) return 'Выехал'
+  if (isResidentOutside.value || isGuestOutside.value) return 'Въехал'
   return 'Действие'
 })
 
 const totalPeopleCount = computed(() => 1 + tripPassengers.value.length)
 
+// [НАДПИСИ] пеший проход — только каноничные варианты: вышел/вышли (выход)
+// и вошел/вошли (вход), для резидента и гостя одинаково, с числом людей
 const walkingButtonLabel = computed(() => {
   const isExit = isResidentInside.value || isGuestInside.value
   const isEnter = isResidentOutside.value || isGuestOutside.value
-  const isGuest = !isResident.value
 
   if (isExit) {
-    const base = isGuest
-      ? (totalPeopleCount.value > 1 ? 'Уехали' : 'Уехал')
-      : (totalPeopleCount.value > 1 ? 'Вышли' : 'Вышел')
+    const base = totalPeopleCount.value > 1 ? 'Вышли' : 'Вышел'
     return `${base} (${totalPeopleCount.value})`
   } else if (isEnter) {
-    const base = isGuest
-      ? (totalPeopleCount.value > 1 ? 'Пришли' : 'Пришёл')
-      : (totalPeopleCount.value > 1 ? 'Вошли' : 'Вошел')
+    const base = totalPeopleCount.value > 1 ? 'Вошли' : 'Вошел'
     return `${base} (${totalPeopleCount.value})`
   }
   return `Действие (${totalPeopleCount.value})`

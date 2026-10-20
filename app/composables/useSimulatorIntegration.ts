@@ -309,13 +309,17 @@ export function useSimulatorIntegration() {
   const getAvailableVehicleForPerson = (personId: number, direction: Direction): any | null => {
     const owned = vehiclesByOwner.value.get(personId) || []
     if (owned.length === 0) return null
+    // [FIX «не вижу машин»] Раньше машина сверялась с картой статусов:
+    // никогда не ездившая машина считалась «внутри» и не могла въехать, а
+    // рассинхрон статусов (машина «внутри», владелец «снаружи») навсегда
+    // блокировал автомобильный спавн в обе стороны. Теперь сторону машины
+    // определяет сторона владельца: направление уже проверено в
+    // getAvailablePerson, машина просто едет со своим владельцем
+    // (direction оставлен в сигнатуре для совместимости вызовов).
+    void direction
     for (const car of owned) {
       const plate = car.plate?.trim()
-      if (!plate) continue
-      const currentStatus = vehicleStatusMap.value.get(plate)
-      const inside = currentStatus === undefined ? true : currentStatus
-      if (direction === 'enter' && !inside) return car
-      if (direction === 'exit' && inside) return car
+      if (plate) return car
     }
     return null
   }
@@ -410,6 +414,32 @@ export function useSimulatorIntegration() {
     }
   }
 
+  // [PAYROLL] Ручной режим: журнал пишет охранник, но симулятору всё равно
+  // нужен актуальный статус «внутри/снаружи», иначе фильтр спавна ломается.
+  // Вынесено из logAgentEvent: обновление карт статусов БЕЗ записи в журнал.
+  // Мир меняется физикой (человек прошёл) — расходится с журналом именно
+  // тогда, когда охранник не записал проход, и именно это штрафуется.
+  const updateAgentStatusOnly = (
+    personId: number,
+    direction: Direction,
+    vehiclePlate?: string
+  ) => {
+    const timestamp = Date.now()
+    const plate = (vehiclePlate || '').trim()
+    const isWalk = !plate || plate === '🚶 Пеш.'
+
+    const currentStatus = personStatusMap.value.get(personId)
+      || { isInside: true, lastEventTime: 0, vehicleOut: null }
+    personStatusMap.value.set(personId, {
+      isInside: direction === 'enter',
+      lastEventTime: timestamp,
+      vehicleOut: direction === 'exit' ? (plate || null) : null
+    })
+    if (!isWalk) {
+      vehicleStatusMap.value.set(plate, direction === 'enter')
+    }
+  }
+
   // Форматирование
   const formatDisplayName = (fio: string): string => {
     if (!fio) return 'Аноним'
@@ -477,6 +507,7 @@ export function useSimulatorIntegration() {
     getAvailableVehicleForPerson,
     getVehicleColor,
     logAgentEvent,
+    updateAgentStatusOnly,
     formatDisplayName,
     createPersonInfo,
   }

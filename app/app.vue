@@ -13,5 +13,14 @@ div.min-h-screen.bg-base-200
 </template>
 
 <script setup lang="ts">
-// Глобальная логика приложения (если нужна)
+// Глобальная логика приложения
+// [PAYROLL] Ранняя инициализация движка оплаты: страница настроек получает
+// конфиг, симулятор — подписчика шины. init() идемпотентен (повторы — no-op),
+// поэтому startShift дублирует вызов без риска двойной подписки.
+import { onMounted } from 'vue'
+import { usePayroll } from '~/composables/usePayroll'
+
+onMounted(() => {
+  usePayroll().init()
+})
 </script>

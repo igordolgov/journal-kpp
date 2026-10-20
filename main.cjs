@@ -1,18 +1,15 @@
 // main.cjs
 // Назначение: входная точка Electron — окно приложения + окружение portable.
-// [ФИКС] Файл переименован из main.js в main.cjs.
-// Причина: в package.json стоит "type": "module" (нужно Nuxt 4). С ним Electron
-// грузит main как ESM, а require() в ESM не существует — приложение падает с
-// "ReferenceError: require is not defined in ES module scope".
-// Расширение .cjs принудительно указывает Node/Electron: это CommonJS,
-// независимо от "type" в package.json.
+// ПОЧЕМУ .cjs, А НЕ .js: в package.json стоит "type": "module", и Electron
+// грузил бы main.js как ESM — в ESM нет require(), процесс падает на старте.
+// Расширение .cjs принудительно включает CommonJS независимо от "type".
 // [ФИКС] Данные (IndexedDB: журнал, база, сцены) привязаны к папке 'data'
 // рядом с НАСТОЯЩИМ exe через PORTABLE_EXECUTABLE_DIR. Раньше Electron писал
 // userData в %APPDATA% — поведение для portable ненадёжное (папка распаковки
 // временная; на другой машине данные «терялись»).
 // Бонус: перенос папки с exe переносит и данные — истинная портативность.
 
-const { app, BrowserWindow } = require('electron')
+const { app, BrowserWindow, dialog } = require('electron')
 const path = require('path')
 const fs = require('fs')
 
@@ -33,6 +30,9 @@ if (process.env.PORTABLE_EXECUTABLE_DIR) {
   app.setPath('userData', dataDir)
 }
 
+// Главная страница SPA-сборки Nuxt (ssr:false кладёт её в .output/public)
+const indexPath = path.join(__dirname, '.output', 'public', 'index.html')
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1280,
@@ -45,15 +45,26 @@ function createWindow() {
     }
   })
 
-  // Загружаем статический index.html из папки .output/public
-  // (пререндерNitro — фундамент сборки, работает без сервера)
-  win.loadFile(path.join(__dirname, '.output', 'public', 'index.html'))
+  win.loadFile(indexPath)
 
-  // Открываем DevTools только для отладки (можно удалить)
+  // Открываем DevTools только для отладки белого экрана (можно удалить)
   // win.webContents.openDevTools()
 }
 
-app.whenReady().then(createWindow)
+app.whenReady().then(() => {
+  // Страховка: electron:build запущен БЕЗ предварительного pnpm build —
+  // тогда .output/public/index.html не существует и окно было бы белым.
+  if (!fs.existsSync(indexPath)) {
+    dialog.showErrorBox(
+      'Нет сборки Nuxt',
+      'Не найден файл:\n' + indexPath +
+      '\n\nСначала выполните:\n    pnpm build\nзатем:\n    pnpm electron:build'
+    )
+    app.quit()
+    return
+  }
+  createWindow()
+})
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()

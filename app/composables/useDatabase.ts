@@ -6,12 +6,24 @@
 // (воспроизводилось в updateItem при миграциях: записи из reactive-списков
 // уходили в put() как Proxy). Теперь write-путь безопасен для любых входных.
 // [FIX] deleteItem — guard от записи с невалидным ключом.
+// [PAYROLL v11] + store 'payroll' (проводки зарплаты). Список stores вынесен
+// в константу DB_STORES: раньше он дублировался в ТРЁХ местах (onupgradeneeded,
+// exportDB, importDB) — при добавлении стора легко забыть одно из них, и бэкап
+// молча терял бы начисления. Один источник правды.
 
 // toRaw импортируем явно: composable может вызываться вне автоимпорт-контекста
 import { toRaw } from 'vue'
 
 let dbInstance: IDBDatabase | null = null
 let dbOpeningPromise: Promise<IDBDatabase> | null = null
+
+// Единый список сторов — используется при создании схемы, экспорте и импорте
+const DB_STORES = ['people', 'vehicles', 'journal', 'settings', 'shifts', 'scenes', 'payroll'] as const
+
+// v11: + store 'payroll'. onupgradeneeded создаёт недостающие сторы
+// избирательно (contains-check), поэтому миграция безопасна для любой версии:
+// и 10→11, и свежая установка сразу получит полный набор.
+const DB_VERSION = 11
 
 // Deep-клон без прокси: toRaw снимает внешний реактивный прокси,
 // JSON-цикл снимает ВСЕ вложенные. Функции теряются — для БД это ок.
@@ -38,12 +50,11 @@ export const useDatabase = () => {
         return
       }
 
-      const request = indexedDB.open('KppDatabase', 10)
+      const request = indexedDB.open('KppDatabase', DB_VERSION)
 
       request.onupgradeneeded = (event: any) => {
         const db = event.target.result
-        const stores = ['people', 'vehicles', 'journal', 'settings', 'shifts', 'scenes']
-        stores.forEach(store => {
+        DB_STORES.forEach(store => {
           if (!db.objectStoreNames.contains(store)) {
             db.createObjectStore(store, { keyPath: 'id', autoIncrement: true })
           }
@@ -214,8 +225,7 @@ export const useDatabase = () => {
   const exportDB = async () => {
     if (import.meta.server) return
     const data: Record<string, any[]> = {}
-    const stores = ['people', 'vehicles', 'journal', 'settings', 'shifts', 'scenes']
-    for (const storeName of stores) {
+    for (const storeName of DB_STORES) {
       data[storeName] = await getAllItems(storeName)
     }
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
@@ -235,9 +245,8 @@ export const useDatabase = () => {
         try {
           const data = JSON.parse(e.target?.result as string)
           const db = await getDb()
-          const stores = ['people', 'vehicles', 'journal', 'settings', 'shifts', 'scenes']
 
-          for (const storeName of stores) {
+          for (const storeName of DB_STORES) {
             if (data[storeName] && Array.isArray(data[storeName])) {
               const tx = db.transaction(storeName, 'readwrite')
               const store = tx.objectStore(storeName)

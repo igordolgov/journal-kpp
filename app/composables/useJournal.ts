@@ -6,6 +6,8 @@
 
 import { useState, computed, ref } from '#imports'
 import { useDatabase } from './useDatabase'
+import { peekPayrollPass } from '~/utils/payrollPass'
+import { publishEntryAdded } from '~/utils/payrollBus'
 
 export const useJournal = () => {
   const { getAllItems, addItem, updateItem, deleteItem: dbDeleteItem } = useDatabase()
@@ -110,6 +112,36 @@ export const useJournal = () => {
     }
     const id = await addItem('journal', entry)
     journalList.value = [...journalList.value, { ...entry, id }]
+
+    // [PAYROLL] Оценка ручной записи против следа прохода симулятора.
+    // Важно: авто-запись (logAgentEvent) пишет в 'journal' напрямую, минуя
+    // addEntry, — сюда попадают только записи, созданные пользователем.
+    // Нет следа (свободный режим / не из симулятора) — события нет,
+    // движок ничего не начисляет: журналом можно пользоваться как раньше.
+    const pass = peekPayrollPass(entry.person_id)
+    if (pass) {
+      const now = Date.now()
+      pass.recordedTs = now
+      // Направление по составу отметок времени: выход = только timestamp_out.
+      // Записи с обоими штампами считаем входом (закрытие активного выхода).
+      const entryDirection = entry.timestamp_out && !entry.timestamp_in ? 'exit' : 'enter'
+      const directionOk = entryDirection === pass.direction
+      const expectedPlate = String(pass.plate || '').trim()
+      const rawVehicle = String((entryDirection === 'exit' ? entry.vehicle_out : entry.vehicle_in) || '')
+      const actualPlate = rawVehicle.replace('🚶 Пеш.', '').trim()
+      // Проверяем номер только если проход был на машине: пешком — любой
+      // вариант транспорта в записи не ошибка
+      const plateOk = !expectedPlate ? true : actualPlate === expectedPlate
+      publishEntryAdded({
+        entryId: id,
+        personId: entry.person_id,
+        fio: pass.fio,
+        plate: pass.plate,
+        direction: pass.direction,
+        correct: directionOk && plateOk,
+        lateSeconds: Math.max(0, Math.round((now - pass.ts) / 1000)),
+      })
+    }
   }
 
   const updateEntryFull = async (entry: any) => {

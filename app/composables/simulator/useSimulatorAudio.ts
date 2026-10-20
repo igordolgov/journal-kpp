@@ -19,6 +19,10 @@
 //  6. maxDist: fallback 400/800 — поля TrafficConfig опциональны.
 //  7. visibleAgentLabels: Set<string | number>, т.к. SceneElement.id может быть числом.
 //     Поля AiAgent.groupId/isLeader добавляются в app/types/simulator.ts (см. шаг 2).
+//  8. [ФИКС-звук] Пулы машин освобождаются при ЛЮБОМ удалении агента
+//     (свип по createdPools); добавлен stopAllCarEngines() — глушит двигатели
+//     при паузе/выключении симулятора; убран таймер 500мс, пересоздавший
+//     пул каждый кадр (гонки старт/стоп = «залипший» гул двигателя).
 
 import { ref, type Ref } from 'vue'
 import { useAudioEngine } from '~/composables/useAudioEngine'
@@ -60,7 +64,6 @@ export function useSimulatorAudio(
   const carPrevSpeeds = new Map<string, number>()   // Предыдущая скорость машины (для торможения)
   const lastBrakeTime = new Map<string, number>()   // Время последнего скрипа тормозов
   const carHornPlayed = new Set<string>()           // Флаг: уже сигналил ли автомобиль
-  const carPendingDispose = new Map<string, ReturnType<typeof setTimeout>>() // Отложенная очистка пулов
 
   // Реактивный набор id агентов с меткой переговорника.
   // [ИСПРАВЛЕНО] string | number — id элемента сцены может быть числом (легаси-сцены)
@@ -165,6 +168,9 @@ export function useSimulatorAudio(
    * Обновление аудио для конкретного агента.
    */
   const updateAgentAudio = (dt: number, agent: AiAgent) => {
+    // [ФИКС-звук] завершённый агент уже не слышен: не обновляем и не
+    // пересоздаём его пулы в кадре перед деспавном
+    if (agent.state === 'done') return
     const cfg = getTrafficConfig()
     // "Слушатель" в центре сцены (для расчёта стерео-панорамы в будущем)
     const listenerX = sceneSize.value.width / 2
@@ -242,20 +248,12 @@ export function useSimulatorAudio(
       }
       targetVol = Math.min(0.9, targetVol * fadeMultiplier * approachFade)
 
-      // Логика остановки звука (очистка ресурсов)
-      if (targetVol < 0.01 && !carPendingDispose.has(agent.id)) {
-        // [НАСТРОЙКА] Задержка перед удалением пула (500мс) — звук уходит плавно
-        const timer = setTimeout(() => {
-          // releasePool синхронизирует движок и реестр
-          releasePool(poolId)
-          carPendingDispose.delete(agent.id)
-        }, 500)
-        carPendingDispose.set(agent.id, timer)
-      }
-      if (targetVol > 0.01 && carPendingDispose.has(agent.id)) {
-        clearTimeout(carPendingDispose.get(agent.id)!)
-        carPendingDispose.delete(agent.id)
-      }
+      // [ФИКС-звук] Пул двигателя живёт, пока жив агент: громкость ведётся
+      // через updateEngineVolume (плавное затухание), высвобождение — строго
+      // при удалении агента (свип updateAllAudio / cleanupAgentSounds /
+      // stopAllCarEngines). Раньше пул удалялся таймером 500мс при затухании
+      // и пересоздавался в следующем кадре — гонки старт/стоп оставляли
+      // «залипший» гул двигателя после убытия машины.
 
       // [ИСПРАВЛЕНО] Пул создаётся один раз на машину (ensurePool), а не каждый кадр.
       ensurePool(poolId, 'engine', 1)
@@ -306,12 +304,13 @@ export function useSimulatorAudio(
     // 1. Очистка памяти от удалённых агентов (Anti-Memory Leak)
     const currentAgentIds = new Set(aiAgents.value.map(a => a.id))
 
-    // [ИСПРАВЛЕНО] Свип по ВСЕМ картам. Map итерируем через .keys() —
-    // прямая итерация даёт кортеж [ключ, значение].
-    for (const [id, timer] of carPendingDispose) {
-      if (!currentAgentIds.has(id)) {
-        clearTimeout(timer)
-        carPendingDispose.delete(id)
+    // [ФИКС-звук] Машина покинула сцену — её пул двигателя освобождается
+    // немедленно. Раньше здесь только отменялся отложенный таймер, а играющий
+    // пул оставался звучать вечно при любом пути удаления агента в обход
+    // cleanupAgentSounds (перезагрузка сцены, лимит агентов и т.п.).
+    for (const poolId of [...createdPools]) {
+      if (poolId.startsWith('car-') && !currentAgentIds.has(poolId.slice(4))) {
+        releasePool(poolId)
       }
     }
     for (const id of lastBrakeTime.keys()) {
@@ -340,11 +339,6 @@ export function useSimulatorAudio(
    * Принудительная очистка звуков при удалении агента.
    */
   const cleanupAgentSounds = (agentId: string) => {
-    // Отменяем отложенное удаление пула, если оно было запланировано
-    const timer = carPendingDispose.get(agentId)
-    if (timer) clearTimeout(timer)
-    carPendingDispose.delete(agentId)
-
     // releasePool синхронизирует движок и реестр пулов
     releasePool(`car-${agentId}`)
 
@@ -360,9 +354,20 @@ export function useSimulatorAudio(
     carPrevSpeeds.clear()
     lastBrakeTime.clear()
     carHornPlayed.clear()
-    for (const timer of carPendingDispose.values()) clearTimeout(timer)
-    carPendingDispose.clear()
     audio.resetPool('gate-active')
+  }
+
+  // [ФИКС-звук] Полное глушение двигателей всех машин: пауза/выключение
+  // симулятора, закрытие виджета. Раньше при остановке игрового цикла пулы
+  // продолжали звучать с последней громкостью — гул слышен «после
+  // выключения симулятора», пока страницу не перезагрузят.
+  const stopAllCarEngines = () => {
+    for (const poolId of [...createdPools]) {
+      if (poolId.startsWith('car-')) releasePool(poolId)
+    }
+    carPrevSpeeds.clear()
+    lastBrakeTime.clear()
+    carHornPlayed.clear()
   }
 
   return {
@@ -370,6 +375,7 @@ export function useSimulatorAudio(
     updateAllAudio,
     cleanupAgentSounds,
     resetAllAudioTimers,
+    stopAllCarEngines,
     visibleAgentLabels,
     updateIntercomAndLabels
   }

@@ -14,7 +14,7 @@
   )
     UiPageHeader(
       title="Настройки"
-      description="Поведение интерфейса, справочники и симулятор. Изменения применяются после сохранения."
+      description="Поведение интерфейса, справочники, симулятор и оплата труда. Изменения применяются после сохранения."
     )
 
   //- Основной контент
@@ -59,6 +59,7 @@ import { ref, computed, onMounted } from 'vue'
 import { Save, Download, Upload, Trash2, HelpCircle } from '@lucide/vue'
 import { useDatabase } from '../composables/useDatabase'
 import { useConfig } from '../composables/useConfig'
+import { usePayroll } from '~/composables/usePayroll'
 import { useToast } from '~/composables/useToast'
 import { useConfirm } from '~/composables/useConfirm'
 import { useOnboarding } from '~/composables/useOnboarding'
@@ -68,12 +69,16 @@ import SettingsColumns from '~/components/settings/SettingsColumns.vue'
 import SettingsButtons from '~/components/settings/SettingsButtons.vue'
 import SettingsPlaces from '~/components/settings/SettingsPlaces.vue'
 import SettingsSimulator from '~/components/settings/SettingsSimulator.vue'
+import SettingsPayroll from '~/components/settings/SettingsPayroll.vue'
 import SettingsGenerator from '~/components/settings/SettingsGenerator.vue'
 
 definePageMeta({ title: 'Настройки' })
 
 const { exportDB, importDB, destroyDb } = useDatabase()
 const configStore = useConfig()
+// [PAYROLL] Тарифы живут отдельной записью 'payroll_config', не в app_config —
+// поэтому общая кнопка сохранения обязана писать и их вручную
+const { saveConfig: savePayrollConfig, isInitialized: payrollReady } = usePayroll()
 const toast = useToast()
 const { confirmDialog } = useConfirm()
 const { show: showTour } = useOnboarding()
@@ -86,6 +91,7 @@ const tabs = [
   { key: 'buttons', label: 'Кнопки' },
   { key: 'places', label: 'Места' },
   { key: 'simulator', label: 'Симулятор' },
+  { key: 'payroll', label: 'Оплата' },
   { key: 'generator', label: 'Генератор' },
 ]
 
@@ -96,6 +102,7 @@ const componentsMap: Record<string, any> = {
   buttons: SettingsButtons,
   places: SettingsPlaces,
   simulator: SettingsSimulator,
+  payroll: SettingsPayroll,
   generator: SettingsGenerator,
 }
 const currentComponent = computed(() => componentsMap[activeTab.value])
@@ -103,6 +110,9 @@ const currentComponent = computed(() => componentsMap[activeTab.value])
 // [UI/UX] alert -> тост; reload с задержкой, чтобы тост успели прочитать
 const saveSettings = async () => {
   await configStore.saveConfig()
+  // [PAYROLL] Guard по isInitialized: до init() движка в памяти дефолтный
+  // конфиг — записать его значило бы затереть пользовательские тарифы
+  if (payrollReady.value) await savePayrollConfig()
   toast.success('Настройки сохранены — перезагрузка...')
   setTimeout(() => window.location.reload(), 900)
 }
