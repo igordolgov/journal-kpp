@@ -231,7 +231,10 @@ describe('очерёдность направлений у прохода', () =
     run(scene, 6)
     expect(scene.gate.settings.isOpen).toBe(false)
     expect(['moving_away', 'done']).toContain(enter.state)
-    expect(exit.state).toBe('waiting_before')
+    // [БАГ-РЕПОРТ-6-УСТУПАНИЕ-МАШИН] выезжающая могла отъехать, пропуская
+    // въезжающую, и теперь возвращается на остановку (to_gate) — либо уже
+    // вернулась (waiting_before)
+    expect(['waiting_before', 'to_gate']).toContain(exit.state)
 
     // охранник открывает ворота — выезжающая проходит
     scene.gate.settings.isOpen = true

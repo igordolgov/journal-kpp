@@ -79,6 +79,28 @@ export function useSimulatorPhysics(
   const PERSON_GATE_ZONE = 130   // px от центра калитки
   const CAR_GATE_ZONE = 240      // px от центра автомобильных ворот
 
+  // [БАГ-РЕПОРТ-6-УСТУПАНИЕ-МАШИН] машины уступают проезд друг другу «как
+  // люди»: стоящая у прохода машина (и машина на самом подходе к остановке)
+  // ОТЪЕЗЖАЕТ ПО СВОЕЙ ОСИ ПОДХОДА, освобождая коридор проезда: въезжающая —
+  // назад по дороге от ворот, выезжающая — назад вглубь базы. Человек при
+  // уступании шагает вбок (PERSON_SEP_*), машине «шагнуть» некуда — она
+  // отступает по своей оси, а когда коридор свободен — возвращается на
+  // остановку (state to_gate, ретаргет приводит на место).
+  // Раньше (до №6) припаркованная встречная машина стояла НА пути проезда:
+  // проезжающая тормозила перед ней, а сторож через 10с телепортировал её на
+  // цель — «машина мгновенно оказывается в месте ожидания закрытия ворот».
+  const CAR_YIELD_SPEED = 55     // px/с: темп отъезда (задний ход)
+  const CAR_YIELD_MAX = 150      // px: предел отъезда от своей остановки
+  // «опасная зона» остановки: отъезжаем, пока не отойдем на столько — корпус
+  // машины 80 + буфер leader-follow 15 + запас: иначе проезжающая встаёт в
+  // упор к отъехавшей и StallWatchdog/cap снова приносят телепорты
+  const CAR_YIELD_NEAR_STOP = 100
+  const CAR_YIELD_REAPPROACH = 4 // px: отъезд, после которого нужен возврат
+  // встречная стоит ПРЯМО НА моей остановке (посадке прохода) — отъезжаю:
+  // радиус меньше CAR_EXIT_PULL_PAST (40), чтобы ожидающая выше дороги
+  // машина не считалась «стоящей на моей остановке»
+  const CAR_YIELD_ON_MY_SPOT = 35
+
   // [ФИКС-УСТУПИ-ДОРОГУ] параметры мягкого расхождения пешеходов: ближе
   // PERSON_SEP_RADIUS движущиеся пешеходы плавно смещаются друг от друга
   // (встречные — каждый в свою сторону), вместо прохода «сквозь» друг друга
@@ -111,6 +133,9 @@ export function useSimulatorPhysics(
   // Очередь за своим же потоком (mateAhead) телепортации не получает.
   const stallTrack = new Map<string, { x: number; y: number; t: number }>()
   const STALL_LIMIT = simOpts.stallEscalateTime ?? 10
+  // [БАГ-РЕПОРТ-6-УСТУПАНИЕ-МАШИН] текущий отъезд машины от своей остановки
+  // (px) пока она уступает проезд; чистится при деспавне и возврате
+  const carBackoffByAgentId = new Map<string, number>()
   
   // ✅ автоматическая очистка при размонтировании
   onScopeDispose(() => {
@@ -125,6 +150,104 @@ export function useSimulatorPhysics(
       a.element.x + a.element.width / 2 - (gate.x + gate.width / 2),
       a.element.y + a.element.height / 2 - (gate.y + gate.height / 2),
     )
+  }
+
+  // [БАГ-РЕПОРТ-6-АНТИ-СКАЧОК] свободна ли зона текущей цели: телепорт
+  // сторожа на занятую кем-то цель выглядел как «агент мгновенно прыгнул на
+  // другое место» (и вообще на другого агента). Занято — ждём дальше.
+  const targetAreaClear = (agent: AiAgent): boolean => {
+    const t = agent.target
+    if (!Number.isFinite(t?.x) || !Number.isFinite(t?.y)) return false
+    const tcx = t.x + (t.width || 0) / 2
+    const tcy = t.y + (t.height || 0) / 2
+    for (const o of aiAgents.value) {
+      if (o.id === agent.id || o.state === 'done') continue
+      const ocx = o.element.x + o.element.width / 2
+      const ocy = o.element.y + o.element.height / 2
+      if (Math.hypot(ocx - tcx, ocy - tcy) < 26) return false
+    }
+    return true
+  }
+
+  // [БАГ-РЕПОРТ-6-УСТУПАНИЕ-МАШИН] должен ли я (машина) уступить проезд.
+  // 0 — нет; 1 — стою на месте (не приближаюсь к проходу);
+  // 2 — отъезжаю ПО СВОЕЙ ОСИ прямо сейчас (я у остановки/на пути).
+  // Триггеры:
+  //  • встречная в crossing — её путь это мой коридор;
+  //  • встречная стоит в waiting_after ПРЯМО НА моей остановке (посадка
+  //    въезда = остановка выезда) — освобождаю место;
+  //  • встречная уезжает (moving_away) сквозь мой вертикальный коридор вниз —
+  //    выезжающая машина отступает, чтобы не встать под уезд въезжающей.
+  const carYieldLevel = (agent: AiAgent, gate: SceneElement | undefined, includeWaitingAfter: boolean): 0 | 1 | 2 => {
+    if (!gate) return 0
+    const el = agent.element
+    const gcx = gate.x + gate.width / 2
+    const myCy = el.y + el.height / 2
+    const tx = agent.target.x + (agent.target.width || 0) / 2
+    const ty = agent.target.y + (agent.target.height || 0) / 2
+    const nearStop = Math.hypot(el.x + el.width / 2 - tx, el.y + el.height / 2 - ty) < CAR_YIELD_NEAR_STOP
+    for (const o of aiAgents.value) {
+      if (o.id === agent.id || o.type !== 'car' || o.direction === agent.direction || o.state === 'done') continue
+      if (o.state === 'crossing') return nearStop ? 2 : 1
+      if (includeWaitingAfter && o.state === 'waiting_after') {
+        const ocx = o.element.x + o.element.width / 2
+        const ocy = o.element.y + o.element.height / 2
+        if (Math.hypot(ocx - tx, ocy - ty) < CAR_YIELD_ON_MY_SPOT) return nearStop ? 2 : 1
+      }
+      if (o.state === 'moving_away' && agent.direction === 'exit' && o.direction === 'enter') {
+        const ocx = o.element.x + o.element.width / 2
+        const ocy = o.element.y + o.element.height / 2
+        const oTargetY = o.afterTarget?.y
+        if (Number.isFinite(oTargetY) && Math.abs(ocx - gcx) < 70 && ocy < myCy && oTargetY > myCy) return 2
+      }
+    }
+    return 0
+  }
+
+  // [БАГ-РЕПОРТ-6-УСТУПАНИЕ-МАШИН] отъезжает ли машина-лидер ВДОЛЬ нашего
+  // курса: её ось отъезда (выезжающая — вниз +y, въезжающая — назад по
+  // дороге от ворот) сонаправлена нашему направлению движения.
+  const retreatsAlongCourse = (o: AiAgent, dirX: number, dirY: number): boolean => {
+    if (!carBackoffByAgentId.has(o.id)) return false
+    const isExitO = o.direction === 'exit'
+    const ax = isExitO ? 0 : (((o.element.settings as any)?._facingLeft !== false) ? 1 : -1)
+    const ay = isExitO ? 1 : 0
+    return ax * dirX + ay * dirY > 0.5
+  }
+
+  // [БАГ-РЕПОРТ-6-УСТУПАНИЕ-МАШИН] свободен ли путь ВОЗВРАТА на мою
+  // остановку: своя колонна (тот же direction) не помеха, чужие машины в
+  // полосе между мной и воротами и чужой crossing — жду на отъезде.
+  const carCorridorFree = (agent: AiAgent, gate: SceneElement | undefined): boolean => {
+    if (!gate) return false
+    const el = agent.element
+    const gcx = gate.x + gate.width / 2
+    const gBottom = gate.y + gate.height
+    const myCx = el.x + el.width / 2
+    const myCy = el.y + el.height / 2
+    for (const o of aiAgents.value) {
+      if (o.id === agent.id || o.type !== 'car' || o.state === 'done') continue
+      if (o.state === 'crossing') return false
+      if (o.direction === agent.direction) continue
+      const ocx = o.element.x + o.element.width / 2
+      const ocy = o.element.y + o.element.height / 2
+      if (agent.direction === 'exit') {
+        // вертикальный коридор между линией ворот и мной
+        if (Math.abs(ocx - gcx) < 70 && ocy > gBottom - 10 && ocy < myCy - 24) return false
+      } else {
+        // полоса дороги между мной и воротами
+        const roadY = gBottom - el.height / 2
+        if (Math.abs(ocy - roadY) < 45) {
+          const fl = (el.settings as any)?._facingLeft !== false
+          const towardGate = fl ? -1 : 1
+          const inFront = towardGate < 0
+            ? (ocx < myCx + 10 && ocx > gcx - 40)
+            : (ocx > myCx - 10 && ocx < gcx + 40)
+          if (inFront) return false
+        }
+      }
+    }
+    return true
   }
 
   const updateAiMovement = (dt: number, cfg: { carGateId: string; personGateId: string }) => {
@@ -148,6 +271,7 @@ export function useSimulatorPhysics(
         }
         waitStartByAgentId.delete(agent.id) // [PAYROLL] без утечек часов
         stallTrack.delete(agent.id) // [WATCHDOG] без утечек трекинга
+        carBackoffByAgentId.delete(agent.id) // [БАГ-РЕПОРТ-6] без утечек отъезда
         waitOpenByAgentId.delete(agent.id) // [ФИКС-ЗАСТРЯНИЕ] без утечек таймеров стояния
         dirBlockByAgentId.delete(agent.id) // [ОЧЕРЕДЬ-НАПРАВЛЕНИЙ] без утечек
         waitAfterByAgentId.delete(agent.id) // [ФИКС-висяки-2] без утечек
@@ -269,6 +393,10 @@ export function useSimulatorPhysics(
 
     for (const agent of sorted) {
       const el = agent.element
+      const gateId = agent.type === 'car' ? cfg.carGateId : cfg.personGateId
+      const gate = simElements.value.find(g => String(g.id) === gateId)
+      const isWicket = gate?.settings?.gateType === 'wicket' || (gate?.width && gate.width <= 60)
+      const closeDelay = isWicket ? wicketCloseDelay : gateCloseDelay
       // [ФИКС-ДЁРГАНИЕ] флаг is-paused с гистерезисом для анимации ходьбы.
       // Раньше шаблон вычислял его как velocity < 0.1: контроллер «стой/иди»
       // в очереди у прохода (0 <-> 0.8*leaderSpeed) гоняет скорость через
@@ -323,13 +451,22 @@ export function useSimulatorPhysics(
               return f > 0 && f < 80 && Math.abs(ox * uy - oy * ux) < 30
             })
             if (!mateAhead) {
-              console.warn('[watchdog] агент стоял', STALL_LIMIT, 'с — телепорт на цель:', agent.state, agent.id)
-              // [WATCHDOG] дистанция в физике считается центр-к-центру,
-              // поэтому выравниваем ЦЕНТР элемента на центр цели,
-              // иначе остаточная дистанция (h/2) не даст прибытию сработать
-              el.x = agent.target.x - el.width / 2
-              el.y = agent.target.y - el.height / 2
-              el.velocity = 0
+              // [БАГ-РЕПОРТ-6-АНТИ-СКАЧОК] телепорт ТОЛЬКО на свободную цель
+              // и только если агент не уступает проезд: скачок на занятую
+              // кем-то цель выглядел как «мгновенно оказался в другом месте»
+              // (машина прыгала на место ожидания, занятое встречной),
+              // а стоящий в ожидании проезда агент — это штатная вежливость.
+              const yieldingNow = agent.type === 'car' &&
+                carYieldLevel(agent, gate, false) > 0
+              if (!yieldingNow && targetAreaClear(agent)) {
+                console.warn('[watchdog] агент стоял', STALL_LIMIT, 'с — телепорт на цель:', agent.state, agent.id)
+                // [WATCHDOG] дистанция в физике считается центр-к-центру,
+                // поэтому выравниваем ЦЕНТР элемента на центр цели,
+                // иначе остаточная дистанция (h/2) не даст прибытию сработать
+                el.x = agent.target.x - el.width / 2
+                el.y = agent.target.y - el.height / 2
+                el.velocity = 0
+              }
             }
             tr.t = 0
           }
@@ -352,10 +489,54 @@ export function useSimulatorPhysics(
       } else {
         stallTrack.delete(agent.id)
       }
-      const gateId = agent.type === 'car' ? cfg.carGateId : cfg.personGateId
-      const gate = simElements.value.find(g => String(g.id) === gateId)
-      const isWicket = gate?.settings?.gateType === 'wicket' || (gate?.width && gate.width <= 60)
-      const closeDelay = isWicket ? wicketCloseDelay : gateCloseDelay
+
+      // [БАГ-РЕПОРТ-6-УСТУПАНИЕ-МАШИН] отъезд/возврат машины у прохода.
+      // Действует на подходе (to_gate) и в ожидании (waiting_before):
+      //  • уровень 2 и я у своей остановки — отъезжаю по своей оси
+      //    (въезжающая — назад по дороге, выезжающая — назад вглубь базы);
+      //  • триггер отпустил и я отъезжал — возвращаюсь на остановку,
+      //    когда свободен коридор возврата (carCorridorFree).
+      if (agent.type === 'car' && gate && (agent.state === 'to_gate' || agent.state === 'waiting_before')) {
+        const level = carYieldLevel(agent, gate, true)
+        const backoff = carBackoffByAgentId.get(agent.id) ?? 0
+        const tx = agent.target.x + (agent.target.width || 0) / 2
+        const ty = agent.target.y + (agent.target.height || 0) / 2
+        const nearStop = Math.hypot(el.x + el.width / 2 - tx, el.y + el.height / 2 - ty) < CAR_YIELD_NEAR_STOP
+        // level 2 = «отъезжай сейчас»: и у своей остановки, и когда встречная
+        // уезжает сквозь мой коридор (case moving_away) — с любого места
+        if (level > 0 && (nearStop || level === 2) && backoff < CAR_YIELD_MAX) {
+          if (backoff === 0) waitStartByAgentId.delete(agent.id) // выходим из очереди FCFS, вернёмся в её конец
+          const isExit = agent.direction === 'exit'
+          const bx = isExit ? 0 : (((el.settings as any)?._facingLeft !== false) ? 1 : -1)
+          const by = isExit ? 1 : 0
+          let step = CAR_YIELD_SPEED * dt
+          step = Math.min(step, CAR_YIELD_MAX - backoff)
+          if (isExit) step = Math.min(step, Math.max(0, sceneSize.value.height - 50 - (el.y + el.height)))
+          if (step > 0) {
+            el.x += bx * step
+            el.y += by * step
+            el.velocity = CAR_YIELD_SPEED
+            carBackoffByAgentId.set(agent.id, backoff + step)
+          } else {
+            el.velocity = 0
+          }
+          continue
+        }
+        if (backoff > CAR_YIELD_REAPPROACH) {
+          if (level === 0 && carCorridorFree(agent, gate)) {
+            // коридор свободен — возвращаемся на остановку штатным подходом
+            carBackoffByAgentId.delete(agent.id)
+            agent.state = 'to_gate'
+            const pts = trafficPointsFor(gate as any, { width: el.width, height: el.height }, agent.direction, sceneSize.value)
+            agent.target = { x: pts.stop.x, y: pts.stop.y, width: 0, height: 0 }
+            continue
+          }
+          // ждём освобождения коридора, стоя на отъезде
+          el.velocity = 0
+          continue
+        }
+        if (backoff > 0) carBackoffByAgentId.delete(agent.id)
+      }
 
       // [БАГ-РЕПОРТ-5-ЗОНЫ] я в зоне прохода (вход/выход)? Сам фазa crossing
       // (проход сквозь ворота/калитку) — всегда зона уступания, где бы ни
@@ -660,7 +841,7 @@ export function useSimulatorPhysics(
                 // глушило калитку, даже если у неё ещё ждут люди (в таймерной
                 // ветке проверка hasOtherWaiting есть, здесь — не было)
                 const hasOtherWaiting = aiAgents.value.some(a =>
-                  a.state === 'waiting_before' && !dirBlockByAgentId.has(a.id) &&
+                  a.state === 'waiting_before' && !dirBlockByAgentId.has(a.id) && !carBackoffByAgentId.has(a.id) &&
                   ((a.type === 'person' && String(gate.id) === cfg.personGateId) ||
                    (a.type === 'car' && String(gate.id) === cfg.carGateId))
                 )
@@ -672,7 +853,7 @@ export function useSimulatorPhysics(
                   const currentGate = simElements.value.find(g => String(g.id) === gateId)
                   if (currentGate && currentGate.settings?.isOpen && !currentGate.settings?.isAnimating && !currentGate.settings?.isStopping) {
                     const hasOtherWaiting = aiAgents.value.some(a =>
-                      a.state === 'waiting_before' && !dirBlockByAgentId.has(a.id) &&
+                      a.state === 'waiting_before' && !dirBlockByAgentId.has(a.id) && !carBackoffByAgentId.has(a.id) &&
                       ((a.type === 'person' && String(currentGate.id) === cfg.personGateId) ||
                       (a.type === 'car' && String(currentGate.id) === cfg.carGateId))
                     )
@@ -692,7 +873,7 @@ export function useSimulatorPhysics(
             if (gate && gate.settings?.isOpen && !gate.settings?.isAnimating && closeDelay >= 0 && !gateCloseTimers.has(gateId) && !gate.settings?.isStopping) {
               if (closeDelay === 0) {
                 const hasActiveAgents = aiAgents.value.some(a =>
-                  (a.state === 'crossing' || (a.state === 'waiting_before' && !dirBlockByAgentId.has(a.id))) &&
+                  (a.state === 'crossing' || (a.state === 'waiting_before' && !dirBlockByAgentId.has(a.id) && !carBackoffByAgentId.has(a.id))) &&
                   ((a.type === 'car' && String(gate.id) === cfg.carGateId) ||
                    (a.type === 'person' && String(gate.id) === cfg.personGateId))
                 )
@@ -703,7 +884,7 @@ export function useSimulatorPhysics(
                 const currentGate = simElements.value.find(g => String(g.id) === gateId)
                 if (currentGate && currentGate.settings?.isOpen && !currentGate.settings?.isAnimating && !currentGate.settings?.isStopping) {
                   const hasActiveAgents = aiAgents.value.some(a =>
-                    (a.state === 'crossing' || (a.state === 'waiting_before' && !dirBlockByAgentId.has(a.id))) &&
+                    (a.state === 'crossing' || (a.state === 'waiting_before' && !dirBlockByAgentId.has(a.id) && !carBackoffByAgentId.has(a.id))) &&
                     ((a.type === 'car' && String(currentGate.id) === cfg.carGateId) ||
                      (a.type === 'person' && String(currentGate.id) === cfg.personGateId))
                   )
@@ -724,6 +905,9 @@ export function useSimulatorPhysics(
 
       let distanceToLeader = Infinity
       let leaderSpeed = Infinity
+      // [БАГ-РЕПОРТ-6] лидер отъезжает от нас ВДОЛЬ нашего курса (уступает
+      // задним ходом, освобождая проход) — тогда догоняем плавно, без «стой-поехаль»
+      let leaderRetreatsAlongCourse = false
       const myLen = Math.max(el.width, el.height)
       const myWid = Math.min(el.width, el.height)
       // [БАГ-РЕПОРТ-4-ЛОБОВЫЕ] уступи встречной to_gate-машине: приоритет у той,
@@ -799,10 +983,12 @@ export function useSimulatorPhysics(
           if (distanceToLeader > 0) {
             distanceToLeader = 0
             leaderSpeed = other.element.velocity || 0
+            leaderRetreatsAlongCourse = retreatsAlongCourse(other, dirX, dirY)
           }
         } else if (gap < distanceToLeader) {
           distanceToLeader = gap
           leaderSpeed = other.element.velocity || 0
+          leaderRetreatsAlongCourse = retreatsAlongCourse(other, dirX, dirY)
         }
       }
 
@@ -810,7 +996,14 @@ export function useSimulatorPhysics(
       const safeDistance = Math.max(MIN_BUFFER, (el.velocity || 0) * REACTION_TIME)
       if (distanceToLeader < safeDistance) {
         targetSpeed = Math.min(targetSpeed, leaderSpeed * 0.8)
-        if (distanceToLeader < safeDistance * 0.5) targetSpeed = 0
+        // [БАГ-РЕПОРТ-6-УСТУПАНИЕ-МАШИН] жёсткий стоп — только за медленным/
+        // стоящим лидером. Исключение: лидер ОТЪЕЗЖАЕТ от нас ВДОЛЬ НАШЕГО
+        // КУРСА (уступающий отъезжает задним ходом, освобождая нам проход) —
+        // плавно едем за ним без дёргания. Лидер, уходящий ВБОК от курса
+        // (мы поднимаемся сквозь ворота, он отъезжает по дороге), по-прежнему
+        // останавливает нас жёстко — проедем, когда он расчистит коридор.
+        const softFollow = leaderRetreatsAlongCourse && leaderSpeed > (el.velocity || 0)
+        if (distanceToLeader < safeDistance * 0.5 && !softFollow) targetSpeed = 0
       }
       // [ФИКС-УСТУПИ-ДОРОГУ] вблизи любого пешехода ПО КУРСУ (в том числе
       // встречного — leader-follow их не видит) сбавляем шаг: попарное
@@ -872,6 +1065,13 @@ export function useSimulatorPhysics(
       // [БАГ-РЕПОРТ-4-ЛОБОВЫЕ] уступаю встречной to_gate-машине —
       // останавливаюсь заранее, не доезжая до зоны встречи
       if (yieldToOncoming) targetSpeed = 0
+      // [БАГ-РЕПОРТ-6-УСТУПАНИЕ-МАШИН] машина на подходе (level 1 — не у
+      // остановки, отъезд не нужен) замирает, пока встречная проезжает/уезжает
+      // через её коридор; отойдет триггер — поедет дальше сама.
+      if (agent.type === 'car' && gate && distToGateCenter(agent, gate) < CAR_GATE_ZONE &&
+          carYieldLevel(agent, gate, false) > 0) {
+        targetSpeed = 0
+      }
 
       if ((el.velocity || 0) < targetSpeed) {
         el.velocity = Math.min(targetSpeed, (el.velocity || 0) + ACCEL * dt)
