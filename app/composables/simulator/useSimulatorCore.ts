@@ -172,11 +172,13 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
     }
   }
 
-  // [СХЕМА-ТРАЕКТОРИЙ] машина рисуется в ПРОФИЛЬ (нос вправо). Поток теперь
-  // вертикальный (сверху вниз / снизу вверх), поэтому спрайт разворачивается
-  // по el.rotation (рад -> град). При курсе «влево» (90..270°) вместо
-  // переворота вверх ногами (rotate 180°) используем зеркало scaleX(-1).
-  // Люди никогда не вращаются — только по флагу enableVisualRotation.
+  // [СХЕМА-ТРАЕКТОРИЙ][ФИКС-КАПОТ] машина рисуется в ПРОФИЛЬ (нос вправо) и
+  // НЕ вращается по вертикальному курсу — при вертикальном проходе через
+  // ворота она стояла «на капоте». Ориентация — по горизонтальной составляющей
+  // курса (флаг _facingLeft ставит физика): едет влево — зеркало scaleX(-1),
+  // вправо/стоят — нос вправо. Вертикальные участки (проход, убыль) сохраняют
+  // последнюю горизонтальную ориентацию, как в прежней схеме.
+  // Люди никогда не вращаются — только по флагу enableRotation.
   const getElementStyle = (el: SceneElement, enableRotation: boolean) => {
     const base = {
       position: 'absolute' as const,
@@ -187,14 +189,8 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
       zIndex: el.zIndex || 1,
     }
     if (el.category === 'car') {
-      const deg = ((el.rotation || 0) * 180 / Math.PI) % 360
-      const norm = (deg + 360) % 360 // 0..360
-      if (norm > 90 && norm < 270) {
-        // едет влево: зеркало + угол в диапазоне -90..90
-        return { ...base, transform: `scaleX(-1) rotate(${norm - 180}deg)` }
-      }
-      const signed = norm > 180 ? norm - 360 : norm // -180..180 -> -90..90 после ветки выше
-      return { ...base, transform: `rotate(${signed}deg)` }
+      const facingLeft = (el.settings as any)?._facingLeft ?? el.direction === 'enter'
+      return { ...base, transform: facingLeft ? 'scaleX(-1)' : 'none' }
     }
     return {
       ...base,

@@ -171,10 +171,10 @@ describe('доводка потока пешеходов', () => {
     expect(agent.state).toBe('moving_away')
     const el = agent.element
     // [СХЕМА-ТРАЕКТОРИЙ] точная посадка в выведенную точку выхода:
-    // калитка (760,100,80,120) -> crossExit: ноги на 26px выше её верха
-    // (feet = 100 - 26 = 74 -> y = 74 - 55 + 2 = 21), X — центр калитки (800)
+    // калитка (760,100,80,120) -> crossExit = ЛИНИЯ ДОРОГИ: ноги на нижней
+    // линии калитки (feet = 220 -> y = 220 - 55 + 2 = 167), X — центр (800)
     expect(Math.abs(el.x + el.width / 2 - 800)).toBeLessThan(0.02)
-    expect(Math.abs(el.y + el.height / 2 - (21 + PERSON_HEIGHT / 2))).toBeLessThan(0.02)
+    expect(Math.abs(el.y + el.height / 2 - (167 + PERSON_HEIGHT / 2))).toBeLessThan(0.02)
   })
 
   it('встречные на одной линии расходятся в стороны, а не проходят сквозь', () => {
@@ -215,7 +215,7 @@ describe('доводка потока пешеходов', () => {
     expect(minDist).toBeGreaterThan(20)
   })
 
-  it('приходящий спавнится за верхним краем и подходит ногами к верхней линии калитки', async () => {
+  it('приходящий спавнится за правым краем на линии дороги и подходит ногами ровно к нижней линии калитки', async () => {
     // для направления enter нужен человек «В городе» (isOutsideLocation)
     const scene = buildScene([makePerson(1), { id: 2, fio: 'Городской 2', gender: 'male', location: 'В городе' }])
     const agent = await spawnEnterPerson(scene)
@@ -223,15 +223,13 @@ describe('доводка потока пешеходов', () => {
     expect(agent.direction).toBe('enter')
 
     const wicket = scene.simElements.value[0]
-    const gateTop = wicket.y // 100
-    const gateBottom = wicket.y + wicket.height // 220
+    const gateBottom = wicket.y + wicket.height // 220 — линия дороги
     const el = agent.element
-    // [СХЕМА-ТРАЕКТОРИЙ] спавн — за ВЕРХНИМ краем сцены (выходит сверху вниз)
-    expect(el.y + PERSON_HEIGHT).toBeLessThanOrEqual(0)
-    // стоп-точка (ЦЕНТР агента): визуальные ноги чуть выше верхней линии
-    // калитки (centerY + h/2 - pad2 = gateTop - 10), и не ниже низа калитки
-    expect(agent.target.y + PERSON_HEIGHT / 2 - 2).toBeCloseTo(gateTop - 10, 0)
-    expect(agent.target.y + PERSON_HEIGHT / 2).toBeLessThanOrEqual(gateBottom + 0.01)
+    // [КАНОН «КАК РАНЬШЕ»] спавн — за ПРАВЫМ краем сцены (приходит сбоку)
+    expect(el.x).toBeGreaterThanOrEqual(1280)
+    // стоп-точка (ЦЕНТР агента): визуальные ноги РОВНО на нижней линии
+    // калитки (centerY + h/2 - pad2 = gateBottom) — не выше и не ниже
+    expect(agent.target.y + PERSON_HEIGHT / 2 - 2).toBeCloseTo(gateBottom, 0)
     // X выровнен по центру калитки (760 + 80/2 = 800)
     expect(agent.target.x).toBeCloseTo(800, 5)
   })

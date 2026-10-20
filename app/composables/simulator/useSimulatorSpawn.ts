@@ -7,13 +7,12 @@ import { type Ref, computed, nextTick } from 'vue'
 import { useAudioEngine } from '~/composables/useAudioEngine'
 import { useSimulatorIntegration } from '~/composables/useSimulatorIntegration'
 import {
-  EXIT_HORIZONTAL_DISTANCE,
   EXIT_VERTICAL_DISTANCE,
   PERSON_STOP_OFFSET,
   CAR_STOP_OFFSET,
 } from '~/utils/simulatorConstants'
 // [СХЕМА-ТРАЕКТОРИЙ] единый вывод точек спавна/остановки/прохода/ухода из геометрии ворот
-import { trafficPointsFor, type TrafficPoints } from '~/utils/simulatorTraffic'
+import { trafficPointsFor, FOOT_PAD_PERSON, type TrafficPoints } from '~/utils/simulatorTraffic'
 import { getCarSvg, generateRealPersonSvg } from '~/utils/simulatorSvg'
 import type { SceneElement, Direction, TravelMode, TrafficConfig, AiAgent, PersonInfo } from '~/types/simulator'
 // [PAYROLL] реестр проходов (ground truth) и шина событий оплаты
@@ -89,8 +88,10 @@ export function useSimulatorSpawn(
   const shouldSpawn = (timer: number, nextTime: number): boolean => timer >= nextTime
   const getNextInterval = (min: number, max: number): number => min + Math.random() * (max - min)
 
-  // [Фолбэк] ворот нет на сцене (битый gateId) — старая схема по ручным
-  // координатам. Штатные сцены сюда не попадают: точки выводятся из ворот.
+  // [Фолбэк] ворот нет на сцене (битый gateId) — каноническая схема по ручным
+  // координатам: вход сбоку по дороге -> проход вниз -> уход за нижний край;
+  // выход снизу -> проход вверх -> уход вбок за правый край. Штатные сцены
+  // сюда не попадают: точки выводятся из ворот.
   const fallbackPoints = (
     direction: Direction,
     kind: 'Person' | 'Car',
@@ -102,8 +103,8 @@ export function useSimulatorSpawn(
     const scene = sceneSize.value
     if (direction === 'enter') {
       return {
-        vertical: true,
-        spawn: { x: kind === 'Person' ? scene.width + 50 : -size.width - 50, y: fixedY },
+        vertical: false,
+        spawn: { x: scene.width + 60 + size.width / 2, y: fixedY },
         stop: { x: fixedX, y: fixedY },
         cross: { x: fixedX, y: fixedY + stopOffset },
         after: { x: fixedX, y: scene.height + EXIT_VERTICAL_DISTANCE },
@@ -115,7 +116,7 @@ export function useSimulatorSpawn(
       stop: { x: fixedX, y: fixedY + stopOffset },
       cross: { x: fixedX, y: fixedY },
       after: {
-        x: kind === 'Person' ? scene.width + EXIT_HORIZONTAL_DISTANCE : -EXIT_HORIZONTAL_DISTANCE,
+        x: scene.width + 60 + size.width / 2,
         y: fixedY,
       },
     }
@@ -234,11 +235,12 @@ export function useSimulatorSpawn(
       : fallbackPoints(direction, 'Person', { width, height }, stopOffset, fixedX, fixedY)
 
     // [ФИКС-НОГИ-НИЖЕ-КАЛИТКИ] страховочный клэмп для приходящих (ЦЕНТР):
-    // низ спрайта (центр + h/2) не ниже нижней линии калитки
+    // визуальные ноги (центр + h/2 - FOOT_PAD_PERSON) не ниже нижней линии
+    // калитки — подошва стоит НА линии, не утопая в заборе
     const gateBottomY = gate ? gate.y + gate.height : Infinity
     const clampApproachY = (y: number): number =>
       direction === 'enter' && Number.isFinite(gateBottomY)
-        ? Math.min(y, gateBottomY - height / 2)
+        ? Math.min(y, gateBottomY - height / 2 + FOOT_PAD_PERSON)
         : y
 
     const groupId = `group_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`
@@ -260,14 +262,17 @@ export function useSimulatorSpawn(
       let vOffset = 0
 
       if (!isLeader) {
-        // [СХЕМА-ТРАЕКТОРИЙ] группа строится КОЛОННОЙ позади лидера:
-        // вертикальный поток — по Y (приходящие над лидером, уходящие под ним),
-        // горизонтальный — по X. Боковой шаг ±10 разбивает прямую линию.
+        // [СХЕМА-ТРАЕКТОРИЙ] группа строится КОЛОННОЙ ПОЗАДИ ЛИДЕРА на его
+        // пути: вход приходит СБОКУ по дороге (члены правее лидера, по X),
+        // выход подходит СНИЗУ (члены ниже лидера, по Y). Боковой шаг ±10
+        // разбивает прямую линию. Смещение применяется к спавну и стопу;
+        // cross (проход по одному через калитку) и after (общий уход по
+        // дороге/за край) остаются общими точками группы.
         if (pts.vertical) {
-          vOffset = direction === 'enter' ? -(idx * VERTICAL_STEP) : idx * VERTICAL_STEP
+          vOffset = idx * VERTICAL_STEP
           hOffset = (idx % 2 === 0 ? -10 : 10)
         } else {
-          hOffset = direction === 'enter' ? -(idx * HORIZONTAL_STEP) : idx * HORIZONTAL_STEP
+          hOffset = idx * HORIZONTAL_STEP
           vOffset = (idx % 2 === 0 ? -10 : 10)
         }
       }
@@ -280,13 +285,14 @@ export function useSimulatorSpawn(
       if (direction === 'enter') zIndex = 200 - idx
       else zIndex = 400 + idx
 
-      // точки — ЦЕНТРЫ агентов; элемент позиционируется левым-верхним углом
+      // точки — ЦЕНТРЫ агентов; элемент позиционируется левым-верхним углом.
+      // Смещения колонны — только на спавн и стоп; cross/after общие.
       const posX = pts.spawn.x + hOffset - width / 2
       const posY = clampApproachY(pts.spawn.y + vOffset) - height / 2
       const stopCenterX = pts.stop.x + hOffset
       const stopCenterY = clampApproachY(pts.stop.y + vOffset)
-      const afterX = pts.after.x + hOffset
-      const afterY = pts.after.y + vOffset
+      const afterX = pts.after.x
+      const afterY = pts.after.y
 
       try {
         const { element, agent } = createPersonAgent(
@@ -355,7 +361,7 @@ export function useSimulatorSpawn(
     // [ФИКС-НОГИ-НИЖЕ-КАЛИТКИ] страховочный клэмп приходящих (ЦЕНТР, см. createGroup)
     const gateBottomY = gate ? gate.y + gate.height : Infinity
     if (direction === 'enter' && Number.isFinite(gateBottomY)) {
-      const maxY = gateBottomY - height / 2
+      const maxY = gateBottomY - height / 2 + FOOT_PAD_PERSON
       pts.spawn.y = Math.min(pts.spawn.y, maxY)
       pts.stop.y = Math.min(pts.stop.y, maxY)
     }
@@ -403,10 +409,12 @@ export function useSimulatorSpawn(
     const fixedX = fixedXCar.value
     const fixedY = fixedYCar.value
 
-    // [СХЕМА-ТРАЕКТОРИЙ] точки машины — из геометрии автомобильных ворот:
-    // вход спавнится за верхним краем, останавливается перед воротами,
-    // проезжает вниз и уходит за нижний край; выход — зеркально снизу вверх.
-    // Настроенные оффсеты применяются только с правильной стороны ворот.
+    // [СХЕМА-ТРАЕКТОРИЙ] точки машины — из геометрии автомобильных ворот
+    // (каноническая схема): вход спавнится за ПРАВЫМ краем на линии дороги
+    // (бампер на нижней линии ворот), едет влево, останавливается у ворот,
+    // проезжает вниз и уходит за нижний край; выход — снизу вверх, уезжает
+    // ВБОК по дороге за правый край. Настроенные оффсеты применяются только
+    // с правильной стороны ворот.
     const pts: TrafficPoints = gate
       ? trafficPointsFor(gate as any, { width, height }, direction, sceneSize.value)
       : fallbackPoints(direction, 'Car', { width, height }, stopOffset, fixedX, fixedY)

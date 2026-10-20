@@ -325,6 +325,39 @@ export function useSimulatorPhysics(
 
       if (agent.state === 'waiting_before') {
         el.velocity = 0
+        // [ФИКС-УСТУПАНИЕ-ОБЕИМИ] ждущий у прохода тоже отходит в сторону,
+        // если мимо проходит человек: раньше в сторону отходил только
+        // ДВИЖУЩИЙСЯ (входящий обходил стоящего выходящего), а ждущий
+        // оставался стеной на пути. Стоящих не сдвигаем — очередь и строй
+        // групп не расползаются; своих по группе исключаем.
+        if (agent.type === 'person') {
+          const mcx = el.x + el.width / 2
+          const mcy = el.y + el.height / 2
+          let wx = 0, wy = 0, wMax = 0
+          for (const other of aiAgents.value) {
+            if (other.id === agent.id || other.type !== 'person' || other.state === 'done') continue
+            if (agent.groupId && other.groupId === agent.groupId) continue
+            if ((other.element.velocity || 0) <= 0.5) continue
+            const ocx = other.element.x + other.element.width / 2
+            const ocy = other.element.y + other.element.height / 2
+            const ax = mcx - ocx
+            const ay = mcy - ocy
+            const d = Math.hypot(ax, ay)
+            if (d < 0.01 || d >= PERSON_SEP_RADIUS) continue
+            const w = (PERSON_SEP_RADIUS - d) / PERSON_SEP_RADIUS
+            wx += (ax / d) * w
+            wy += (ay / d) * w
+            wMax = Math.max(wMax, w)
+          }
+          if (wMax > 0) {
+            const wm = Math.hypot(wx, wy)
+            if (wm > 0.01) {
+              const push = wMax * PERSON_SEP_SPEED * dt
+              el.x += (wx / wm) * push
+              el.y += (wy / wm) * push
+            }
+          }
+        }
         if (!gate) {
           // [ФИКС-висяки-2] ворота исчезли (удалены/битый gateId) — раньше
           // агент стоял вечно. После паузы проходим «сквозь»: цель crossing
@@ -686,9 +719,24 @@ export function useSimulatorPhysics(
         el.velocity = Math.max(targetSpeed, (el.velocity || 0) - DECEL * dt * 2)
       }
 
-      const targetAngle = Math.atan2(dirY, dirX)
-      let angleDiff = normalizeAngle(targetAngle - (el.rotation || 0) + SPRITE_ORIENTATION_OFFSET)
-      el.rotation = (el.rotation || 0) + angleDiff * 0.1
+      // [ФИКС-КАПОТ] машина рисуется в ПРОФИЛЬ (нос вправо) и НЕ вращается
+      // по вертикальному курсу: при вертикальном проходе/убыли она стояла
+      // «на капоте». Курс запоминаем только по горизонтальной составляющей
+      // (дорога вдоль забора): влево — зеркало scaleX(-1), вправо — нос вправо.
+      // Вертикальный участок (проход через ворота, убыль вниз/вверх)
+      // сохраняет последнюю горизонтальную ориентацию — как в прежней схеме.
+      // Люди вращаются плавно по курсу (targetAngle), как раньше.
+      if (agent.type === 'car') {
+        if (Math.abs(dirX) >= Math.abs(dirY)) {
+          const s = el.settings ?? (el.settings = {})
+          s._facingLeft = dirX < 0
+        }
+        el.rotation = 0
+      } else {
+        const targetAngle = Math.atan2(dirY, dirX)
+        let angleDiff = normalizeAngle(targetAngle - (el.rotation || 0) + SPRITE_ORIENTATION_OFFSET)
+        el.rotation = (el.rotation || 0) + angleDiff * 0.1
+      }
 
       if ((el.velocity || 0) > 0.5) {
         // [ФИКС-РЫВОК] шаг не длиннее остатка дистанции: при разгоне

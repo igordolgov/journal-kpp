@@ -3,27 +3,37 @@
 // выводимая ИЗ ПРЯМОУГОЛЬНИКА ВОРОТ, плюс валидация оффсетов, настроенных
 // пользователем в редакторе сцен.
 //
-// [ПОЧЕМУ ЭТО ПОЯВИЛОСЬ] Прежние фолбэки были написаны под старую «горизонтальную»
-// схему (дорога слева-направо у линии забора): входящие спавнились у ПРАВОГО края
-// и шли вдоль забора по линии y ≈ 180-187, выходящие после прохода уходили вбок
-// вдоль ВЕРХА сцены. На вертикальной сцене пользователя (город сверху, база снизу,
-// забор горизонтально) это выглядело так: «приходят слишком высоко», «выходящие
-// появляются сверху», «застревают внизу». Теперь канонический поток — ВЕРТИКАЛЬНЫЙ:
-//   город СВЕРХУ  ->  вход: спавн за верхним краем -> остановка над калиткой ->
-//                    проход ВНИЗ -> уход за нижний край;
-//   база СНИЗУ    ->  выход: спавн за нижним краем -> остановка под калиткой ->
-//                    проход ВВЕРХ -> уход за верхний край.
-// Ось прохода определяется по геометрии самих ворот:
-//   - калитка (дверь): выше, чем шире  -> проход вдоль её ВЫСОТЫ (вертикальный);
-//   - ворота/шлагбаум: шире, чем выше  -> забор горизонтален -> проход тоже
-//     вертикальный (поперёк линии забора, вдоль высоты элемента);
-//   - вертикальный забор (ворота выше, чем шире) -> горизонтальный поток
-//     (город слева, база справа) — обратная совместимость со старыми сценами.
+// [КАНОНИЧЕСКАЯ СХЕМА — «как раньше»] Забор ГОРИЗОНТАЛЬНЫЙ (полоса ворот на
+// одной высоте Y), город СВЕРХУ, база СНИЗУ. Вдоль городской стороны забора
+// идёт дорога: агенты приезжают/приходят СБОКУ (от правого края сцены) по
+// линии дороги, останавливаются у ворот, проходят через них ПОПЕРЁК забора
+// (короткий вертикальный участок) и уходят:
+//   ВХОД:  спавн за ПРАВЫМ краем на линии дороги -> стоп у ворот (ноги/бампер
+//          на нижней линии ворот) -> проход ВНИЗ сквозь ворота -> уход за
+//          нижний край сцены (X = центр ворот).
+//   ВЫХОД: спавн за НИЖНИМ краем (X = центр ворот) -> стоп под воротами ->
+//          проход ВВЕРХ сквозь ворота -> уход ВБОК по дороге за правый край.
+//
+// [ПОЧЕМУ ТАК] Версия dc00af2 выводила из геометрии ворот ОСЬ ПОТОКА и гнала
+// агентов сверху вниз/снизу вверх через ВСЮ сцену: машины ехали «на капоте»
+// (поворот по вертикальному курсу), прибывающие спавнились сверху вместо
+// сбоку, уходящие уезжали вверх вместо вбок, подход к линии ворот шёл выше
+// линии. Пользователь подтвердил: правильная схема — прежняя, «сбоку по
+// дороге». Теперь схема ФИКСИРОВАННАЯ (описана выше), а не выводимая из
+// пропорций ворот.
+//
+// Линия дороги: визуальный низ агента (подошва ног / бампер) на НИЖНЕЙ линии
+// ворот gate.y + gate.height — приходящие стоят НА линии забора, не выше и
+// не ниже (проверено пользователем: «уровень ног не ниже нижней линии»,
+// «не слишком высоко»).
 //
 // Оффсеты из gate.settings (spawn*/stop*/cross*/despawn* + X/Y) ПРИНИМАЮТСЯ
-// только если точка лежит на правильной стороне ворот для своей роли.
-// Устаревшие/случайные точки (например, spawnExit сверху) молча заменяются
-// геометрическими — именно они давали «спавн не с той стороны».
+// только если точка лежит на правильной стороне для своей роли В ЭТОЙ СХЕМЕ:
+// спавн входа — за боковым краем, стоп — у ворот, уход входа — за нижним
+// краем, спавн выхода — за нижним краем, уход выхода — за боковым краем.
+// Устаревшие точки (например, spawnExit сверху) молча заменяются геометрией.
+
+import { PERSON_STOP_OFFSET, CAR_STOP_OFFSET } from './simulatorConstants'
 
 
 export interface TrafficPoint {
@@ -36,7 +46,8 @@ export interface TrafficPoints {
   stop: TrafficPoint    // ЦЕНТР на остановке перед проходом (waiting_before)
   cross: TrafficPoint   // ЦЕНТР в конце прохода (за воротами)
   after: TrafficPoint   // ЦЕНТР точки ухода/деспавна (moving_away)
-  vertical: boolean     // true — поток идёт по вертикали (сверху вниз / снизу вверх)
+  vertical: boolean     // ОСЬ ПОДХОДА: true — колонна по Y (выход снизу),
+                        // false — колонна по X (вход сбоку по дороге)
 }
 
 export interface GateRect {
@@ -53,16 +64,10 @@ export interface GateRect {
 // верх спрайта ставится на F - h + FOOT_PAD_PERSON.
 export const FOOT_PAD_PERSON = 2
 
-// Вертикален ли поток через эти ворота (см. шапку файла)
-export const isVerticalFlow = (gate: GateRect): boolean => {
-  const w = gate.width || 1
-  const h = gate.height || 1
-  const type = gate.gateType ?? (gate.settings as any)?.gateType
-  const isWicket = type === 'wicket' || w <= 60
-  // калитка-дверь: выше, чем шире -> вертикальный проход;
-  // ворота/шлагбаум: шире, чем выше -> горизонтальный забор -> проход вертикальный
-  return isWicket ? h >= w : w >= h
-}
+// Глубина прохода: стоп/проход отстоят от линии дороги на величину офсета
+// остановки (как в прежней схеме: cross = дорога + stopOffset).
+export const crossingOffset = (isPerson: boolean): number =>
+  isPerson ? PERSON_STOP_OFFSET : CAR_STOP_OFFSET
 
 interface RawPoint { x?: number; y?: number }
 
@@ -95,120 +100,85 @@ export interface ValidateCtx {
   scene: { width: number; height: number }
 }
 
-// Валидация точки «по роли»: правильная сторона ворот + внятный X/Y.
-// Точка — ЦЕНТР агента. Вертикальный поток: город сверху, база снизу.
+// Валидация точки «по роли» в канонической схеме. Точка — ЦЕНТР агента.
+// Дорога: визуальный низ агента на нижней линии ворот (город сверху).
 export const isValidPoint = (
   role: 'spawn' | 'stop' | 'cross' | 'after',
   direction: 'enter' | 'exit',
   p: TrafficPoint,
   ctx: ValidateCtx,
 ): boolean => {
-  const { gate, size, vertical } = ctx
+  const { gate, size, scene } = ctx
   if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) return false
+  const isPerson = size.height > size.width
+  const pad = isPerson ? FOOT_PAD_PERSON : 0
   const gateTop = gate.y
   const gateBottom = gate.y + gate.height
-  const gateLeft = gate.x
-  const gateRight = gate.x + gate.width
-  // края спрайта из центра
-  const spriteBottom = p.y + size.height / 2
+  const gateCx = gate.x + gate.width / 2
+  // визуальный низ спрайта (подошва/бампер) из центра
+  const spriteBottom = p.y + size.height / 2 - pad
   const spriteTop = p.y - size.height / 2
-  const spriteRight = p.x + size.width / 2
-  const spriteLeft = p.x - size.width / 2
-  const nearX = Math.abs(p.x - (gate.x + gate.width / 2)) <= Math.max(80, gate.width) + 60
-  const nearY = Math.abs(p.y - (gate.y + gate.height / 2)) <= Math.max(80, gate.height) + 60
-  const crossBandY = spriteBottom >= gateTop - 60 && spriteTop <= gateBottom + 120
-  const crossBandX = spriteRight >= gateLeft - 60 && spriteLeft <= gateRight + 120
+  const nearGateX = Math.abs(p.x - gateCx) <= Math.max(120, gate.width)
+  const offSideX = p.x < -20 || p.x > scene.width + 20      // за боковым краем
+  const offBottom = p.y > scene.height + 20                 // за нижним краем
+  // полоса дороги: визуальный низ агента в ±20px от нижней линии ворот —
+  // отсекает устаревшие точки «вертикальной схемы» (спавн сверху, стоп у верха)
+  const onRoad = Math.abs(spriteBottom - gateBottom) <= 20
 
-  if (vertical) {
-    if (!nearX) return false
-    switch (`${role}:${direction}`) {
-      case 'spawn:enter': return spriteBottom <= gateTop + 6
-      case 'stop:enter':  return spriteBottom <= gateBottom - 6
-      case 'cross:enter': return crossBandY
-      case 'after:enter': return spriteBottom >= gateBottom + 40
-      case 'spawn:exit':  return spriteBottom >= gateBottom + 6
-      case 'stop:exit':   return spriteBottom >= gateBottom + 6
-      case 'cross:exit':  return crossBandY
-      case 'after:exit':  return spriteTop <= gateTop - 6
+  if (direction === 'enter') {
+    switch (role) {
+      case 'spawn': return offSideX && onRoad
+      case 'stop':  return nearGateX && onRoad
+      case 'cross': return nearGateX && spriteBottom >= gateBottom - 10
+      case 'after': return offBottom
       default: return false
     }
   }
-  // горизонтальный поток: город слева, база справа
-  if (!nearY) return false
-  switch (`${role}:${direction}`) {
-    case 'spawn:enter': return spriteRight <= gateLeft + 6
-    case 'stop:enter':  return spriteRight <= gateLeft + 6
-    case 'cross:enter': return crossBandX
-    case 'after:enter': return spriteRight >= gateRight + 40
-    case 'spawn:exit':  return spriteLeft >= gateRight - 6
-    case 'stop:exit':   return spriteLeft >= gateRight - 6
-    case 'cross:exit':  return crossBandX
-    case 'after:exit':  return spriteLeft <= gateLeft - 6
+  switch (role) {
+    case 'spawn': return offBottom
+    case 'stop':  return nearGateX && spriteTop >= gateTop - 20
+    case 'cross': return nearGateX && spriteBottom <= gateBottom + 10
+    case 'after': return offSideX
     default: return false
   }
 }
 
 // Геометрический вывод четырёх точек из прямоугольника ворот.
 // ВСЕ точки — ЦЕНТР агента (физика центрирует элемент на цели, маркер
-// редактора — тоже центровый). vertical: вход сверху-вниз, выход
-// снизу-вверх. horizontal: вход слева-направо, выход справа-налево.
-// Земля человека = линия ног: визуальная подошва на линии F, т.е.
-// центр.y = F - h/2 + pad (подошва на 2px выше низа спрайта).
+// редактора — тоже центровый). Линия дороги F = gate.y + gate.height:
+// визуальный низ агента (подошва/бампер) на F.
+//   enter: спавн за правым краем -> стоп у ворот -> проход вниз на стоп-офсет
+//          -> уход за нижний край; колонна группы по X (подход сбоку).
+//   exit:  спавн за нижним краем -> стоп под воротами (дорога + офсет) ->
+//          проход вверх К линии дороги -> уход вбок за правый край;
+//          колонна группы по Y (подход снизу).
 export const deriveTrafficPoints = (
   gate: GateRect,
   size: { width: number; height: number },
   direction: 'enter' | 'exit',
   scene: { width: number; height: number },
 ): TrafficPoints => {
-  const vertical = isVerticalFlow(gate)
   const isPerson = size.height > size.width   // человек 40x55, машина 80x40
   const footPad = isPerson ? FOOT_PAD_PERSON : 0
+  const off = crossingOffset(isPerson)
   const cx = gate.x + gate.width / 2
-  const cy = gate.y + gate.height / 2
-  const gateTop = gate.y
-  const gateBottom = gate.y + gate.height
-  const gateLeft = gate.x
-  const gateRight = gate.x + gate.width
+  const roadY = gate.y + gate.height - size.height / 2 + footPad  // центр на дороге
 
-  // центр по линии ног F: visualFeet = centerY + h/2 - pad = F
-  const yAtFeet = (feet: number): number => feet - size.height / 2 + footPad
-
-  if (vertical) {
-    if (direction === 'enter') {
-      return {
-        vertical,
-        spawn: { x: cx, y: -(size.height / 2 + 60) },
-        stop: { x: cx, y: yAtFeet(gateTop - 10) },
-        cross: { x: cx, y: yAtFeet(gateBottom + 26) },
-        after: { x: cx, y: scene.height + 80 + size.height / 2 },
-      }
-    }
-    return {
-      vertical,
-      spawn: { x: cx, y: scene.height + 60 + size.height / 2 },
-      stop: { x: cx, y: yAtFeet(gateBottom + 30) },
-      cross: { x: cx, y: yAtFeet(gateTop - 26) },
-      after: { x: cx, y: -(size.height / 2 + 80) },
-    }
-  }
-
-  // горизонтальный поток
-  const yCenter = cy
   if (direction === 'enter') {
     return {
-      vertical,
-      spawn: { x: -(size.width / 2 + 60), y: yCenter },
-      stop: { x: gateLeft - 10 - size.width / 2, y: yCenter },
-      cross: { x: gateRight + 26 + size.width / 2, y: yCenter },
-      after: { x: scene.width + 80 + size.width / 2, y: yCenter },
+      vertical: false,
+      spawn: { x: scene.width + 60 + size.width / 2, y: roadY },
+      stop:  { x: cx, y: roadY },
+      cross: { x: cx, y: roadY + off },
+      after: { x: cx, y: scene.height + 80 + size.height / 2 },
     }
   }
   return {
-    vertical,
-    spawn: { x: scene.width + 60 + size.width / 2, y: yCenter },
-    stop: { x: gateRight + 16 + size.width / 2, y: yCenter },
-    cross: { x: gateLeft - 10 - size.width / 2, y: yCenter },
-    after: { x: -(size.width / 2 + 80), y: yCenter },
+    vertical: true,
+    spawn: { x: cx, y: scene.height + 60 + size.height / 2 },
+    stop:  { x: cx, y: roadY + off },
+    cross: { x: cx, y: roadY },
+    after: { x: scene.width + 60 + size.width / 2, y: roadY },
   }
 }
 

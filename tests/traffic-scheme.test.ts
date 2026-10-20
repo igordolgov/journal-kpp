@@ -1,11 +1,17 @@
 // tests/traffic-scheme.test.ts
-// [СХЕМА-ТРАЕКТОРИЙ] регрессионные тесты единой геометрии траекторий:
-//  1) вертикальный поток: вход сверху-вниз, выход снизу-вверх, точки по воротам;
-//  2) валидация: настроенные оффсеты не с той стороны отбрасываются
-//     (именно они давали «выходящие спавнятся сверху»);
-//  3) горизонтальный поток для вертикального забора (совместимость);
+// [СХЕМА-ТРАЕКТОРИЙ][КАНОН «КАК РАНЬШЕ»] регрессионные тесты единой геометрии
+// траекторий. Забор горизонтальный (город сверху, база снизу), вдоль городской
+// стороны — дорога:
+//  1) вход: спавн за ПРАВЫМ краем на линии дороги -> стоп у ворот (подошва/
+//     бампер на нижней линии ворот) -> проход ВНИЗ -> уход за нижний край;
+//  2) выход: спавн за НИЖНИМ краем -> стоп под воротами -> проход ВВЕРХ к
+//     линии дороги -> уход ВБОК за правый край;
+//  3) валидация: настроенные оффсеты не с той стороны отбрасываются
+//     (именно они давали «спавнятся не с той стороны»);
 //  4) машина покидает waiting_after за ~2с, а не через closeDelay+15с;
-//  5) ретаргет физики приводит цель к той же остановке, что и спавн.
+//  5) ретаргет физики приводит цель к той же остановке, что и спавн;
+//  6) ждущий у прохода человек отходит в сторону, когда мимо проходит
+//     встречный (уступают ОБА направления, а не только входящий).
 // Все точки схемы — ЦЕНТР агента (физика центрирует элемент на цели).
 
 import { describe, it, expect } from 'vitest'
@@ -13,7 +19,7 @@ import { ref } from 'vue'
 import {
   trafficPointsFor,
   deriveTrafficPoints,
-  isVerticalFlow,
+  isValidPoint,
 } from '~/utils/simulatorTraffic'
 import { PERSON_WIDTH, PERSON_HEIGHT } from '~/utils/simulatorConstants'
 import { useSimulatorPhysics } from '~/composables/simulator/useSimulatorPhysics'
@@ -44,150 +50,145 @@ const makeCarGate = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 })
 
-describe('simulatorTraffic: ось потока', () => {
-  it('калитка-дверь (выше, чем шире) — вертикальный поток', () => {
-    expect(isVerticalFlow(makeWicket())).toBe(true)
-  })
-  it('ворота-слайдер (шире, чем выше) — горизонтальный забор, поток вертикальный', () => {
-    expect(isVerticalFlow(makeCarGate())).toBe(true)
-  })
-  it('вертикальный забор (ворота выше, чем шире) — горизонтальный поток', () => {
-    expect(isVerticalFlow(makeCarGate({ width: 120, height: 320 }))).toBe(false)
-  })
-})
+// калитка (760,100,80,120): центр X = 800, нижняя линия (дорога) F = 220
+// человек 40x55, подошва = центр + h/2 - 2 -> центр на дороге = 194.5
+const W_CX = 800
+const W_ROAD = 220 - PERSON_HEIGHT / 2 + 2 // 194.5
+const OFF_PERSON = 78                      // PERSON_STOP_OFFSET
 
-describe('simulatorTraffic: вертикальная схема (центровые точки)', () => {
+describe('simulatorTraffic: каноническая схема — вход', () => {
   const wicket = makeWicket()
   const PH = PERSON.height / 2
 
-  it('вход: спавн за верхним краем, стоп над калиткой, проход под неё, уход вниз', () => {
+  it('вход: спавн за правым краем на линии дороги, стоп у калитки, проход вниз, уход за нижний край', () => {
     const pts = deriveTrafficPoints(wicket, PERSON, 'enter', SCENE)
-    expect(pts.vertical).toBe(true)
-    // спавн полностью за верхним краем (нижняя кромка <= 0)
-    expect(pts.spawn.y + PH).toBeLessThanOrEqual(0)
-    // стоп: визуальные ноги на 10px выше верхней линии (центр + h/2 - pad 2 = 90)
-    expect(pts.stop.y + PH - 2).toBeCloseTo(90, 5)
-    // проход: визуальные ноги на 26px ниже нижней линии (246)
-    expect(pts.cross.y + PH - 2).toBeCloseTo(246, 5)
+    expect(pts.vertical).toBe(false) // колонна группы по X (подход сбоку)
+    // спавн полностью за правым краем
+    expect(pts.spawn.x - PH).toBeGreaterThanOrEqual(SCENE.width)
+    // спавн на линии дороги: подошва на нижней линии калитки (220)
+    expect(pts.spawn.y + PH - 2).toBeCloseTo(220, 5)
+    // стоп: подошва ТОЖЕ на линии (не выше и не ниже), X — центр калитки
+    expect(pts.stop.y + PH - 2).toBeCloseTo(220, 5)
+    expect(pts.stop.x).toBeCloseTo(W_CX, 5)
+    // проход: подошва на стоп-офсет ниже линии дороги
+    expect(pts.cross.y + PH - 2).toBeCloseTo(220 + OFF_PERSON, 5)
     // уход: верхняя кромка за нижним краем сцены
     expect(pts.after.y - PH).toBeGreaterThanOrEqual(SCENE.height)
-    // все по центру калитки
-    for (const p of [pts.spawn, pts.stop, pts.cross, pts.after]) {
-      expect(p.x).toBeCloseTo(800, 5)
-    }
+    expect(pts.after.x).toBeCloseTo(W_CX, 5)
   })
 
-  it('выход: спавн за нижним краем, стоп под калиткой, проход над ней, уход вверх', () => {
+  it('выход: спавн за нижним краем, стоп под калиткой, проход вверх к дороге, уход ВБОК за правый край', () => {
     const pts = deriveTrafficPoints(wicket, PERSON, 'exit', SCENE)
-    expect(pts.vertical).toBe(true)
+    expect(pts.vertical).toBe(true) // колонна группы по Y (подход снизу)
     // спавн за нижним краем (верхняя кромка >= 720)
     expect(pts.spawn.y - PH).toBeGreaterThanOrEqual(SCENE.height)
-    // стоп: визуальные ноги на 30px ниже нижней линии (250)
-    expect(pts.stop.y + PH - 2).toBeCloseTo(250, 5)
-    // проход: визуальные ноги на 26px выше верхней линии (74)
-    expect(pts.cross.y + PH - 2).toBeCloseTo(74, 5)
-    // уход: нижняя кромка выше верхнего края сцены
-    expect(pts.after.y + PH).toBeLessThanOrEqual(0)
+    // стоп: подошва на дороге + стоп-офсет
+    expect(pts.stop.y + PH - 2).toBeCloseTo(220 + OFF_PERSON, 5)
+    // проход: подошва выходит НА линию дороги
+    expect(pts.cross.y + PH - 2).toBeCloseTo(220, 5)
+    // уход ВБОК: спавн-точка за правым краем на линии дороги
+    expect(pts.after.x - PH).toBeGreaterThanOrEqual(SCENE.width)
+    expect(pts.after.y + PH - 2).toBeCloseTo(220, 5)
   })
 
-  it('машина: вход сверху через автомобильные ворота, выход снизу вверх', () => {
-    const gate = makeCarGate()
+  it('машина: вход слева по дороге через автомобильные ворота, уезжает вниз; выход уезжает вбок', () => {
+    const gate = makeCarGate() // (420,100,320,120): центр X = 580, низ = 220
     const CH = CAR.height / 2
+    const ROAD = 220 - CH // 200
+    const OFF_CAR = 58    // CAR_STOP_OFFSET
+
     const enter = deriveTrafficPoints(gate, CAR, 'enter', SCENE)
-    expect(enter.spawn.y + CH).toBeLessThanOrEqual(0)
-    // стоп: бампер (низ спрайта) на 10px выше верхней линии ворот (90)
-    expect(enter.stop.y + CH).toBeCloseTo(100 - 10, 5)
-    expect(enter.cross.y + CH).toBeCloseTo(220 + 26, 5)
+    expect(enter.vertical).toBe(false)
+    expect(enter.spawn.x - CH).toBeGreaterThanOrEqual(SCENE.width)
+    // стоп: бампер (низ спрайта) на нижней линии ворот, X — центр ворот
+    expect(enter.stop.y + CH).toBeCloseTo(220, 5)
+    expect(enter.stop.x).toBeCloseTo(580, 5)
+    // проход: бампер на 58px ниже линии
+    expect(enter.cross.y + CH).toBeCloseTo(220 + OFF_CAR, 5)
     expect(enter.after.y - CH).toBeGreaterThanOrEqual(SCENE.height)
 
     const exit = deriveTrafficPoints(gate, CAR, 'exit', SCENE)
     expect(exit.spawn.y - CH).toBeGreaterThanOrEqual(SCENE.height)
-    expect(exit.stop.y + CH).toBeCloseTo(220 + 30, 5)
-    expect(exit.cross.y + CH).toBeCloseTo(100 - 26, 5)
-    expect(exit.after.y + CH).toBeLessThanOrEqual(0)
+    expect(exit.stop.y + CH).toBeCloseTo(220 + OFF_CAR, 5)
+    expect(exit.cross.y + CH).toBeCloseTo(220, 5)
+    // уезжает ВБОК за правый край на линии дороги
+    expect(exit.after.x - CH).toBeGreaterThanOrEqual(SCENE.width)
+    expect(exit.after.y + CH).toBeCloseTo(220, 5)
+    expect(ROAD).toBeCloseTo(200, 5) // санити вычисления дороги
   })
 })
 
 describe('simulatorTraffic: валидация настроенных оффсетов', () => {
-  it('устаревший spawnExitPerson сверху отбрасывается — спавн остаётся снизу', () => {
+  it('валидный спавн входа за боковым краем применяется (центр = центр ворот + оффсет)', () => {
     const gate = makeWicket({
       settings: {
-        gateType: 'wicket',
-        isOpen: false,
-        isAnimating: false,
-        // центр маркера = центр калитки (800,160) + оффсет: спавн у верха сцены
-        spawnExitPersonX: 0,
-        spawnExitPersonY: -320,
+        gateType: 'wicket', isOpen: false, isAnimating: false,
+        // центр спавна x = 800 + 560 = 1360 (за правым краем), y = 160 + 34.5 = 194.5 (дорога)
+        spawnEnterPersonX: 560,
+        spawnEnterPersonY: 34.5,
       },
     })
-    const pts = trafficPointsFor(gate, PERSON, 'exit', SCENE)
-    expect(pts.spawn.y - PERSON.height / 2).toBeGreaterThanOrEqual(SCENE.height)
+    const pts = trafficPointsFor(gate, PERSON, 'enter', SCENE)
+    expect(pts.spawn.x).toBeCloseTo(1360, 5)
+    expect(pts.spawn.y).toBeCloseTo(W_ROAD, 5)
   })
 
-  it('устаревший stopEnterPerson ниже забора отбрасывается — стоп выводится над калиткой', () => {
+  it('устаревший spawnEnterPerson у ВЕРХНЕГО края отбрасывается — спавн остаётся за правым краем', () => {
     const gate = makeWicket({
       settings: {
-        gateType: 'wicket',
-        isOpen: false,
-        isAnimating: false,
-        // центр стопа на y=427.5: ноги на 455 — глубоко под забором (220)
+        gateType: 'wicket', isOpen: false, isAnimating: false,
+        // центр спавна y = 160 - 320 = -160 — над сценой (вертикальная схема)
+        spawnEnterPersonY: -320,
+      },
+    })
+    const pts = trafficPointsFor(gate, PERSON, 'enter', SCENE)
+    expect(pts.spawn.x - PERSON.height / 2).toBeGreaterThanOrEqual(SCENE.width)
+    expect(pts.spawn.y + PERSON_HEIGHT / 2 - 2).toBeCloseTo(220, 5)
+  })
+
+  it('устаревший stopEnterPerson ниже забора отбрасывается — стоп выводится на линию дороги', () => {
+    const gate = makeWicket({
+      settings: {
+        gateType: 'wicket', isOpen: false, isAnimating: false,
+        // центр стопа на y = 160 + 267.5 = 427.5: ноги на 455 — глубоко под забором
         stopEnterPersonX: 0,
         stopEnterPersonY: 267.5,
       },
     })
     const pts = trafficPointsFor(gate, PERSON, 'enter', SCENE)
-    expect(pts.stop.y + PERSON.height / 2 - 2).toBeCloseTo(90, 0)
+    expect(pts.stop.y + PERSON_HEIGHT / 2 - 2).toBeCloseTo(220, 0)
+    expect(pts.stop.x).toBeCloseTo(800, 5)
   })
 
-  it('валидный настроенный стоп применяется как есть (центр = центр ворот + оффсет)', () => {
+  it('despawnExit у центра сцены (мусор) заменяется уходом ВБОК за правый край', () => {
     const gate = makeWicket({
       settings: {
-        gateType: 'wicket',
-        isOpen: false,
-        isAnimating: false,
-        // центр стопа y = 160 - 127.5 = 32.5 (ноги на 60 — над калиткой)
-        stopEnterPersonX: 0,
-        stopEnterPersonY: -127.5,
+        gateType: 'wicket', isOpen: false, isAnimating: false,
+        despawnExitPersonX: -700, // центр ухода x = 100 — в сцене, не за краем
       },
     })
-    const pts = trafficPointsFor(gate, PERSON, 'enter', SCENE)
-    expect(pts.stop.y).toBeCloseTo(32.5, 5)
-    expect(pts.stop.x).toBeCloseTo(800, 5)
+    const pts = trafficPointsFor(gate, PERSON, 'exit', SCENE)
+    expect(pts.after.x - PERSON.height / 2).toBeGreaterThanOrEqual(SCENE.width)
   })
 
   it('despawnEnter выше забора (мусор) заменяется уходом за нижний край', () => {
     const gate = makeWicket({
       settings: {
-        gateType: 'wicket',
-        isOpen: false,
-        isAnimating: false,
+        gateType: 'wicket', isOpen: false, isAnimating: false,
         despawnEnterPersonY: -200,
       },
     })
     const pts = trafficPointsFor(gate, PERSON, 'enter', SCENE)
-    expect(pts.after.y - PERSON.height / 2).toBeGreaterThanOrEqual(SCENE.height)
+    expect(pts.after.y - PERSON_HEIGHT / 2).toBeGreaterThanOrEqual(SCENE.height)
   })
-})
 
-describe('simulatorTraffic: горизонтальный поток (вертикальный забор)', () => {
-  const tallGate = makeCarGate({ width: 120, height: 320, x: 580, y: 180 })
-  const CW = CAR.width / 2
-
-  it('вход слева направо, выход справа налево', () => {
-    const enter = deriveTrafficPoints(tallGate, CAR, 'enter', SCENE)
-    expect(enter.vertical).toBe(false)
-    expect(enter.spawn.x + CW).toBeLessThanOrEqual(0)
-    // стоп: правая кромка на 10px левее левой линии ворот (580)
-    expect(enter.stop.x + CW).toBeCloseTo(580 - 10, 5)
-    // проход: левая кромка на 26px правее правой линии (700)
-    expect(enter.cross.x - CW).toBeCloseTo(700 + 26, 5)
-    expect(enter.after.x - CW).toBeGreaterThanOrEqual(SCENE.width)
-
-    const exit = deriveTrafficPoints(tallGate, CAR, 'exit', SCENE)
-    expect(exit.spawn.x - CW).toBeGreaterThanOrEqual(SCENE.width)
-    expect(exit.stop.x - CW).toBeCloseTo(700 + 16, 5)
-    expect(exit.cross.x + CW).toBeCloseTo(580 - 10, 5)
-    expect(exit.after.x + CW).toBeLessThanOrEqual(0)
+  it('isValidPoint: точка ухода выхода принимается только за боковым краем', () => {
+    const gate = makeWicket()
+    const ctx = { vertical: true, gate, size: PERSON, scene: SCENE }
+    const right = { x: SCENE.width + 80 + PERSON.height / 2, y: W_ROAD }
+    const center = { x: 800, y: W_ROAD }
+    expect(isValidPoint('after', 'exit', right, ctx)).toBe(true)
+    expect(isValidPoint('after', 'exit', center, ctx)).toBe(false)
   })
 })
 
@@ -225,7 +226,7 @@ const mkCar = (id: string, direction: 'enter' | 'exit', state: string, pos: { x:
   },
   state,
   target: { x: target.x, y: target.y, width: 0, height: 0 },
-  afterTarget: { x: pos.x, y: direction === 'enter' ? SCENE.height + 100 : -100, width: 0, height: 0 },
+  afterTarget: { x: pos.x, y: direction === 'enter' ? SCENE.height + 100 : pos.y, width: 0, height: 0 },
   exitPoint: { x: pos.x, y: pos.y, width: 0, height: 0 },
   speed: 100, type: 'car', direction, travelMode: 'car',
 })
@@ -249,15 +250,109 @@ describe('поведение: машина после ворот', () => {
     expect(car.target.y).toBeGreaterThanOrEqual(SCENE.height)
   })
 
-  it('машина в to_gate: ретаргет приводит цель остановки к геометрии ворот', () => {
+  it('машина в to_gate: ретаргет приводит цель остановки к геометрии ворот (бампер на нижней линии)', () => {
     const h = buildCarHarness()
-    // ворота открыты; машина едет сверху к остановке перед воротами
-    const car = mkCar('car-2', 'enter', 'to_gate', { x: 540, y: -80 }, { x: 0, y: 0 })
+    // ворота открыты; машина едет справа по дороге к остановке у ворот
+    const car = mkCar('car-2', 'enter', 'to_gate', { x: 1000, y: 200 }, { x: 0, y: 0 })
     h.aiAgents.value = [car as any]
 
     h.physics.updateAiMovement(DT, { carGateId: 'car-gate-1', personGateId: 'wicket-1' })
-    // стоп: бампер на 10px выше верхней линии ворот (100), X — центр ворот (580)
-    expect(car.target.y + CAR.height / 2).toBeCloseTo(100 - 10, 0)
+    // стоп: бампер на нижней линии ворот (220), X — центр ворот (580)
+    expect(car.target.y + CAR.height / 2).toBeCloseTo(220, 0)
     expect(car.target.x).toBeCloseTo(580, 0)
+  })
+
+  it('машина едет влево — флаг _facingLeft установлен, rotation остаётся 0 (не стоит на капоте)', () => {
+    const h = buildCarHarness()
+    const car = mkCar('car-3', 'enter', 'to_gate', { x: 1000, y: 200 }, { x: 0, y: 0 })
+    h.aiAgents.value = [car as any]
+
+    for (let i = 0; i < 30; i++) {
+      h.physics.updateAiMovement(DT, { carGateId: 'car-gate-1', personGateId: 'wicket-1' })
+    }
+    // машина движется влево по дороге -> физика запомнила курс влево
+    expect((car.element.settings as any)?._facingLeft).toBe(true)
+    // и НЕ вращается по вертикали
+    expect(car.element.rotation).toBe(0)
+  })
+})
+
+describe('поведение: уступание ждущего', () => {
+  const buildPersonHarness = () => {
+    const wicket = makeWicket()
+    const simElements = ref<any[]>([wicket])
+    const aiAgents = ref<any[]>([])
+    const sceneSize = ref({ ...SCENE })
+    const simOpts: any = {
+      ACCEL: 100, DECEL: 100, REACTION_TIME: 1.5, MIN_BUFFER: 15,
+      MAX_LOOKAHEAD: 220, ARRIVE_THRESHOLD: 1,
+      gateCloseDelay: 10, wicketCloseDelay: 2, stallEscalateTime: 10,
+    }
+    const physics = useSimulatorPhysics(
+      simElements as any, aiAgents, sceneSize,
+      (gate: any) => { gate.settings.isOpen = true; return true },
+      (gate: any) => { gate.settings.isOpen = false; return true },
+      () => {},
+      simOpts,
+      undefined,
+      undefined
+    )
+    return { simElements, aiAgents, physics }
+  }
+
+  const mkPerson = (id: string, state: string, pos: { x: number; y: number }, target: { x: number; y: number }, direction: 'enter' | 'exit', velocity = 0) => ({
+    id,
+    element: {
+      id, x: pos.x - PERSON.width / 2, y: pos.y - PERSON.height / 2,
+      width: PERSON.width, height: PERSON.height,
+      rotation: 0, velocity, category: 'human', type: 'actor', direction,
+    },
+    state,
+    target: { x: target.x, y: target.y, width: 0, height: 0 },
+    afterTarget: { x: target.x, y: target.y, width: 0, height: 0 },
+    exitPoint: { x: target.x, y: target.y, width: 0, height: 0 },
+    speed: 40, type: 'person', direction, travelMode: 'walk',
+  })
+
+  it('ждущий у прохода отходит в сторону, когда встречный идёт прямо на него (лоб на дороге)', () => {
+    const h = buildPersonHarness()
+    // выходящий стоит в waiting_before; калитка закрыта — он ждёт
+    const waiter = mkPerson('waiter', 'waiting_before', { x: 800, y: 300 }, { x: 800, y: 300 }, 'exit')
+    // входящий идёт прямо НА него по одной линии (лобовая встреча на дороге)
+    const passer = mkPerson('passer', 'moving_away', { x: 500, y: 300 }, { x: 1400, y: 300 }, 'enter', 40)
+    h.aiAgents.value = [waiter as any, passer as any]
+    const startX = waiter.element.x
+    const startY = waiter.element.y
+
+    for (let i = 0; i < 500; i++) {
+      h.physics.updateAiMovement(DT, { carGateId: '', personGateId: 'wicket-1' })
+      // [ВАЖНО] ref() оборачивает объекты в reactive-proxy: сравниваем по id,
+      // а не по ссылке (includes(passenser) всегда false -> цикл рвался на 1-м кадре)
+      if (!h.aiAgents.value.some(a => a.id === 'passer')) break
+    }
+    // ждущий уступил: сместился от проходящего минимум на 3px
+    expect(Math.hypot(waiter.element.x - startX, waiter.element.y - startY)).toBeGreaterThan(3)
+    // и пропустил: проходящий прошёл дальше ждущего по X (пока он на сцене)
+    const passerFinal = h.aiAgents.value.find(a => a.id === 'passer') as any
+    const waiterCx = waiter.element.x + PERSON.width / 2
+    if (passerFinal) {
+      expect(passerFinal.element.x + PERSON.width / 2).toBeGreaterThan(waiterCx)
+    }
+  })
+
+  it('ждущий стоит на месте, если рядом никто не проходит', () => {
+    const h = buildPersonHarness()
+    const waiter = mkPerson('waiter', 'waiting_before', { x: 800, y: 300 }, { x: 800, y: 300 }, 'exit')
+    // проходящий далеко (220px по вертикали) — вне PERSON_SEP_RADIUS
+    const passer = mkPerson('passer', 'moving_away', { x: 500, y: 540 }, { x: 1400, y: 540 }, 'enter', 40)
+    h.aiAgents.value = [waiter as any, passer as any]
+    const startX = waiter.element.x
+    const startY = waiter.element.y
+
+    for (let i = 0; i < 300; i++) {
+      h.physics.updateAiMovement(DT, { carGateId: '', personGateId: 'wicket-1' })
+      if (!h.aiAgents.value.some(a => a.id === 'passer')) break
+    }
+    expect(Math.hypot(waiter.element.x - startX, waiter.element.y - startY)).toBeLessThan(0.5)
   })
 })
