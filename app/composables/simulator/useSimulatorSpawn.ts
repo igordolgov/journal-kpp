@@ -226,12 +226,29 @@ export function useSimulatorSpawn(
       afterTargetY = getAbs(`despawnExit${prefix}`, 'Y', height) ?? fixedY
     }
 
+    // [ФИКС-НОГИ-НИЖЕ-КАЛИТКИ] приходящие из города идут так, чтобы уровень
+    // ног (низ спрайта) не опускался ниже нижней линии калитки: раньше линия
+    // ходьбы бралась как есть (fixedY / оффсеты сцены) и люди корпусом
+    // «протыкали» забор. Выходящих не трогаем: они подходят с городской
+    // стороны — там ходить ниже линии забора естественно.
+    const gateBottomY = gate ? gate.y + gate.height : Infinity
+    const clampApproachY = (y: number): number =>
+      direction === 'enter' && Number.isFinite(gateBottomY)
+        ? Math.min(y, gateBottomY - height)
+        : y
+    spawnY = clampApproachY(spawnY)
+    entryPointY = clampApproachY(entryPointY)
+
     const groupId = `group_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`
     const allPersons = [leaderPerson, ...members]
     const groupAgents: AiAgent[] = []
 
-    const HORIZONTAL_STEP = 35
-    const VERTICAL_STEP = 45
+    const HORIZONTAL_STEP = 44
+    const VERTICAL_STEP = 58
+    // [ФИКС-СПОР-СПЛОШНЕНИЕ] шаги увеличены (35->44, 45->58): при старых
+    // значениях боксы соседей по группе перекрывались (ширина человека 40 >
+    // шага 35; высота 55 > шага 45) — члены группы визуально «слипались»
+    // и проходили друг сквозь друга на параллельных дорожках.
 
     for (let idx = 0; idx < allPersons.length; idx++) {
       const person = allPersons[idx]
@@ -254,9 +271,9 @@ export function useSimulatorSpawn(
       else zIndex = 190 + idx
 
       const posX = spawnX + hOffset
-      const posY = spawnY + vOffset
+      const posY = clampApproachY(spawnY + vOffset)
       const stopX = entryPointX + hOffset
-      const stopY = entryPointY + vOffset
+      const stopY = clampApproachY(entryPointY + vOffset)
       const afterX = afterTargetX + hOffset
       const afterY = afterTargetY + vOffset
 
@@ -351,6 +368,15 @@ export function useSimulatorSpawn(
       exitPointY = getAbs(`crossExit${prefix}`, 'Y', height) ?? fixedY
       afterTargetX = getAbs(`despawnExit${prefix}`, 'X', width) ?? (sceneSize.value.width + EXIT_HORIZONTAL_DISTANCE)
       afterTargetY = getAbs(`despawnExit${prefix}`, 'Y', height) ?? fixedY
+    }
+
+    // [ФИКС-НОГИ-НИЖЕ-КАЛИТКИ] см. createGroup: приходящие из города не
+    // опускают уровень ног ниже нижней линии калитки
+    const gateBottomY = gate ? gate.y + gate.height : Infinity
+    if (direction === 'enter' && Number.isFinite(gateBottomY)) {
+      const maxY = gateBottomY - height
+      spawnY = Math.min(spawnY, maxY)
+      entryPointY = Math.min(entryPointY, maxY)
     }
 
     const { element, agent } = createPersonAgent(
@@ -727,4 +753,4 @@ export function useSimulatorSpawn(
     resetSpawnTimers,
     handleAgentDone,
   }
-}
+}

@@ -123,7 +123,7 @@ div(
           )
             | {{ isWalking ? '⏹ Стоп' : '▶ Ходьба' }}
           
-          .grid.grid-cols-3.gap-x-5
+          .grid.grid-cols-4.gap-x-5
             .form-control
               label.text-sm.text-gray-500.flex.justify-between
                 span Скорость
@@ -134,6 +134,11 @@ div(
                 span Размах
                 span.font-mono.text-primary {{ selectedPerson?.animation?.swingAmplitude || 5 }}
               input.range.range-xs.range-primary.w-full(type="range" min="0" max="10" step="1" v-model.number="selectedPerson.animation.swingAmplitude")
+            .form-control
+              label.text-sm.text-gray-500.flex.justify-between
+                span Взмах рук
+                span.font-mono.text-primary {{ selectedPerson?.animation?.armSwing ?? 10 }}
+              input.range.range-xs.range-primary.w-full(type="range" min="0" max="25" step="1" v-model.number="selectedPerson.animation.armSwing")
             .form-control
               label.text-sm.text-gray-500.flex.justify-between
                 span Подскок
@@ -327,7 +332,14 @@ const normalizePerson = (p: any) => {
   // ---------------------------
 
   if (!p.animation || typeof p.animation !== 'object') {
-    p.animation = { speed: 1, swingAmplitude: 5, bounceAmplitude: 3, armSwing: 15 }
+    p.animation = { speed: 1, swingAmplitude: 5, bounceAmplitude: 3, armSwing: 10 }
+  } else {
+    // Дозаполнение полей у старых записей БД: без armSwing слайдер «Взмах рук»
+    // и рендереры использовали разные fallback-значения
+    if (typeof p.animation.speed !== 'number') p.animation.speed = 1
+    if (typeof p.animation.swingAmplitude !== 'number') p.animation.swingAmplitude = 5
+    if (typeof p.animation.bounceAmplitude !== 'number') p.animation.bounceAmplitude = 3
+    if (typeof p.animation.armSwing !== 'number') p.animation.armSwing = 10
   }
   return p
 }

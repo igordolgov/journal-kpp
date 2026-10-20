@@ -53,8 +53,12 @@ export default defineNuxtConfig({
   vite: {
     optimizeDeps: {
       include: [
+        '@lucide/vue',
+        'chart.js',
         'fuse.js',
         'gsap',
+        'nanoid',
+        'vue-chartjs',
       ],
       exclude: [
         '@vue/devtools-core',

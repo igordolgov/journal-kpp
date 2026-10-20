@@ -1,0 +1,49 @@
+ПРИМЕНИ: доводка потока у калитки (рывок, расхождение, зеркало, ноги, руки)
+
+ЧТО ЭТО
+6 файлов из коммита 27065f6 «fix: smooth gate-exist flow — no jerk at stop
+point, yield separation, mirror, feet-level clamp, longer arms».
+
+КАК ПРИМЕНИТЬ
+1. Распакуй zip ПОВЕРХ D:\journal-kpp (с заменой файлов):
+   app\components\SimulatorWidget.vue
+   app\composables\simulator\useSimulatorPhysics.ts
+   app\composables\simulator\useSimulatorSpawn.ts
+   app\utils\avatarGeometry.ts
+   app\utils\familyMath.ts
+   tests\pedestrian-flow.test.ts            (новый файл)
+2. СРАЗУ после распаковки закоммить и запушь:
+   cd D:\journal-kpp
+   git add .
+   git commit -m "fix: smooth gate-exit flow — no jerk at stop point, yield separation, mirror, feet-level clamp, longer arms"
+   git push
+3. Пересборка exe (если нужен новый exe):
+   Remove-Item -Recurse -Force dist-electron, .output
+   pnpm generate
+   node scripts/fix-electron-paths.mjs
+   pnpm electron:build
+   .\dist-electron\JournalKPP.exe
+
+ЧТО ИЗМЕНИЛОСЬ (кратко)
+- Рывок у точки останова после калитки/ворот устранён: пешеход больше не
+  сбрасывает скорость на стыке crossing -> moving_away (из-за этого анимация
+  ходьбы замерла на 1-2 кадра посреди шага); шаг кадра не перескакивает цель;
+  торможение к точке плавное (скорость пропорциональна остатку пути).
+- Люди больше не проходят сквозь друг друга: пересечение корпусов = стоп,
+  плюс мягкое расхождение (радиальный пуш + «держись правее» + сбавление
+  шага при соседе по курсу). Встречные плавно расходятся в разные стороны.
+- Выходящие люди теперь надёжно зеркалятся слева направо (inline scaleX(-1),
+  прежнее CSS-правило в сборке не срабатывало).
+- Приходящие из города (в т.ч. группы) идут с уровнем ног НЕ ниже нижней
+  линии калитки; строй группы раздвинут (44/58px), боксы не слипаются.
+- Руки чуть длиннее: кисть на линии бёдер (естественная пропорция) — и в
+  конструкторе, и в симуляторе.
+- «Полоска» на голове — это был блик на волосах (белый штрих), на масштабе
+  симулятора выглядел артефактом; УДАЛЁН из всех причёсок.
+- WARN «Duplicated imports CAR_COLORS» исправлен: справочник в familyMath.ts
+  переименован в FAMILY_CAR_COLORS.
+
+ПРОВЕРКИ
+- vitest: 98 passed / 1 skipped (в т.ч. 4 новых регресс-теста в
+  tests/pedestrian-flow.test.ts)
+- vue-tsc: чисто; nuxi generate: успешно

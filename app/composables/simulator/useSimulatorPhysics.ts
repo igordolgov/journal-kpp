@@ -68,6 +68,12 @@ export function useSimulatorPhysics(
   const DIR_BLOCK_MAX = 25        // сек
   const GATE_ZONE_PERSON = 70     // px: радиус зоны прохода для пешеходов
   const GATE_ZONE_CAR = 160       // px: радиус зоны прохода для машин
+  // [ФИКС-УСТУПИ-ДОРОГУ] параметры мягкого расхождения пешеходов: ближе
+  // PERSON_SEP_RADIUS движущиеся пешеходы плавно смещаются друг от друга
+  // (встречные — каждый в свою сторону), вместо прохода «сквозь» друг друга
+  const PERSON_SEP_RADIUS = 40   // px: дистанция начала расхождения
+  const PERSON_SEP_SPEED = 34    // px/с: темп бокового смещения
+  const PERSON_YIELD_SPEED = 22  // px/с: постоянный дрейф «держись правее» при соседе по курсу
   const FORCE_CROSS_AFTER = 5        // сек: одиночка / лидер группы
   const FORCE_CROSS_GROUP_AFTER = 12 // сек: член группы, даже если предыдущий не прошёл
   
@@ -482,7 +488,11 @@ export function useSimulatorPhysics(
           }
         } 
         else if (agent.state === 'crossing') {
-          el.velocity = 0
+          // [ФИКС-РЫВОК-ПОСЛЕ-КАЛИТКИ] скорость на стыке crossing ->
+          // moving_away НЕ обнуляется: обнуление на 1-2 кадра ставило анимацию
+          // ходьбы на паузу (гистерезис is-paused) посреди шага — видимый
+          // «дёрганчик» в точке останова после калитки. Пешеход продолжает
+          // шаг с текущей скоростью; машину останавливает ветка waiting_after.
           if (el.zIndex && el.zIndex < 400 && agent.direction === 'enter') {
             el.zIndex = 400
             simElements.value = [...simElements.value]
@@ -538,6 +548,7 @@ export function useSimulatorPhysics(
             }
           } 
           else {
+            el.velocity = 0 // машина встаёт на точку останова после ворот
             agent.state = 'waiting_after'
             // [ФИКС-висяки-2] closeDelay=0: раньше таймер не ставился вовсе —
             // ворота не закрывались никогда, машина стояла в ожидании вечно.
@@ -588,13 +599,25 @@ export function useSimulatorPhysics(
         const toX = ox - cx
         const toY = oy - cy
         const forward = dot({ x: toX, y: toY }, { x: dirX, y: dirY })
-        if (forward < 0 || forward > MAX_LOOKAHEAD) continue
+        // forward <= 0: центр другого позади/совпадает с моим — он не впереди,
+        // стоповать друг друга взаимно нельзя (двое в одной точке заморозили
+        // бы друг друга навсегда). Совпавшие центры разводит расхождение ниже.
+        if (forward <= 0 || forward > MAX_LOOKAHEAD) continue
         const lateral = Math.abs(cross({ x: toX, y: toY }, { x: dirX, y: dirY }))
         const otherWid = Math.min(other.element.width, other.element.height)
         if (lateral > myWid / 2 + otherWid / 2 + 15) continue
         const otherLen = Math.max(other.element.width, other.element.height)
         const gap = forward - (myLen / 2 + otherLen / 2)
-        if (gap > 0 && gap < distanceToLeader) {
+        // [ФИКС-СКВОЗЬ] gap <= 0 — корпуса уже пересеклись: раньше такой
+        // «препятствие» игнорировалось (условие gap > 0), и агент спокойно
+        // проходил сквозь стоящего/медленного впереди. Пересечение = дистанция
+        // 0: экстренное торможение за уходящим впереди.
+        if (gap <= 0) {
+          if (distanceToLeader > 0) {
+            distanceToLeader = 0
+            leaderSpeed = other.element.velocity || 0
+          }
+        } else if (gap < distanceToLeader) {
           distanceToLeader = gap
           leaderSpeed = other.element.velocity || 0
         }
@@ -606,7 +629,37 @@ export function useSimulatorPhysics(
         targetSpeed = Math.min(targetSpeed, leaderSpeed * 0.8)
         if (distanceToLeader < safeDistance * 0.5) targetSpeed = 0
       }
-      if (dist < 80) targetSpeed = Math.min(targetSpeed, 30)
+      // [ФИКС-УСТУПИ-ДОРОГУ] вблизи любого пешехода ПО КУРСУ (в том числе
+      // встречного — leader-follow их не видит) сбавляем шаг: попарное
+      // торможение даёт расхождению время развести людей в стороны без
+      // прохода насквозь. Math.min — никогда не УВЕЛИЧИВАЕТ скорость,
+      // поэтому очереди leader-follow (targetSpeed = 0) не ломаются.
+      let personNearAhead = Infinity
+      if (agent.type === 'person') {
+        let near2 = Infinity
+        for (const other of aiAgents.value) {
+          if (other.id === agent.id || other.type !== 'person' || other.state === 'done') continue
+          const ox = other.element.x + other.element.width / 2 - cx
+          const oy = other.element.y + other.element.height / 2 - cy
+          const ahead = ox * dirX + oy * dirY
+          if (ahead < -10 || ahead > 90) continue
+          const lateral = Math.abs(ox * dirY - oy * dirX)
+          if (lateral > 30) continue
+          const d2 = ahead * ahead + lateral * lateral
+          if (d2 < near2) near2 = d2
+        }
+        personNearAhead = Math.sqrt(near2)
+        if (personNearAhead < PERSON_SEP_RADIUS * 1.6) {
+          targetSpeed = Math.min(targetSpeed, Math.max(14, personNearAhead * 0.5))
+        }
+      }
+      // [ФИКС-РЫВОК] плавное торможение к точке останова: скорость
+      // пропорциональна остатку пути (с нижним порогом), а не ступенька
+      // «dist<80 -> сразу 30». Подход к цели заканчивается мягко,
+      // скорость к моменту прибытия уже сопоставима с шагом кадра.
+      if (dist < 80) {
+        targetSpeed = Math.min(targetSpeed, Math.max(12, dist * 0.55))
+      }
 
       if ((el.velocity || 0) < targetSpeed) {
         el.velocity = Math.min(targetSpeed, (el.velocity || 0) + ACCEL * dt)
@@ -619,8 +672,63 @@ export function useSimulatorPhysics(
       el.rotation = (el.rotation || 0) + angleDiff * 0.1
 
       if ((el.velocity || 0) > 0.5) {
-        el.x += dirX * (el.velocity || 0) * dt
-        el.y += dirY * (el.velocity || 0) * dt
+        // [ФИКС-РЫВОК] шаг не длиннее остатка дистанции: при разгоне
+        // фактический шаг (velocity УЖЕ после разгона) * dt бывал больше
+        // остатка, агент перескакивал точку останова и «возвратом» давал рывок
+        const moveStep = Math.min((el.velocity || 0) * dt, dist)
+        el.x += dirX * moveStep
+        el.y += dirY * moveStep
+      }
+
+      // [ФИКС-УСТУПИ-ДОРОГУ] мягкое расхождение пешеходов: в зоне радиуса
+      // PERSON_SEP_RADIUS каждый ДВИЖУЩИЙСЯ пешеход смещается от соседа.
+      // Радиальная составляющая разводит в стороны; боковая (перпендикуляр
+      // «от соседа», одинаково ориентированная для обоих участников) разводит
+      // встречных на встречных курсах в противоположные стороны — расходятся,
+      // «уступая дорогу», вместо прохода насквозь. Стоящих не толкаем:
+      // строй группы (шаги 44-58px) и очереди у прохода не расползаются.
+      if (agent.type === 'person' && (el.velocity || 0) > 0.5) {
+        const ccx = el.x + el.width / 2
+        const ccy = el.y + el.height / 2
+        let sepX = 0, sepY = 0, maxW = 0
+        for (const other of aiAgents.value) {
+          if (other.id === agent.id || other.type !== 'person' || other.state === 'done') continue
+          const ocx = other.element.x + other.element.width / 2
+          const ocy = other.element.y + other.element.height / 2
+          const ax = ccx - ocx
+          const ay = ccy - ocy
+          const d = Math.hypot(ax, ay)
+          if (d < 0.01) {
+            // центры совпали (спавн в одной точке): детерминированно разводим
+            // по разные стороны от курса по порядку id — иначе взаимный стоп
+            const s = String(agent.id) < String(other.id) ? 1 : -1
+            sepX += -dirY * s
+            sepY += dirX * s
+            maxW = Math.max(maxW, 0.6)
+            continue
+          }
+          if (d >= PERSON_SEP_RADIUS) continue
+          const w = (PERSON_SEP_RADIUS - d) / PERSON_SEP_RADIUS // 0..1
+          const nx = ax / d, ny = ay / d
+          sepX += nx * w - ny * w * 0.8 // радиально от соседа + вбок
+          sepY += ny * w + nx * w * 0.8
+          maxW = Math.max(maxW, w)
+        }
+        const m = Math.hypot(sepX, sepY)
+        if (m > 0.01 && maxW > 0) {
+          // сила пропорциональна тесноте (maxW), направление — среднему
+          // вектору «от соседей»; скорость ограничена PERSON_SEP_SPEED
+          const push = maxW * PERSON_SEP_SPEED * dt
+          el.x += (sepX / m) * push
+          el.y += (sepY / m) * push
+          // Правило «держись правее»: при соседе по курсу — постоянный дрейф
+          // вправо от СВОЕГО курса. Для встречных правые стороны противоположны
+          // по экрану — расходятся гарантированно и детерминированно.
+          if (personNearAhead < PERSON_SEP_RADIUS * 1.6) {
+            el.x += -dirY * PERSON_YIELD_SPEED * dt
+            el.y += dirX * PERSON_YIELD_SPEED * dt
+          }
+        }
       }
 
       // [ФИКС-висяки] деспавн за пределами сцены — для всех одинаково:
@@ -645,4 +753,4 @@ export function useSimulatorPhysics(
   }
 
   return { updateAiMovement, clearAllTimers, cancelCloseTimer }
-}
+}

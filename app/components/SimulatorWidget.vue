@@ -113,7 +113,12 @@
           .person-avatar.w-full.h-full.relative(
             v-else-if="el.asset?.type === 'person'"
             :class="{ 'is-paused': el.isPaused ?? ((el.velocity || 0) < 0.1), 'is-exit': el.direction === 'exit' }"
+            :style="el.direction === 'exit' ? { transform: 'scaleX(-1)' } : undefined"
           )
+            //- [ФИКС-ЗЕРКАЛО] выходящие зеркалятся inline-стилем на обёртке:
+            //- прежнее правило .person-avatar.is-exit :deep(svg) в сборке
+            //- не срабатывало (специфичность/скоуп), и выходящие выглядели
+            //- неотличимо от входящих. Inline-стиль не зависит от CSS-скоупа.
             .person-svg-container(v-html="el.asset.svg || ' '")
           .w-full.h-full.relative(v-else-if="el.asset?.type === 'car'")
             .car-svg-container(v-html="el.asset.svg || ' '")
@@ -854,9 +859,9 @@ onUnmounted(() => {
   animation-play-state: paused !important;
 }
 
-.person-avatar.is-exit :deep(svg) {
-  transform: scaleX(-1);
-}
+/* [ФИКС-ЗЕРКАЛО] правило ".person-avatar.is-exit :deep(svg) { transform: scaleX(-1) }"
+   удалено: в собранной версии оно не срабатывало. Зеркало выходящих теперь
+   inline-стилем на обёртке .person-avatar (шаблон выше) — вне CSS-скоупа. */
 
 .sim-canvas-wrapper :deep(svg) {
   width: 100%;
