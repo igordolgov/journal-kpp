@@ -2,7 +2,7 @@ overrides:
   '@types/node': '24.1.0'
 
 minimumReleaseAgeExclude:
-  - knip@6.40.0
+  - knip@6.40.0 || 6.42.1
   - nanoid@6.0.2
   - '@nuxt/kit@4.6.0'
   - '@nuxt/nitro-server@4.6.0'
@@ -10,6 +10,8 @@ minimumReleaseAgeExclude:
   - '@nuxt/vite-builder@4.6.0'
   - '@nuxt/vite-server@4.6.0'
   - nuxt@4.6.0
+  - '@lucide/vue@1.60.0'
+  - electron@44.9.1
 
 allowBuilds:
   '@parcel/watcher': true
