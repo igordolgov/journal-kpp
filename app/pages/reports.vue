@@ -12,6 +12,10 @@
       description="Сводка по журналу: кто на выезде, динамика дня, пиковые часы."
     )
       template(#actions)
+        //- [ЭТАП 8] переключатель вкладок: журнал КПП / оплата труда
+        .tabs.tabs-boxed.bg-base-100.shadow.mr-2
+          button.tab(:class="{ 'tab-active': view === 'journal' }" @click="view = 'journal'") Журнал
+          button.tab(:class="{ 'tab-active': view === 'payroll' }" @click="view = 'payroll'") Оплата
         select.select.select-bordered.select-sm.bg-base-100.shadow(
           v-model="period"
         )
@@ -20,7 +24,7 @@
           option(value="month") Месяц
 
   //- КАРТОЧКИ СТАТИСТИКИ (Компактные, в один ряд)
-  .grid.grid-cols-5.gap-3.px-4.pb-3.flex-none
+  .grid.grid-cols-5.gap-3.px-4.pb-3.flex-none(v-if="view === 'journal'")
     .stat.shadow-xl.bg-base-100.p-3.rounded-xl.border.border-base-300
       .stat-title.text-xs.opacity-60.flex.items-center.gap-1
         ClipboardList.w-3.h-3
@@ -51,8 +55,11 @@
         | Пик
       .stat-value.text-2xl.font-bold.text-error {{ stats.peakHour }}
 
+  //- [ЭТАП 8] Вкладка «Оплата»: KPI + графики начислений (компонент этапа 8)
+  PayrollReports(v-if="view === 'payroll'" :period="period")
+
   //- ОСНОВНОЙ КОНТЕНТ (Графики занимают 100% оставшейся высоты)
-  ClientOnly
+  ClientOnly(v-if="view === 'journal'")
     main.grid.grid-cols-12.gap-3.px-4.pb-4.flex-1.min-h-0
       //- ЛЕВАЯ КОЛОНКА (Аудитория + Топ отсутствующих)
       .col-span-12.flex.flex-col.gap-3(
@@ -213,6 +220,8 @@ const { getAllItems } = useDatabase()
 
 // --- State ---
 const period = ref('day')
+// [ЭТАП 8] активная вкладка аналитики: журнал КПП или оплата труда
+const view = ref<'journal' | 'payroll'>('journal')
 const vehiclesList = ref<any[]>([])
 
 // --- Инициализация ---

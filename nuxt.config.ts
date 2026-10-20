@@ -14,11 +14,23 @@ export default defineNuxtConfig({
 
   srcDir: 'app',
 
+  // [ELECTRON] exe-сборка: SPA без сервера; хеш-роутинг обязателен для file://
+  // (history-пути на file:// дают 404 «Page not found» — nuxt#15629).
+  ssr: false,
+  router: {
+    options: {
+      hashMode: true,
+    },
+  },
+
   future: {
     compatibilityVersion: 4,
   },
 
   app: {
+    // [ELECTRON] относительный base — ассеты резолвятся рядом с index.html (file://)
+    baseURL: './',
+
     head: {
       charset: 'utf-8',
       viewport: 'width=device-width, initial-scale=1',

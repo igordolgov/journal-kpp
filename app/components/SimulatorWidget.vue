@@ -62,21 +62,21 @@
           class="text-base-content/60"
         )
           span Макс. агентов
-          input.input.input-xs(type="number" v-model.number="userMaxAgents" min="1" max="50" placeholder="20")
+          input.input.input-xs(type="number" v-model.number="userMaxAgents" min="1" max="50" placeholder="10")
         label.flex.flex-col.text-xs(
           class="text-base-content/60"
         )
           span Интервал пеших (мин-макс)
           .flex.gap-1
-            input.input.input-xs.w-16(type="number" v-model.number="userPersonIntervalMin" min="1" placeholder="10")
-            input.input.input-xs.w-16(type="number" v-model.number="userPersonIntervalMax" min="1" placeholder="30")
+            input.input.input-xs.w-16(type="number" v-model.number="userPersonIntervalMin" min="30" placeholder="40")
+            input.input.input-xs.w-16(type="number" v-model.number="userPersonIntervalMax" min="30" placeholder="90")
         label.flex.flex-col.text-xs(
           class="text-base-content/60"
         )
           span Интервал авто (мин-макс)
           .flex.gap-1
-            input.input.input-xs.w-16(type="number" v-model.number="userCarIntervalMin" min="1" placeholder="5")
-            input.input.input-xs.w-16(type="number" v-model.number="userCarIntervalMax" min="1" placeholder="15")
+            input.input.input-xs.w-16(type="number" v-model.number="userCarIntervalMin" min="45" placeholder="60")
+            input.input.input-xs.w-16(type="number" v-model.number="userCarIntervalMax" min="45" placeholder="120")
         label.flex.flex-col.text-xs(
           class="text-base-content/60"
         )
@@ -201,6 +201,10 @@
                 span.font-bold {{ el.name }}
                 span.text-sm(v-if="el.groupLabel") {{ el.groupLabel }}
 
+    //- [PAYROLL] HUD баланса: ребёнок containerRef, не scale-обёртки —
+    //- иначе чип сжимался бы transform'ом сцены и ловил бы клики
+    SimulatorPayrollHud
+
     //- [Фаза 5] Empty state с CTA: сцена не загружена — прямая дорога в Редактор
     .absolute.inset-0.flex.items-center.justify-center(
       v-if="!config || simElements.length === 0"
@@ -219,6 +223,25 @@
         )
           PencilRuler.w-4.h-4.mr-1
           | Открыть Редактор
+
+    //- [СМЕНА] симуляция запущена без принятой смены — всплывающее окно
+    .absolute.inset-0.flex.items-center.justify-center(
+      v-if="shiftWarningOpen"
+      style="z-index: 1100"
+      class="bg-black/70"
+    )
+      .rounded-xl.p-5.shadow-2xl(
+        class="bg-gray-900 border border-white/10 w-[340px]"
+      )
+        .flex.items-center.gap-2.mb-2
+          ShieldAlert.w-5.h-5(class="text-warning")
+          span.text-sm.font-bold(class="text-warning") Смена не принята
+        p.text-xs.leading-relaxed.mb-4(
+          class="text-base-content/70"
+        ) Симуляция запущена без принятой смены. Примите смену, чтобы вести журнал проходов и начислять зарплату.
+        .flex.justify-end.gap-2
+          button.btn.btn-ghost.btn-xs(@click="shiftWarningOpen = false") Продолжить без смены
+          button.btn.btn-primary.btn-xs(@click="acceptShiftFromSim") Принять смену
 </template>
 
 <script setup lang="ts">
@@ -230,6 +253,8 @@
 import { ref, watch, onMounted, onUnmounted, nextTick, computed } from 'vue'
 import type { CSSProperties } from 'vue'
 import TrafficRoad from './editor/TrafficRoad.vue'
+// [PAYROLL] HUD баланса смены — оверлей поверх холста
+import SimulatorPayrollHud from './SimulatorPayrollHud.vue'
 import { useSimulatorCore } from '../composables/simulator/useSimulatorCore'
 import { useSimulatorPhysics } from '../composables/simulator/useSimulatorPhysics'
 import { useSimulatorSpawn } from '../composables/simulator/useSimulatorSpawn'
@@ -238,8 +263,15 @@ import { useSimulatorAudio } from '../composables/simulator/useSimulatorAudio'
 import { useSimulatorUI, type ActiveIntercom } from '../composables/simulator/useSimulatorUI'
 import { useSimulatorRendering } from '../composables/simulator/useSimulatorRendering'
 import { useSimulatorIntegration } from '../composables/useSimulatorIntegration'
+// [PAYROLL] шина событий оплаты и реестр проходов (ground truth)
+import { publishGateOpened, publishGateNoEntry } from '~/utils/payrollBus'
+import { markPayrollPass, peekPayrollPass } from '~/utils/payrollPass'
 import { generateSlidingGateSVG, generateWicketSVG } from '../constants/library'
 import { useAudioEngine } from '../composables/useAudioEngine'
+// [ФИКС-НАСТРОЙКИ] сохранение настроек поповера симулятора между запусками
+import { loadWidgetSettings, saveWidgetSettings } from '~/utils/widgetSettings'
+// [СМЕНА] напоминание о принятии смены при запуске симуляции
+import { useShift } from '~/composables/useShift'
 import {
   PERSON_WIDTH,
   PERSON_HEIGHT,
@@ -249,7 +281,7 @@ import {
 // [Фаза 5] Lucide: хедер и empty state
 import {
   CarFront, Activity, SlidersHorizontal, X,
-  MonitorX, PencilRuler
+  MonitorX, PencilRuler, ShieldAlert
 } from '@lucide/vue'
 
 const audio = useAudioEngine()
@@ -261,6 +293,17 @@ const props = defineProps<{
   simSettings?: any
 }>()
 const emit = defineEmits(['close'])
+
+// [СМЕНА] симуляция запущена без принятой смены — всплывающее напоминание.
+// loadCurrentShift() перечитывает store 'shifts': активная смена могла ещё
+// не попасть в память на момент монтирования дока.
+const { currentShift, loadCurrentShift } = useShift()
+const shiftStartModal = useState('shift-start-modal', () => false)
+const shiftWarningOpen = ref(false)
+const acceptShiftFromSim = () => {
+  shiftWarningOpen.value = false
+  shiftStartModal.value = true
+}
 
 // ---- Состояния ----
 const simElements = ref<any[]>([])
@@ -292,6 +335,45 @@ const resetSettings = () => {
   showSettings.value = false
 }
 
+// [ФИКС-НАСТРОЙКИ] настройки поповера («Макс. агентов» и остальные)
+// сохраняются в localStorage и восстанавливаются при монтировании:
+// док-панель монтируется через v-if и раньше обнуляла их при каждом
+// открытии/перезапуске приложения. null = «не задано пользователем».
+const getLocalStorage = (): Storage | null =>
+  (typeof localStorage !== 'undefined') ? localStorage : null
+
+const applySavedWidgetSettings = () => {
+  const saved = loadWidgetSettings(getLocalStorage())
+  userMaxAgents.value = saved.maxAgents
+  userPersonIntervalMin.value = saved.personIntervalMin
+  userPersonIntervalMax.value = saved.personIntervalMax
+  userCarIntervalMin.value = saved.carIntervalMin
+  userCarIntervalMax.value = saved.carIntervalMax
+  userMaxGroupSize.value = saved.maxGroupSize
+  userMaxNonFamily.value = saved.maxNonFamily
+}
+applySavedWidgetSettings()
+
+let widgetSaveTimer: ReturnType<typeof setTimeout> | null = null
+watch(
+  [userMaxAgents, userPersonIntervalMin, userPersonIntervalMax,
+   userCarIntervalMin, userCarIntervalMax, userMaxGroupSize, userMaxNonFamily],
+  () => {
+    if (widgetSaveTimer) clearTimeout(widgetSaveTimer)
+    widgetSaveTimer = setTimeout(() => {
+      saveWidgetSettings(getLocalStorage(), {
+        maxAgents: userMaxAgents.value,
+        personIntervalMin: userPersonIntervalMin.value,
+        personIntervalMax: userPersonIntervalMax.value,
+        carIntervalMin: userCarIntervalMin.value,
+        carIntervalMax: userCarIntervalMax.value,
+        maxGroupSize: userMaxGroupSize.value,
+        maxNonFamily: userMaxNonFamily.value,
+      })
+    }, 400)
+  }
+)
+
 const integration = useSimulatorIntegration()
 const { allPeople, usedPeopleIds } = integration
 
@@ -301,17 +383,25 @@ const { getElementStyle: _getElementStyle, getGateStyle, ...core } = useSimulato
 const getElementStyle = (el: any, enableRotation: boolean): CSSProperties =>
   _getElementStyle(el, enableRotation) as CSSProperties
 
-const simOpts = computed(() => ({
-  ...props.simSettings,
-  maxGroupSize: userMaxGroupSize.value ?? 4,
-  maxNonFamily: userMaxNonFamily.value ?? 1,
-  personWidth: PERSON_WIDTH,
-  personHeight: PERSON_HEIGHT,
-  carWidth: CAR_WIDTH,
-  carHeight: CAR_HEIGHT,
-  carSpawnIntervalMin: userCarIntervalMin.value ?? props.simSettings?.carSpawnIntervalMin ?? 5,
-  carSpawnIntervalMax: userCarIntervalMax.value ?? props.simSettings?.carSpawnIntervalMax ?? 15,
-}))
+// [ФИКС-флуд-3] интервалы машин тоже санитарны: раньше шли в спавн как есть
+// (поповер допускает 1с, старые сцены — любые значения), поток машин душит
+// ручной журнал. Дефолты подняты 30-60 -> 60-120с, пол 45с, потолок 300с.
+const simOpts = computed(() => {
+  const rawCarMin = Number(userCarIntervalMin.value ?? props.simSettings?.carSpawnIntervalMin ?? 60) || 60
+  const rawCarMax = Number(userCarIntervalMax.value ?? props.simSettings?.carSpawnIntervalMax ?? 120) || 120
+  const carMin = Math.min(180, Math.max(45, rawCarMin))
+  return {
+    ...props.simSettings,
+    maxGroupSize: userMaxGroupSize.value ?? 4,
+    maxNonFamily: userMaxNonFamily.value ?? 1,
+    personWidth: PERSON_WIDTH,
+    personHeight: PERSON_HEIGHT,
+    carWidth: CAR_WIDTH,
+    carHeight: CAR_HEIGHT,
+    carSpawnIntervalMin: carMin,
+    carSpawnIntervalMax: Math.min(300, Math.max(carMin + 15, rawCarMax)),
+  }
+})
 
 const spawn = useSimulatorSpawn(
   simElements, aiAgents, sceneSize,
@@ -320,12 +410,102 @@ const spawn = useSimulatorSpawn(
   simOpts
 )
 
+// --- [PAYROLL] Рождение событий оплаты ---
+// Ручной режим — переключатель «Автозапись журнала» (Настройки → Симулятор).
+// Авто-режим = свободная симуляция: журнал пишет система, из оплаты остаются
+// только события ворот. Ручной режим = полный расчёт, включая записи.
+const isManualJournal = computed(() => props.simSettings?.autoJournal === false)
+
+// [stage-8.1] Тип прохода: settings.gateType — источник истины (его
+// допроставляет useSimulatorCore при клике), иначе имя элемента, иначе
+// ширина. Чистая ширина<=60 промахивалась по калиткам 80px без gateType —
+// отсюда «ворота» в штрафах за проход через калитку.
+const gateTypeOf = (gate: any): 'gate' | 'wicket' => {
+  if (!gate) return 'gate'
+  const s = gate.settings || {}
+  if (s.gateType) return s.gateType === 'wicket' ? 'wicket' : 'gate'
+  const name = String(gate.name || '').toLowerCase()
+  if (name.includes('калитка') || name.includes('wicket')) return 'wicket'
+  return gate.width && gate.width <= 60 ? 'wicket' : 'gate'
+}
+
+const onAgentArrive = (agent: any) => {
+  if (!isManualJournal.value) return
+  const personId = agent.element?.personId
+  if (!personId) return
+  // Члены группы идут следом за лидером — след прохода ведётся один
+  // на группу, иначе наказания/бонусы умножаются на состав семьи
+  if (agent.groupId && !agent.isLeader) return
+  // След регистрируется на водителя/пешего. Пассажиров машины не наказываем:
+  // за журнал отвечает водитель — иначе штрафы заспамят каждую поездку.
+  // [PAYROLL stage-7.1] Попутчики запоминаются в следе (companionIds):
+  // журнальная запись по ним оценивается по следу водителя/лидера, а
+  // «запись без прохода» не штрафует за запись реального пассажира
+  const companionIds: number[] = []
+  if (agent.type === 'car' && Array.isArray(agent.occupants)) {
+    for (const occ of agent.occupants) {
+      if (occ?.id != null && Number(occ.id) !== Number(personId)) companionIds.push(Number(occ.id))
+    }
+  }
+  if (Array.isArray(agent.groupMembers)) {
+    for (const member of agent.groupMembers) {
+      const memberId = member?.element?.personId
+      if (memberId != null && Number(memberId) !== Number(personId)) companionIds.push(Number(memberId))
+    }
+  }
+  // [stage-8.1] тип калитки/ворот фиксируем в следе по фактическому
+  // объекту агента — формулировка штрафа не зависит от повторного
+  // поиска элемента в момент пересечения
+  const arriveGate = simElements.value.find(g => String(g.id) === String(agent.gateId ?? ''))
+  markPayrollPass({
+    personId,
+    fio: agent.element?.name || '',
+    plate: agent.element?.asset?.plate,
+    direction: agent.direction,
+    gateId: agent.gateId,
+    gateType: gateTypeOf(arriveGate),
+    ts: Date.now(),
+    companionIds,
+  })
+}
+
+const onAgentCrossing = (agent: any, waitMs: number, gate?: any) => {
+  // Одно событие на группу (считаем лидера): семья из четырёх человек
+  // не должна начислять бонус ворот четырежды
+  if (agent.groupId && !agent.isLeader) return
+  // Событие ворот — в обоих режимах: ворота открывает человек (кнопка
+  // панели/клик), бонусы и штрафы ожидания честны и в свободной симуляции
+  publishGateOpened({
+    waitMs,
+    gateType: gateTypeOf(gate),
+    gateId: agent.gateId || (gate ? String(gate.id) : undefined),
+    personId: agent.element?.personId,
+    fio: agent.element?.name || '',
+    plate: agent.element?.asset?.plate,
+    direction: agent.direction,
+  })
+  // Открыл ворота, а записи нет — критический штраф (только ручной режим)
+  if (isManualJournal.value && agent.element?.personId) {
+    const pass = peekPayrollPass(agent.element.personId)
+    if (pass && !pass.recordedTs) {
+      publishGateNoEntry({
+        personId: pass.personId,
+        fio: pass.fio,
+        plate: pass.plate,
+        direction: pass.direction,
+        gateId: pass.gateId,
+        gateType: pass.gateType ?? gateTypeOf(gate),
+      })
+    }
+  }
+}
+
 const audioCtrl = useSimulatorAudio(
   simElements, aiAgents, sceneSize,
   () => getTrafficConfig(),
   activeIntercoms
 )
-const { visibleAgentLabels, initAudioPools, updateAllAudio, resetAllAudioTimers, cleanupAgentSounds } = audioCtrl
+const { visibleAgentLabels, initAudioPools, updateAllAudio, resetAllAudioTimers, stopAllCarEngines, cleanupAgentSounds } = audioCtrl
 
 const physics = useSimulatorPhysics(
   simElements, aiAgents, sceneSize,
@@ -334,7 +514,9 @@ const physics = useSimulatorPhysics(
   (agent) => {
     spawn.handleAgentDone(agent)
     cleanupAgentSounds(agent.id)
-  }
+  },
+  // [PAYROLL] хуки моментов «подошёл» и «начал проход»
+  { onAgentArrive, onAgentCrossing }
 )
 
 const rendering = useSimulatorRendering(containerRef, sceneSize)
@@ -416,19 +598,37 @@ const getTrafficConfig = () => {
   let carGate = gates.find(g => (g.width && g.width > 60) || g.settings?.gateType !== 'wicket')
   let personGate = gates.find(g => (g.width && g.width <= 60) || g.settings?.gateType === 'wicket')
   if (!carGate && gates.length) carGate = gates[0]
-  if (!personGate && gates.length) personGate = gates[0]
+  // [ФИКС-маршрут] сцена «ворота + калитка без метки»: без этого фолбэка
+  // пешеходным выбирались те же ворота — люди шли к автомобильному проходу
+  if (!personGate && gates.length) personGate = gates.find(g => g !== carGate) ?? gates[0]
+
+  // [ФИКС-флуд-2] санитарные пределы темпа: старые сцены хранят агрессивные
+  // интервалы (4-10с) и перекрывали глобальные настройки; пол не даёт потоку
+  // душить ручной журнал, потолок отсекает бессмысленные значения
+  // [ФИКС-флуд-3] темп поднят: два пеших потока по 25-60с давали нового
+  // пешехода в среднем каждые ~10с — ручной журнал не успевал. Новые
+  // дефолты 40-90с, пол 30с (старые сцены с агрессивными интервалами),
+  // потолок минимума 150с, максимум расширен до 300с.
+  const rawPMin = Number(userPersonIntervalMin.value ?? st.intervalMin ?? st.spawnIntervalMin ?? props.simSettings?.spawnIntervalMin ?? 40) || 40
+  const rawPMax = Number(userPersonIntervalMax.value ?? st.intervalMax ?? st.spawnIntervalMax ?? props.simSettings?.spawnIntervalMax ?? 90) || 90
+  const personIntervalMin = Math.min(150, Math.max(30, rawPMin))
+  const personIntervalMax = Math.min(300, Math.max(personIntervalMin + 15, rawPMax))
 
   return {
     enabled: st.enabled ?? true,
-    intervalMin: userPersonIntervalMin.value ?? st.intervalMin ?? 10,
-    intervalMax: userPersonIntervalMax.value ?? st.intervalMax ?? 30,
+    // [ФИКС-флуд] Редактор сохраняет spawnIntervalMin/Max, симулятор читал
+    // intervalMin — ключи не совпадали, интервал пешеходов всегда был
+    // дефолтным 10-30с независимо от настроек. Цепочка: оверрайд поповера
+    // -> сцена (оба ключа) -> глобальные настройки -> безопасный дефолт.
+    intervalMin: personIntervalMin,
+    intervalMax: personIntervalMax,
     personSpeed: st.personSpeed ?? 40,
     carSpeed: st.carSpeed ?? 100,
     carGateId: (st.carGateId ?? carGate?.id) || '',
     personGateId: (st.personGateId ?? personGate?.id) || '',
     gateCloseDelay: st.gateCloseDelay ?? 10,
     wicketCloseDelay: st.wicketCloseDelay ?? 0,
-    maxAgents: userMaxAgents.value ?? st.maxAgents ?? 20,
+    maxAgents: Math.min(50, Math.max(1, Number(userMaxAgents.value ?? st.maxAgents ?? props.simSettings?.maxAgents ?? 10) || 10)),
     stepAudibleDistance: st.stepAudibleDistance ?? 400,
     engineAudibleDistance: st.engineAudibleDistance ?? 800,
   }
@@ -455,14 +655,29 @@ const gameLoop = (timestamp: number) => {
   if (!props.isRunning) return
   const dt = Math.min((timestamp - lastTime) / 1000, 0.1)
   lastTime = timestamp
-  const cfg = getTrafficConfig()
-  if (cfg.enabled) {
-    spawn.updateSpawnLogic(dt, cfg, allPeople.value.length > 0, aiAgents.value.length)
-    physics.updateAiMovement(dt, { carGateId: cfg.carGateId, personGateId: cfg.personGateId })
-    scriptsHandler.processScriptLogic(dt)
-    scriptsHandler.updateActiveCommands(dt)
+  // [ФИКС-ЗАСТРЯНИЕ] броня игрового цикла: ЛЮБОЕ исключение в подсистеме
+  // (спавн/физика/скрипты/аудио) раньше убивало rAF-цикл навсегда — вся
+  // сцена замирала («зависают вошедшие люди»), а сторожа внутри физики
+  // не спасали, потому что физика тоже больше не вызывалась. Каждый шаг
+  // изолирован; requestAnimationFrame вне try — кадр всегда перевыстраивается.
+  try {
+    const cfg = getTrafficConfig()
+    // [ФИКС-ЗАСТРЯНИЕ] сторож ворот: лечит зависшие isAnimating/isOpen
+    core.updateGateWatchdog(dt)
+    if (cfg.enabled) {
+      try {
+        spawn.updateSpawnLogic(dt, cfg, allPeople.value.length > 0, cfg.maxAgents)
+      } catch (e) { console.error('[gameLoop] спавн:', e) }
+      try {
+        physics.updateAiMovement(dt, { carGateId: cfg.carGateId, personGateId: cfg.personGateId })
+      } catch (e) { console.error('[gameLoop] физика:', e) }
+      try { scriptsHandler.processScriptLogic(dt) } catch (e) { console.error('[gameLoop] скрипты:', e) }
+      try { scriptsHandler.updateActiveCommands(dt) } catch (e) { console.error('[gameLoop] команды:', e) }
+    }
+    try { updateAllAudio(dt) } catch (e) { console.error('[gameLoop] аудио:', e) }
+  } catch (e) {
+    console.error('[gameLoop] кадр:', e)
   }
-  updateAllAudio(dt)
   animationFrameId = requestAnimationFrame(gameLoop)
 }
 
@@ -490,9 +705,16 @@ watch(() => props.isRunning, (ir) => {
   if (ir) {
     lastTime = performance.now()
     animationFrameId = requestAnimationFrame(gameLoop)
-  } else if (animationFrameId) {
-    cancelAnimationFrame(animationFrameId)
-    animationFrameId = null
+  } else {
+    if (animationFrameId) {
+      cancelAnimationFrame(animationFrameId)
+      animationFrameId = null
+    }
+    // [ФИКС-звук] Пауза/выключение симуляции: игровой цикл остановлен,
+    // updateAllAudio не работает — глушим моторы машин и мотор ворот,
+    // иначе гул продолжается с последней громкостью.
+    resetAllAudioTimers()
+    stopAllCarEngines()
   }
 })
 
@@ -568,6 +790,16 @@ onMounted(async () => {
     c0.resume()
   }
 
+  // [СМЕНА] при КАЖДОМ запуске симулятора смена считается непринятой:
+  // окно «Смена не принята» всплывает всегда, пока охранник не нажмёт
+  // «Принять смену». loadCurrentShift лишь освежает данные активной смены.
+  try {
+    await loadCurrentShift()
+  } catch (e) {
+    console.warn('[SimulatorWidget] не удалось проверить смену:', e)
+  }
+  shiftWarningOpen.value = true
+
   if (props.isRunning) {
     lastTime = performance.now()
     animationFrameId = requestAnimationFrame(gameLoop)
@@ -581,6 +813,7 @@ onUnmounted(() => {
   cleanupScaling()
   physics.clearAllTimers()
   resetAllAudioTimers()
+  stopAllCarEngines()
   for (const agent of aiAgents.value) cleanupAgentSounds(agent.id)
   if ((window as any).__cleanupScale) (window as any).__cleanupScale()
 })

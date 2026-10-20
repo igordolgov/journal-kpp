@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Журнал КПП",
   "author": "Igor",
-  "main": "main.js",
+  "main": "main.cjs",
   "private": true,
   "type": "module",
   "scripts": {
@@ -12,6 +12,8 @@
     "generate": "nuxt generate",
     "preview": "nuxt preview",
     "postinstall": "nuxt prepare",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "electron:build": "electron-builder --win portable"
   },
   "dependencies": {
@@ -40,7 +42,9 @@
     "sass": "^1.105.1",
     "tailwindcss": "^4.3.3",
     "typescript": "~5.9.3",
-    "vue-tsc": "^3.3.12"
+    "vue-tsc": "^3.3.12",
+    "vitest": "^4.0.1",
+    "happy-dom": "^18.0.1"
   },
   "allowScripts": {
     "@parcel/watcher@2.6.0": true,
@@ -54,7 +58,7 @@
       "output": "dist-electron"
     },
     "files": [
-      "main.js",
+      "main.cjs",
       ".output/public/**/*"
     ],
     "win": {

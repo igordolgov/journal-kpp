@@ -64,6 +64,14 @@ export interface ISimulatorConfig {
   wicketCloseDelay: number
   autoOpenGates: boolean
   autoOpenWicket: boolean
+  // [PAYROLL] Автозапись журнала симулятором. Выкл = ручной режим:
+  // журнал заполняет охранник, движок оплаты оценивает записи и проходы
+  autoJournal: boolean
+  // Одноразовый маркер миграции «автозапись выкл» (см. loadConfig):
+  // отсутствие поля = конфиг сохранён до введения маркера
+  journalManualMigrated?: boolean
+  // [ФИКС-флуд] Одноразовый маркер миграции темпа спавна (см. loadConfig)
+  spawnPaceMigrated?: boolean
   // --- Физика движения ---
   ACCEL: number
   DECEL: number
@@ -169,11 +177,11 @@ const defaultConfig: IConfig = {
 
   simulator: {
     enabled: true,
-    maxAgents: 20,
-    spawnIntervalMin: 10,
-    spawnIntervalMax: 30,
-    carSpawnIntervalMin: 5,
-    carSpawnIntervalMax: 15,
+    maxAgents: 10,
+    spawnIntervalMin: 25,
+    spawnIntervalMax: 60,
+    carSpawnIntervalMin: 30,
+    carSpawnIntervalMax: 60,
     personSpeed: 40,
     personWidth: 40,
     personHeight: 55,
@@ -185,6 +193,7 @@ const defaultConfig: IConfig = {
     wicketCloseDelay: 0,
     autoOpenGates: false,
     autoOpenWicket: false,
+    autoJournal: false,
     ACCEL: 100,
     DECEL: 100,
     ARRIVE_THRESHOLD: 10,
@@ -277,6 +286,36 @@ export const useConfig = () => {
 
       if (values.simulator) {
         Object.assign(config.value.simulator, values.simulator)
+        // [PAYROLL] Одноразовая миграция на ручной журнал: до неё дефолт
+        // был autoJournal=true — симулятор сам вёл журнал, и штрафы за
+        // записи были недостижимы. Флаг отделяет «старый» конфиг от
+        // осознанного переключения пользователя после миграции.
+        if (!values.simulator.journalManualMigrated) {
+          config.value.simulator.autoJournal = false
+          config.value.simulator.journalManualMigrated = true
+          try {
+            await saveConfig() // маркер сразу в БД, иначе миграция повторится
+          } catch (e) {
+            console.error('[useConfig] маркер миграции не сохранён', e)
+          }
+        }
+        // [ФИКС-флуд] Разовая миграция темпа спавна: старые значения
+        // (10-30с пешеходы, 5-15с авто, 20 агентов) заполняли сцену быстрее,
+        // чем охранник успевал вести журнал. После миграции темп настраивается
+        // в Настройки -> Симулятор.
+        if (!values.simulator.spawnPaceMigrated) {
+          config.value.simulator.spawnIntervalMin = 25
+          config.value.simulator.spawnIntervalMax = 60
+          config.value.simulator.carSpawnIntervalMin = 30
+          config.value.simulator.carSpawnIntervalMax = 60
+          config.value.simulator.maxAgents = 10
+          config.value.simulator.spawnPaceMigrated = true
+          try {
+            await saveConfig()
+          } catch (e) {
+            console.error('[useConfig] маркер миграции темпа не сохранён', e)
+          }
+        }
       }
 
       if (values.seeder) {

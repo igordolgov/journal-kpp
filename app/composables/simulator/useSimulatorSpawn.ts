@@ -14,6 +14,9 @@ import {
 } from '~/utils/simulatorConstants'
 import { getCarSvg, generateRealPersonSvg } from '~/utils/simulatorSvg'
 import type { SceneElement, Direction, TravelMode, TrafficConfig, AiAgent, PersonInfo } from '~/types/simulator'
+// [PAYROLL] реестр проходов (ground truth) и шина событий оплаты
+import { takePayrollPass } from '~/utils/payrollPass'
+import { publishEntryMissing } from '~/utils/payrollBus'
 
 export function useSimulatorSpawn(
   simElements: Ref<SceneElement[]>,
@@ -38,31 +41,39 @@ export function useSimulatorSpawn(
     formatDisplayName,
     createPersonInfo,
     logAgentEvent,
+    updateAgentStatusOnly,
     usedPeopleIds,
     allPeople
   } = integration
 
   // ----- Таймеры спавна -----
   let spawnTimerPersonEnter = 0
-  let nextSpawnTimePersonEnter = 8    // увеличен интервал
+  let nextSpawnTimePersonEnter = 10   // [ФИКС-флуд] первый пешеход — не мгновенно
   let spawnTimerPersonExit = 0
-  let nextSpawnPersonExit = 10
+  let nextSpawnPersonExit = 14
   let spawnTimerCarEnter = 0
-  let nextSpawnTimeCarEnter = 15
+  let nextSpawnTimeCarEnter = 20
   let spawnTimerCarExit = 0
-  let nextSpawnCarExit = 18
+  let nextSpawnCarExit = 25
 
   let isFirstUpdate = true
 
+  // [ФИКС-ЛИМИТ] бюджет «Макс. агентов»: сколько агентов фактически добавляет
+  // текущий спавн. Раньше группа из 2-4 человек считалась ОДНИМ агентом
+  // (attemptSpawn делал spawnedThisTickCount++ один раз), из-за чего на сцене
+  // становилось больше агентов, чем разрешено настройкой.
+  let spawnBudgetLeft = 999
+  let lastSpawnAdded = 0
+
   const resetSpawnTimers = () => {
     spawnTimerPersonEnter = 0
-    nextSpawnTimePersonEnter = 8
+    nextSpawnTimePersonEnter = 10
     spawnTimerPersonExit = 0
-    nextSpawnPersonExit = 10
+    nextSpawnPersonExit = 14
     spawnTimerCarEnter = 0
-    nextSpawnTimeCarEnter = 15
+    nextSpawnTimeCarEnter = 20
     spawnTimerCarExit = 0
-    nextSpawnCarExit = 18
+    nextSpawnCarExit = 25
     isFirstUpdate = true
   }
 
@@ -269,6 +280,8 @@ export function useSimulatorSpawn(
       }
     }
 
+    // [ФИКС-ЛИМИТ] фактический размер группы — для подсчёта слотов лимита
+    lastSpawnAdded = groupAgents.length
     const leaderAgent = groupAgents.find(a => a.isLeader)
     if (leaderAgent) {
       leaderAgent.groupMembers = groupAgents
@@ -354,6 +367,8 @@ export function useSimulatorSpawn(
       aiAgents.value.push(agent)
     })
     usedPeopleIds.value.add(person.id)
+    // [ФИКС-ЛИМИТ] одиночный агент занимает один слот лимита
+    lastSpawnAdded = 1
     return true
   }
 
@@ -448,12 +463,16 @@ export function useSimulatorSpawn(
     carElement.occupants = occupantsInfo
     aiAgents.value.push(carAgent)
 
-    audio.createPool(`car-${carAgent.id}`, 'engine', 1)
-    audio.createPool(`car-${carAgent.id}`, 'brake', 1)
-    audio.createPool(`car-${carAgent.id}`, 'horn', 1)
+    // [ФИКС-звук] Один пул на машину с ДВУМЯ слотами: createPool с тем же id
+    // — no-op, слоты 'brake'/'horn' никогда не создавались, и скрип тормозов
+    // не находил свободный слот (двигатель занимал единственный). Гудок
+    // играет через отдельный пул horn-pool.
+    audio.createPool(`car-${carAgent.id}`, 'engine', 2)
 
     usedPeopleIds.value.add(driverPerson.id)
     for (const occ of occupants) usedPeopleIds.value.add(occ.id)
+    // [ФИКС-ЛИМИТ] машина = один слот лимита (пассажиры внутри, не отдельные агенты)
+    lastSpawnAdded = 1
     return true
   }
 
@@ -470,14 +489,22 @@ export function useSimulatorSpawn(
     const gate = simElements.value.find(g => String(g.id) === gateId)
 
     if (travelMode === 'walk') {
-      const isGroup = Math.random() < 0.3
+      // [ФИКС-флуд] группы реже: семья из 4 человек = 4 журнальные записи
+      // разом, при ручном журнале охранник не успевал
+      // [ФИКС-флуд-2] группы ещё реже: 2-3 записи в журнал разом не успевать
+      // [ФИКС-ЛИМИТ] группа спавнится только если в лимите есть хотя бы 2
+      // свободных слота, а её размер зажимается остатком бюджета — «Макс.
+      // агентов» ограничивает ОДНОВРЕМЕННЫХ людей, а не попытки спавна
+      const budget = Math.max(1, Math.floor(spawnBudgetLeft))
+      const isGroup = Math.random() < 0.15 && budget >= 2
       if (!isGroup) return createSinglePerson(direction, person, cfg, gate, gateId)
 
       const MAX_GROUP_SIZE = simOpts.value.maxGroupSize ?? 4
       const MAX_NON_FAMILY = simOpts.value.maxNonFamily ?? 1
 
-      let groupSize = Math.floor(Math.random() * 3) + 2
+      let groupSize = Math.floor(Math.random() * 2) + 2
       if (groupSize > MAX_GROUP_SIZE) groupSize = MAX_GROUP_SIZE
+      if (groupSize > budget) groupSize = budget
 
       const familyMembers = Math.random() < 0.7
         ? getFamilyGroup(person, direction, groupSize, activePersonIdsSet.value, extraExcludeIds)
@@ -569,6 +596,10 @@ export function useSimulatorSpawn(
 
     const canSpawn = () => spawnedThisTickCount < safeMax
 
+    // [ФИКС-ЛИМИТ] передаём в spawnEntity остаток бюджета: лимит считается
+    // по фактическому числу агентов на сцене, а не по числу попыток
+    spawnBudgetLeft = safeMax - spawnedThisTickCount
+
     const attemptSpawn = (
       timer: number,
       nextTime: number,
@@ -580,10 +611,13 @@ export function useSimulatorSpawn(
       if (!shouldSpawn(timer, nextTime)) return false
       if (!canSpawn()) return false
 
+      spawnBudgetLeft = safeMax - spawnedThisTickCount
+      lastSpawnAdded = 0
       const { success, personId } = trySpawn(direction, type, cfg, spawnedThisTickIds)
       if (success) {
         if (personId) spawnedThisTickIds.add(personId)
-        spawnedThisTickCount++
+        // [ФИКС-ЛИМИТ] группа добавила несколько агентов — учитываем все слоты
+        spawnedThisTickCount += Math.max(1, lastSpawnAdded)
       }
       return success
     }
@@ -630,6 +664,40 @@ export function useSimulatorSpawn(
   const handleAgentDone = async (agent: AiAgent) => {
     if (agent.state === 'done') return
     agent.state = 'done'
+
+    // [PAYROLL] Ручной режим (автозапись выключена): журнал заполняет
+    // охранник. Симулятор только проверяет след прохода: агент уходит,
+    // а запись так и не появилась — публикуем entry_missing, сумму
+    // назначает движок по правилу. Авто-ветка ниже не выполняется вовсе.
+    if (!simOpts.value.autoJournal) {
+      const personId = agent.element.personId
+      // Статус «внутри/снаружи» обновляется всегда — физический проход
+      // состоялся независимо от того, записал ли его охранник
+      if (personId) {
+        const plate = agent.travelMode === 'car'
+          ? (agent.element.asset?.plate || '')
+          : undefined
+        updateAgentStatusOnly(personId, agent.direction, plate)
+      }
+      const pass = takePayrollPass(personId)
+      if (pass && !pass.recordedTs) {
+        publishEntryMissing({
+          personId,
+          fio: pass.fio,
+          plate: pass.plate,
+          direction: pass.direction,
+        })
+      }
+      // Освобождаем id для повторного спавна — в авто-режиме это делала
+      // ветка logAgentEvent, а в ручном журнал никто не пишет
+      if (personId) usedPeopleIds.value.delete(personId)
+      if (agent.type === 'car' && agent.occupants) {
+        for (const occ of agent.occupants) {
+          if (occ.id !== personId) usedPeopleIds.value.delete(occ.id)
+        }
+      }
+      return
+    }
 
     if (agent.type === 'person' || (agent.type === 'car' && agent.occupants?.length)) {
       const personId = agent.element.personId

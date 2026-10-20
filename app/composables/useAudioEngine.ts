@@ -560,8 +560,13 @@ export const useAudioEngine = () => {
     for (const item of pool) {
       if (item.nodes) {
         if (item.nodes.osc) {
-          if (Array.isArray(item.nodes.osc)) item.nodes.osc.forEach((o: OscillatorNode) => o.stop())
-          else item.nodes.osc.stop()
+          // [ФИКС-звук] stop() на уже остановленном узле бросает
+          // InvalidStateError и обрывал цепочку остановки — зацикленный
+          // noise-буфер продолжал звучать вечно (гул после убытия машины)
+          try {
+            if (Array.isArray(item.nodes.osc)) item.nodes.osc.forEach((o: OscillatorNode) => o.stop())
+            else item.nodes.osc.stop()
+          } catch (e) {}
         }
         if (item.nodes.rumble) item.nodes.rumble.stop()
         if (item.nodes.noise) try { item.nodes.noise.stop() } catch(e) {}
@@ -594,8 +599,13 @@ export const useAudioEngine = () => {
     for (const item of pool) {
       if (item.state === 'playing' && item.nodes) {
         if (item.nodes.osc) {
-          if (Array.isArray(item.nodes.osc)) item.nodes.osc.forEach((o: OscillatorNode) => o.stop())
-          else item.nodes.osc.stop()
+          // [ФИКС-звук] stop() на уже остановленном узле бросает
+          // InvalidStateError и обрывал цепочку остановки — зацикленный
+          // noise-буфер продолжал звучать вечно (гул после убытия машины)
+          try {
+            if (Array.isArray(item.nodes.osc)) item.nodes.osc.forEach((o: OscillatorNode) => o.stop())
+            else item.nodes.osc.stop()
+          } catch (e) {}
         }
         if (item.nodes.rumble) item.nodes.rumble.stop()
         if (item.nodes.noise) try { item.nodes.noise.stop() } catch(e) {}
