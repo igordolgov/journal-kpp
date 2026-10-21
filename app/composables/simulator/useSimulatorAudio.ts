@@ -64,6 +64,9 @@ export function useSimulatorAudio(
   const carPrevSpeeds = new Map<string, number>()   // Предыдущая скорость машины (для торможения)
   const lastBrakeTime = new Map<string, number>()   // Время последнего скрипа тормозов
   const carHornPlayed = new Set<string>()           // Флаг: уже сигналил ли автомобиль
+  // [БАГ-РЕПОРТ-8-ГУДОК] сколько секунд машина стоит у ЗАКРЫТЫХ ворот:
+  // гудок только после долгого ожидания (см. updateAgentAudio)
+  const carHornWait = new Map<string, number>()
 
   // Реактивный набор id агентов с меткой переговорника.
   // [ИСПРАВЛЕНО] string | number — id элемента сцены может быть числом (легаси-сцены)
@@ -281,16 +284,41 @@ export function useSimulatorAudio(
       }
 
       // --- Гудок (Клаксон) ---
-      // [НАСТРОЙКА] Мин. скорость (10), мин. громкость мотора (0.1),
-      // вероятность гудка 0.01/сек, пауза между гудками (3000мс)
-      if (speed > 10 && !carHornPlayed.has(agent.id) && targetVol > 0.1) {
-        const hornProb = 0.01 * dt
-        if (Math.random() < hornProb) {
-          // [НАСТРОЙКА] Громкость гудка: 0.6
-          audio.playFromPool('horn-pool', 'horn', 0.6)
+      // [БАГ-РЕПОРТ-8-ГУДОК] сигнал ТОЛЬКО при долгом ожидании у ЗАКРЫТЫХ
+      // ворот. Раньше гудок был случайным у ЛЮБОЙ движущейся машины
+      // (speed > 10, вероятность 0.01/с) — сигнал без причины на ходу.
+      // Теперь: машина стоит в waiting_before рядом с ближайшими
+      // автомобильными воротами, ворота ЗАКРЫТЫ и не анимируются, ожидание
+      // длится дольше HORN_MIN_WAIT (+ персональная фаза 0..3с, чтобы
+      // колонна не гудела хором) — короткий гудок; повтор не чаще
+      // HORN_REPEAT, пока прострой продолжается. Открылись/тронулись —
+      // счётчик ожидания сбрасывается.
+      const HORN_MIN_WAIT = 8    // сек ожидания до первого гудка
+      const HORN_REPEAT = 12     // сек между повторами, пока всё ждёт
+      let hornGate: SceneElement | undefined
+      let hornGateD = Infinity
+      for (const g of simElements.value) {
+        const gs = g.settings as Record<string, unknown> | undefined
+        if (g.category !== 'gate' || gs?.gateType === 'wicket') continue
+        const d = Math.hypot(g.x + g.width / 2 - agentX, g.y + g.height / 2 - agentY)
+        if (d < hornGateD) { hornGateD = d; hornGate = g }
+      }
+      const hornGateShut = hornGate &&
+        !hornGate.settings?.isOpen && !hornGate.settings?.isAnimating &&
+        !hornGate.settings?.isStopping
+      if (agent.state === 'waiting_before' && hornGate && hornGateShut && hornGateD < 260) {
+        const waited = (carHornWait.get(agent.id) ?? 0) + dt
+        carHornWait.set(agent.id, waited)
+        const phase = (String(agent.id).split('').reduce((a, c) => a + c.charCodeAt(0), 0) % 30) / 10
+        if (waited >= HORN_MIN_WAIT + phase && !carHornPlayed.has(agent.id)) {
+          // [НАСТРОЙКА] Громкость гудка: 0.6 (с дистанционным затуханием, пол 0.3)
+          audio.playFromPool('horn-pool', 'horn', 0.6 * Math.max(0.3, fadeMultiplier))
           carHornPlayed.add(agent.id)
-          setTimeout(() => carHornPlayed.delete(agent.id), 3000)
+          carHornWait.delete(agent.id)
+          setTimeout(() => carHornPlayed.delete(agent.id), HORN_REPEAT * 1000)
         }
+      } else {
+        carHornWait.delete(agent.id)
       }
 
       carPrevSpeeds.set(agent.id, speed)
@@ -318,6 +346,9 @@ export function useSimulatorAudio(
     }
     for (const id of carHornPlayed) {
       if (!currentAgentIds.has(id)) carHornPlayed.delete(id)
+    }
+    for (const id of carHornWait.keys()) {
+      if (!currentAgentIds.has(id)) carHornWait.delete(id)
     }
     for (const id of stepTimers.keys()) {
       if (!currentAgentIds.has(id)) stepTimers.delete(id)
@@ -347,6 +378,7 @@ export function useSimulatorAudio(
     carPrevSpeeds.delete(agentId)
     lastBrakeTime.delete(agentId)
     carHornPlayed.delete(agentId)
+    carHornWait.delete(agentId)
   }
 
   const resetAllAudioTimers = () => {
@@ -354,6 +386,7 @@ export function useSimulatorAudio(
     carPrevSpeeds.clear()
     lastBrakeTime.clear()
     carHornPlayed.clear()
+    carHornWait.clear()
     audio.resetPool('gate-active')
   }
 
@@ -368,6 +401,7 @@ export function useSimulatorAudio(
     carPrevSpeeds.clear()
     lastBrakeTime.clear()
     carHornPlayed.clear()
+    carHornWait.clear()
   }
 
   return {

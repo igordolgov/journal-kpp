@@ -90,13 +90,17 @@
         button.btn.btn-xs.btn-outline.btn-error.mt-2(@click="resetSettings") Сбросить
 
   //- Основной холст симуляции
-  .relative.flex.flex-1.items-center.justify-center.overflow-hidden.bg-gray-800(ref="containerRef")
+  //- [БАГ-РЕПОРТ-8-ВЫРАВНИВАНИЕ] окно симулятора прижато ВЛЕВО (как было
+  //- раньше): justify-start/items-start вместо центрирования.
+  .relative.flex.flex-1.items-start.justify-start.overflow-hidden.bg-gray-800(ref="containerRef")
     //- [СХЕМА-ТРАЕКТОРИЙ] холст имеет КОНФИГ-размер сцены (например 1280x720)
     //- и целиком масштабируется под контейнер (scale, origin center).
     //- Раньше sceneSize перезаписывался размером контейнера: сцена обрезалась,
     //- а точки спавна/деспавна (fallback от sceneSize) ползли за контейнером.
+    //- [БАГ-РЕПОРТ-8-ВЫРАВНИВАНИЕ] origin top-left: масштаб ведётся от
+    //- левого-верхнего угла, сцена не уплывает от левого края
     .sim-canvas-wrapper.relative.overflow-hidden.shrink-0(
-      :style="{ width: sceneSize.width + 'px', height: sceneSize.height + 'px', transform: `scale(${scale})`, transformOrigin: 'center center' }"
+      :style="{ width: sceneSize.width + 'px', height: sceneSize.height + 'px', transform: `scale(${scale})`, transformOrigin: 'top left' }"
     )
       template(v-for="el in simElements" :key="el.id")
         .absolute.cursor-pointer(

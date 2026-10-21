@@ -110,7 +110,10 @@ describe('simulatorTraffic: каноническая схема — вход', (
 
     const exit = deriveTrafficPoints(gate, CAR, 'exit', SCENE)
     expect(exit.spawn.y - CH).toBeGreaterThanOrEqual(SCENE.height)
-    expect(exit.stop.y + CH).toBeCloseTo(220 + OFF_CAR, 5)
+    // [БАГ-РЕПОРТ-8-СТОП] стоп выезжающей — ЗЕРКАЛЬНО въезжающей: передний
+    // край (верх спрайта) НА нижней линии ворот (bottom = линия + h),
+    // раньше bottom = линия + 58 и бампер недоезжал 18px («далеко»)
+    expect(exit.stop.y + CH).toBeCloseTo(220 + 2 * CH, 5)
     // [БАГ-РЕПОРТ-5] ждёт закрытия и уезжает ВЫШЕ линии дороги
     // (CAR_EXIT_PULL_PAST): за шлагбаумом, на своей полосе
     expect(exit.cross.y + CH).toBeCloseTo(220 - CAR_EXIT_PULL_PAST, 5)

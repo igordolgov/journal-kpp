@@ -204,7 +204,15 @@ export const deriveTrafficPoints = (
   return {
     vertical: true,
     spawn: { x: cx, y: scene.height + 60 + size.height / 2 },
-    stop:  { x: cx, y: roadY + off },
+    // [БАГ-РЕПОРТ-8-СТОП] стоп выезжающей машины - ЗЕРКАЛЬНО въезжающей:
+    // передний край (верх спрайта) НА нижней линии ворот. Раньше центр был
+    // на roadY + off (58): бампер недоезжал 18px до линии - на фоне
+    // въезжающих (бампер ВПРИТИРКУ) выезжающая "останавливается далеко".
+    // roadY + высота корпуса = gBottom + h/2: верх спрайта ровно на линии.
+    // У человека без изменений (thin-корпус не читается как "далеко").
+    stop: isPerson
+      ? { x: cx, y: roadY + off }
+      : { x: cx, y: roadY + size.height },
     cross: { x: cx, y: exitY },
     after: { x: edgeX, y: exitY },
   }

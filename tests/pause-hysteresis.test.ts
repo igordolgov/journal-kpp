@@ -76,9 +76,10 @@ describe('[ФИКС-ДЁРГАНИЕ] is-paused с гистерезисом', ()
   })
 
   it('в полосе гистерезиса (0.1..1.5) флаг не мигает — держит прежнее значение', () => {
-    // Медленный разгон: ACCEL=5 => за кадр +0.5 px/s: 0.5 -> 1.0 -> 1.5 -> 2.0
+    // Медленный разгон: [№8] разгон людей = ACCEL/2 => ACCEL=5 даёт +0.25 px/с
+    // за кадр: 0.5 -> 0.75 -> 1.0 -> 1.25 -> 1.5 -> 1.75 -> 2.0.
     // Флаг читается в НАЧАЛЕ кадра, поэтому граница > 1.5 снимает паузу
-    // только на кадре, когда сверху пришла скорость 2.0.
+    // только на кадре, когда сверху пришла скорость 1.75.
     const { aiAgents, physics } = buildPhysics({ ACCEL: 5, DECEL: 2 })
     const person = makePerson({ state: 'to_gate' })
     person.element.y = 600
@@ -86,16 +87,20 @@ describe('[ФИКС-ДЁРГАНИЕ] is-paused с гистерезисом', ()
     person.element.velocity = 0.5
     person.element.isPaused = true
     aiAgents.value = [person]
-    physics.updateAiMovement(DT, CFG) // флаг(0.5): полоса -> держится; v := 1.0
+    physics.updateAiMovement(DT, CFG) // флаг(0.5): полоса -> держится; v := 0.75
+    expect(person.element.velocity).toBeCloseTo(0.75, 5)
+    expect(person.element.isPaused).toBe(true)
+    physics.updateAiMovement(DT, CFG) // флаг(0.75): полоса -> держится; v := 1.0
     expect(person.element.velocity).toBeCloseTo(1.0, 5)
     expect(person.element.isPaused).toBe(true)
-    physics.updateAiMovement(DT, CFG) // флаг(1.0): полоса -> держится; v := 1.5
-    expect(person.element.velocity).toBeCloseTo(1.5, 5)
+    physics.updateAiMovement(DT, CFG) // флаг(1.0): полоса -> держится; v := 1.25
+    expect(person.element.velocity).toBeCloseTo(1.25, 5)
     expect(person.element.isPaused).toBe(true)
-    physics.updateAiMovement(DT, CFG) // флаг(1.5): строгое > -> держится; v := 2.0
-    expect(person.element.velocity).toBeCloseTo(2.0, 5)
+    physics.updateAiMovement(DT, CFG) // флаг(1.25): полоса -> держится; v := 1.5
     expect(person.element.isPaused).toBe(true)
-    physics.updateAiMovement(DT, CFG) // флаг(2.0): выше 1.5 -> пауза снята
+    physics.updateAiMovement(DT, CFG) // флаг(1.5): строгое > -> держится; v := 1.75
+    expect(person.element.isPaused).toBe(true)
+    physics.updateAiMovement(DT, CFG) // флаг(1.75): выше 1.5 -> пауза снята
     expect(person.element.isPaused).toBe(false)
   })
 })

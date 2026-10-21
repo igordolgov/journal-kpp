@@ -1,8 +1,8 @@
 // tests/car-corridor-yield.test.ts
 // [БАГ-РЕПОРТ-6-УСТУПАНИЕ-МАШИН] машины уступают проезд друг другу «как люди»:
-//  1) выезжающая машина, стоящая на посадке въезда (= её остановка), отъезжает
-//     ВГЛУБЬ БАЗЫ, пока въезжающая проходит ворота; въезжающая проходит
-//     ПЛАВНО (без скачков позиции) и без watchdog-телепорта;
+//  1) выезжающая машина, стоящая у своих ворот (её остановка — [№8] зеркальна
+//     посадке въезда), отъезжает ВГЛУБЬ БАЗЫ, пока въезжающая проходит ворота;
+//     въезжающая проходит ПЛАВНО (без скачков позиции) и без watchdog-телепорта;
 //  2) въезжающая, припаркованная НА линии прохода выезда, отъезжает НАЗАД ПО
 //     ДОРОГЕ, выезжающая проходит ворота плавно;
 //  3) колонна машин отъезжает «в.lockstep» — дистанция между своими не меняется;
@@ -36,6 +36,9 @@ const GATE = {
 const ROAD_Y = 220 - CAR.height / 2          // 200 — центр на дороге
 const ENTER_STOP_Y = ROAD_Y                  // остановка въезда (бампер на линии)
 const ENTER_CROSS_Y = ROAD_Y + CAR_STOP_OFFSET // 258 — посадка въезда
+// [БАГ-РЕПОРТ-8-СТОП] остановка выезда — ЗЕРКАЛЬНО въезду: передний край
+// (верх спрайта) на нижней линии ворот => центр = ROAD_Y + высота корпуса
+const EXIT_STOP_Y = ROAD_Y + CAR.height      // 240 — остановка выезда
 const EXIT_CROSS_Y = ROAD_Y - CAR_EXIT_PULL_PAST // 160 — ожидание закрытия
 
 const buildHarness = (gateOverrides: Record<string, unknown> = {}) => {
@@ -135,10 +138,10 @@ describe('уступание машин у ворот ([БАГ-РЕПОРТ-6])'
       pos: { x: 580, y: ENTER_STOP_Y }, target: { x: 580, y: ENTER_CROSS_Y },
       exitPoint: { x: 580, y: ENTER_CROSS_Y }, afterTarget: { x: 580, y: 900 },
     })
-    // выезжающая стоит НА посадке въезда (её остановка = та же точка)
+    // выезжающая стоит на СВОЕЙ остановке (бампер на линии ворот, [№8])
     const exit = mkCar({
       id: 'car-x', direction: 'exit', state: 'waiting_before',
-      pos: { x: 580, y: ENTER_CROSS_Y }, target: { x: 580, y: ENTER_CROSS_Y },
+      pos: { x: 580, y: EXIT_STOP_Y }, target: { x: 580, y: EXIT_STOP_Y },
       exitPoint: { x: 580, y: EXIT_CROSS_Y }, afterTarget: { x: 1300, y: EXIT_CROSS_Y },
     })
     h.aiAgents.value = [enter, exit]
@@ -244,7 +247,7 @@ describe('уступание машин у ворот ([БАГ-РЕПОРТ-6])'
     })
     const exit = mkCar({
       id: 'car-x', direction: 'exit', state: 'waiting_before',
-      pos: { x: 580, y: ENTER_CROSS_Y }, target: { x: 580, y: ENTER_CROSS_Y },
+      pos: { x: 580, y: EXIT_STOP_Y }, target: { x: 580, y: EXIT_STOP_Y },
       exitPoint: { x: 580, y: EXIT_CROSS_Y }, afterTarget: { x: 1300, y: EXIT_CROSS_Y },
     })
     h.aiAgents.value = [enter, exit]
@@ -255,7 +258,7 @@ describe('уступание машин у ворот ([БАГ-РЕПОРТ-6])'
     }
     expect(enter.state).toBe('waiting_after')
     const backedOffY = centerOf(exit).y
-    expect(backedOffY).toBeGreaterThan(ENTER_CROSS_Y + 20)
+    expect(backedOffY).toBeGreaterThan(EXIT_STOP_Y + 20)
 
     // фаза 2: ворота закрыли (вручную, без таймеров) — въезжающая уезжает вниз
     h.gate.settings.isOpen = false
@@ -273,10 +276,10 @@ describe('уступание машин у ворот ([БАГ-РЕПОРТ-6])'
     for (let i = 0; i < 160; i++) { // 8с
       h.physics.updateAiMovement(DT, { carGateId: 'car-gate-1', personGateId: '' })
       if (exit.state === 'waiting_before' &&
-          Math.abs(centerOf(exit).y - ENTER_CROSS_Y) < 8) break
+          Math.abs(centerOf(exit).y - EXIT_STOP_Y) < 8) break
     }
     expect(exit.state).toBe('waiting_before')
-    expect(Math.abs(centerOf(exit).y - ENTER_CROSS_Y)).toBeLessThan(8)
+    expect(Math.abs(centerOf(exit).y - EXIT_STOP_Y)).toBeLessThan(8)
     expect(h.warns.filter(w => w.includes('[watchdog]'))).toEqual([])
   })
 
