@@ -347,8 +347,8 @@
                   @click="deselectVehicle"
                   class="bg-linear-to-br from-base-100 to-base-200 shadow-sm hover:shadow-md border border-base-300 rounded-full"
                 )
-                  span.px-1.font-semibold.border.border-base-content/20.rounded-md(
-                    class="bg-neutral text-neutral-content"
+                  span.px-1.font-semibold.border.rounded-md(
+                    class="bg-neutral border-base-content/20 text-neutral-content"
                   )
                     | {{ selectedVehicle.plate }}
                   X.w-4.w-4.opacity-60(

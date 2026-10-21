@@ -293,7 +293,7 @@ export function useSimulatorAudio(
       // колонна не гудела хором) — короткий гудок; повтор не чаще
       // HORN_REPEAT, пока прострой продолжается. Открылись/тронулись —
       // счётчик ожидания сбрасывается.
-      const HORN_MIN_WAIT = 8    // сек ожидания до первого гудка
+      const HORN_MIN_WAIT = 12   // сек ожидания до первого гудка ([№9] 8 -> 12)
       const HORN_REPEAT = 12     // сек между повторами, пока всё ждёт
       let hornGate: SceneElement | undefined
       let hornGateD = Infinity

@@ -216,6 +216,20 @@ export function useSimulatorPhysics(
     for (const o of aiAgents.value) {
       if (o.id === agent.id || o.type !== 'car' || o.direction === agent.direction || o.state === 'done') continue
       if (o.state === 'crossing') return nearStop ? 2 : 1
+      // [№9-ПРИОРИТЕТ-ВЫЕЗДА] выезжающая стоит/подъезжает к своему створу
+      // (базовая сторона, зона ворот) — въезжающая освобождает полосу:
+      // у остановки отъезжает назад по дороге (2), на подходе тормозит к
+      // границе створа (1). Только на подходе/стоянке: в crossing машиной
+      // управляют leader-follow и очередь направлений.
+      if (agent.direction === 'enter' &&
+          (agent.state === 'to_gate' || agent.state === 'waiting_before') &&
+          (o.state === 'to_gate' || o.state === 'waiting_before')) {
+        const ocyYield = o.element.y + o.element.height / 2
+        if (ocyYield > gate.y + gate.height - 10 &&
+            distToGateCenter(o, gate) <= GATE_ZONE_CAR) {
+          return nearStop ? 2 : 1
+        }
+      }
       if (includeWaitingAfter && o.state === 'waiting_after') {
         const ocx = o.element.x + o.element.width / 2
         const ocy = o.element.y + o.element.height / 2
@@ -373,6 +387,23 @@ export function useSimulatorPhysics(
           return true
         }
       }
+      // [№9-ПРИОРИТЕТ-ВЫЕЗДА] въезжающая не начинает проход, пока выезжающая
+      // занимает свой створ с базовой стороны (to_gate/waiting_before в зоне
+      // ворот): выезд идёт ПЕРВЫМ, въезжающая отъезжает (carYieldLevel) и ждёт.
+      // Раньше FCFS мог пустить въезжающую первой — она заезжала В корпус
+      // стоящей выезжающей («въезжающая толкает выезжающую»), и пара
+      // расходилась только по предохранителям (25/90с).
+      if (agent.type === 'car' && agent.direction === 'enter') {
+        const gBottomOcc = gate.y + gate.height
+        for (const o of aiAgents.value) {
+          if (o.id === agent.id || o.type !== 'car' || o.direction !== 'exit' || o.state === 'done') continue
+          if (o.state !== 'to_gate' && o.state !== 'waiting_before') continue
+          const ocyOcc = o.element.y + o.element.height / 2
+          if (ocyOcc <= gBottomOcc - 10) continue
+          if (distToGateCenter(o, gate) > GATE_ZONE_CAR) continue
+          return true
+        }
+      }
       for (const o of aiAgents.value) {
         if (o.id === agent.id || o.type !== agent.type || o.direction !== opp || o.state === 'done') continue
         // проход или стоянка сразу за проходом — занимают всегда
@@ -381,6 +412,13 @@ export function useSimulatorPhysics(
         const ocy = o.element.y + o.element.height / 2
         if (Math.hypot(ocx - gcx, ocy - gcy) >= zoneR) continue
         if (o.state === 'waiting_before') {
+          // [№9-ПРИОРИТЕТ-ВЫЕЗДА] выезд не ждёт очереди у въезжающей, стоящей
+          // на дороге (её бампер не ниже линии ворот): въезжающая уступает
+          // физически — отъезжает по дороге (carYieldLevel), выезжающая
+          // проходит первой. Без этого пара «нос к носу» ждала FCFS друг
+          // друга и расходилась только по предохранителям.
+          if (agent.direction === 'exit' &&
+              (o.element.y + o.element.height) <= gate.y + gate.height + 10) continue
           // оба направления стоят у прохода — первым идёт пришедший раньше (FCFS)
           const t = waitStartByAgentId.get(o.id) ?? Date.now()
           if (t < myEarliest || (t === myEarliest && opp === 'enter')) return true
@@ -566,10 +604,37 @@ export function useSimulatorPhysics(
           const isExit = agent.direction === 'exit'
           const bx = isExit ? 0 : (((el.settings as any)?._facingLeft !== false) ? 1 : -1)
           const by = isExit ? 1 : 0
-          let step = CAR_YIELD_SPEED * dt
+          // [№9] встречная в crossing — экстренная расчистка полосы: отъезд
+          // на 40% быстрее, чтобы встречная не ждала лишних секунд у створа
+          const oppCrossing = aiAgents.value.some(o =>
+            o.id !== agent.id && o.type === 'car' && o.state === 'crossing' &&
+            o.direction !== agent.direction)
+          let step = (oppCrossing ? CAR_YIELD_SPEED * 1.4 : CAR_YIELD_SPEED) * dt
           step = Math.min(step, CAR_YIELD_MAX - backoff)
           if (isExit) step = Math.min(step, Math.max(0, sceneSize.value.height - 50 - (el.y + el.height)))
           if (step > 0) {
+            // [№9-ЗАДНИЙ-ХОД] не отъезжаем В корпус: машина на оси отъезда
+            // впереди ближе 85px — ждём (колонна отъезжает эшелонированно,
+            // задний ход не бьёт задний бампер своего/чужого)
+            const bl = Math.hypot(bx, by)
+            let rearBlocked = false
+            if (bl > 0.01) {
+              const ux0 = bx / bl
+              const uy0 = by / bl
+              rearBlocked = aiAgents.value.some(o => {
+                if (o.id === agent.id || o.type !== 'car' || o.state === 'done') return false
+                const rxc = o.element.x + o.element.width / 2 - (el.x + el.width / 2)
+                const ryc = o.element.y + o.element.height / 2 - (el.y + el.height / 2)
+                const aheadR = rxc * ux0 + ryc * uy0
+                if (aheadR < 10 || aheadR > 85) return false
+                return Math.abs(rxc * uy0 - ryc * ux0) < 50
+              })
+            }
+            if (rearBlocked) {
+              el.velocity = 0
+              holdByAgentId.set(agent.id, 'car-yield')
+              continue
+            }
             el.x += bx * step
             el.y += by * step
             el.velocity = CAR_YIELD_SPEED
@@ -1031,7 +1096,15 @@ export function useSimulatorPhysics(
       // задним ходом, освобождая проход) — тогда догоняем плавно, без «стой-поехаль»
       let leaderRetreatsAlongCourse = false
       const myLen = Math.max(el.width, el.height)
-      const myWid = Math.min(el.width, el.height)
+      // [№9-КЛИП] поперечник корпуса ПЕРПЕНДИКУЛЯРНО курсу: машина рисуется
+      // в профиль (длина 80 по X, высота 40 по Y) — на горизонтальном курсе
+      // поперечник это высота (40), на вертикальном — длина (80). Раньше
+      // всегда брали min(w,h): на вертикальном курсе метрика считала корпус
+      // вдвое уже — выезжающая начинала проход, когда встречная отъехала на
+      // 55px, и её нос на ~20px накрывал задний угол отъезжающей.
+      const myWid = agent.type === 'car'
+        ? (Math.abs(dirX) >= Math.abs(dirY) ? el.height : el.width)
+        : Math.min(el.width, el.height)
       // [БАГ-РЕПОРТ-4-ЛОБОВЫЕ] уступи встречной to_gate-машине: приоритет у той,
       // что КЛИЧЕ к своей цели (при равенстве — меньший id). Уступающая
       // останавливается ЗАРАНЕЕ (по обнаружению в коридоре), поэтому приоритетная
@@ -1062,7 +1135,9 @@ export function useSimulatorPhysics(
         // бы друг друга навсегда). Совпавшие центры разводит расхождение ниже.
         if (forward <= 0 || forward > MAX_LOOKAHEAD) continue
         const lateral = Math.abs(cross({ x: toX, y: toY }, { x: dirX, y: dirY }))
-        const otherWid = Math.min(other.element.width, other.element.height)
+        const otherWid = agent.type === 'car'
+          ? (Math.abs(dirX) >= Math.abs(dirY) ? other.element.height : other.element.width)
+          : Math.min(other.element.width, other.element.height)
         if (lateral > myWid / 2 + otherWid / 2 + 15) continue
 
         if (agent.type === 'car') {
@@ -1220,7 +1295,24 @@ export function useSimulatorPhysics(
       if (dist < 80) {
         const brakeFloor = agent.type === 'person' ? 11 : 24
         const brakeGain = agent.type === 'person' ? 0.6 : 0.7
-        targetSpeed = Math.min(targetSpeed, Math.max(brakeFloor, dist * brakeGain))
+        let brakeCap = Math.max(brakeFloor, dist * brakeGain)
+        // [№9-РЫВОК] дотягивание перед ТОЧКОЙ ОСТАНОВА: на коротком отрезке
+        // скорость плавно спадает от brakeFloor до ходового пола (машина 8,
+        // человек 4) — посадка без «клевка» (раньше в кадр прибытия скорость
+        // падала brakeFloor -> 0 мгновенно). Транзитные фазы (человек в
+        // crossing/moving_away проходит калитку и уходит НЕ останавливаясь)
+        // дотягиванию не подлежат — тормозить в дверном проёме нельзя.
+        const stopsAtTarget = agent.state === 'to_gate' ||
+          (agent.type === 'car' && agent.state === 'crossing')
+        if (stopsAtTarget) {
+          const taperZone = agent.type === 'person' ? 8 : 12
+          const taperFloor = agent.type === 'person' ? 4 : 8
+          if (dist < taperZone) {
+            const k = Math.max(0, dist) / taperZone
+            brakeCap = taperFloor + (brakeFloor - taperFloor) * k
+          }
+        }
+        targetSpeed = Math.min(targetSpeed, brakeCap)
       }
       // [БАГ-РЕПОРТ-4-ЛОБОВЫЕ] уступаю встречной to_gate-машине —
       // останавливаюсь заранее, не доезжая до зоны встречи
@@ -1231,10 +1323,21 @@ export function useSimulatorPhysics(
       // [БАГ-РЕПОРТ-6-УСТУПАНИЕ-МАШИН] машина на подходе (level 1 — не у
       // остановки, отъезд не нужен) замирает, пока встречная проезжает/уезжает
       // через её коридор; отойдет триггер — поедет дальше сама.
-      if (agent.type === 'car' && gate && distToGateCenter(agent, gate) < CAR_GATE_ZONE &&
-          carYieldLevel(agent, gate, false) > 0 && !bypassActive) {
-        targetSpeed = 0
-        holdByAgentId.set(agent.id, 'car-yield') // [БАГ-РЕПОРТ-7] уступаю проезд
+      if (agent.type === 'car' && gate && distToGateCenter(agent, gate) < CAR_GATE_ZONE && !bypassActive) {
+        const yieldLevel = carYieldLevel(agent, gate, false)
+        if (yieldLevel > 0) {
+          // [№9-РЫВОК] уступка на подходе — не ступенька «крейсерская -> 0»:
+          // скорость гасится пропорционально остатку до границы створа
+          // (CAR_YIELD_NEAR_STOP до своей остановки). Ступень 0 осталась
+          // только у самой остановки и для жёстких уровней.
+          if (yieldLevel === 1 && agent.state === 'to_gate') {
+            const holdDist = Math.max(0, dist - CAR_YIELD_NEAR_STOP)
+            targetSpeed = Math.min(targetSpeed, holdDist <= 2 ? 0 : Math.max(14, holdDist * 0.7))
+          } else {
+            targetSpeed = 0
+          }
+          holdByAgentId.set(agent.id, 'car-yield') // [БАГ-РЕПОРТ-7] уступаю проезд
+        }
       }
 
       // [БАГ-РЕПОРТ-8-ДЁРГАНИЕ] разгон людей вдвое мягче машинного:

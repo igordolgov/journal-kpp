@@ -10,8 +10,34 @@ minimumReleaseAgeExclude:
   - '@nuxt/vite-builder@4.6.0'
   - '@nuxt/vite-server@4.6.0'
   - nuxt@4.6.0
-  - '@lucide/vue@1.60.0'
-  - electron@44.9.1
+  - '@lucide/vue@1.60.0 || 1.61.0'
+  - electron@44.9.1 || 45.0.0
+  - '@markuplint/html-parser@5.3.0'
+  - '@markuplint/ml-ast@5.3.0'
+  - '@markuplint/ml-spec@5.3.0'
+  - '@markuplint/parser-utils@5.3.0'
+  - '@markuplint/shared@5.3.0'
+  - '@markuplint/types@5.3.0'
+  - '@markuplint/vue-parser@5.3.0'
+  - '@markuplint/vue-spec@5.3.0'
+  - happy-dom@21.0.4
+  - '@markuplint/astro-parser@5.3.0'
+  - '@markuplint/cli-utils@5.3.0'
+  - '@markuplint/config-presets@5.3.0'
+  - '@markuplint/file-resolver@5.3.0'
+  - '@markuplint/html-spec@5.3.0'
+  - '@markuplint/i18n@5.3.0'
+  - '@markuplint/jsx-parser@5.3.0'
+  - '@markuplint/markdown-parser@5.3.0'
+  - '@markuplint/mdx-parser@5.3.0'
+  - '@markuplint/ml-config@5.3.0'
+  - '@markuplint/ml-core@5.3.0'
+  - '@markuplint/pretenders@5.3.0'
+  - '@markuplint/rules@5.3.0'
+  - '@markuplint/selector@5.3.0'
+  - '@markuplint/svelte-parser@5.3.0'
+  - markuplint@5.3.0
+  - sass@1.106.0
 
 allowBuilds:
   '@parcel/watcher': true

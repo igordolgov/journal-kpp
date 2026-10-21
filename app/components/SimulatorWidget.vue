@@ -244,7 +244,7 @@
       class="bg-black/70"
     )
       .rounded-xl.p-5.shadow-2xl(
-        class="bg-gray-900 border border-white/10 w-[340px]"
+        class="bg-gray-900 border border-white/10 w-85"
       )
         .flex.items-center.gap-2.mb-2
           ShieldAlert.w-5.h-5(class="text-warning")
