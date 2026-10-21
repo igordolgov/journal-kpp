@@ -179,30 +179,46 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
   // вправо/стоят — нос вправо. Вертикальные участки (проход, убыль) сохраняют
   // последнюю горизонтальную ориентацию, как в прежней схеме.
   // Люди никогда не вращаются — только по флагу enableRotation.
+  // [ФИКС-РЫВОК-ДОТЯГИВАНИЯ] позиционирование ПЕРЕВЕДЕНО с left/top на
+  // translate3d. left/top обновляются каждый кадр физики и заставляют браузер
+  // пересчитывать layout всей сцены; хуже того — SVG-растр внутри
+  // масштабированной сцены (transform: scale) привязывается к ЦЕЛЫМ
+  // физическим пикселям, и на медленном ходу (дотягивание 8-24 px/с =
+  // 0.1-0.4 px за кадр) агент двигался прыжками по 1 px — видимое
+  // «дёргание перед точкой останова». translate3d выносит элемент на
+  // композитный слой: смещение применяется на GPU с субпиксельной точностью,
+  // layout не пересчитывается вовсе. Для машин и людей добавлен will-change.
   const getElementStyle = (el: SceneElement, enableRotation: boolean) => {
-    const base = {
+    const moving = el.category === 'car' || el.category === 'human'
+    const base: Record<string, string | number> = {
       position: 'absolute' as const,
-      left: `${el.x}px`,
-      top: `${el.y}px`,
+      left: '0px',
+      top: '0px',
       width: `${el.width}px`,
       height: `${el.height}px`,
       zIndex: el.zIndex || 1,
+      transform: `translate3d(${el.x}px, ${el.y}px, 0)`,
     }
+    if (moving) base.willChange = 'transform'
     if (el.category === 'car') {
       const facingLeft = (el.settings as any)?._facingLeft ?? el.direction === 'enter'
-      return { ...base, transform: facingLeft ? 'scaleX(-1)' : 'none' }
+      base.transform = `${base.transform} scaleX(${facingLeft ? -1 : 1})`
+      return base
     }
-    return {
-      ...base,
-      transform: enableRotation ? `rotate(${(el.rotation || 0) * 180 / Math.PI}deg)` : 'none'
+    if (enableRotation) {
+      base.transform = `${base.transform} rotate(${((el.rotation || 0) * 180) / Math.PI}deg)`
     }
+    return base
   }
 
   const getLabelStyle = (el: SceneElement) => {
     const x = el.x + el.width / 2
     const y = el.y - 47
     return {
-      left: `${x}px`, top: `${y}px`, transform: 'translateX(-50%)',
+      // [ФИКС-РЫВОК-ДОТЯГИВАНИЯ] та же схема translate3d, что у агентов:
+      // лейбл движется субпиксельно вместе с машиной/человеком, без шагов
+      left: '0px', top: '0px',
+      transform: `translate3d(${x}px, ${y}px, 0) translateX(-50%)`,
       background: 'rgba(0, 0, 0, 0.7)', color: 'white', fontSize: '11px',
       fontWeight: 'bold', padding: '2px 8px', borderRadius: '4px',
       whiteSpace: 'nowrap', fontFamily: 'monospace', zIndex: 1000, pointerEvents: 'none'

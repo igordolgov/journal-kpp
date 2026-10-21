@@ -34,11 +34,12 @@ const GATE = {
 }
 
 const ROAD_Y = 220 - CAR.height / 2          // 200 — центр на дороге
-const ENTER_STOP_Y = ROAD_Y                  // остановка въезда (бампер на линии)
+const ENTER_STOP_Y = ROAD_Y - 6               // остановка въезда ([СПЕЦ-Z7] бампер на 6px выше линии)
 const ENTER_CROSS_Y = ROAD_Y + CAR_STOP_OFFSET // 258 — посадка въезда
-// [БАГ-РЕПОРТ-8-СТОП] остановка выезда — ЗЕРКАЛЬНО въезду: передний край
-// (верх спрайта) на нижней линии ворот => центр = ROAD_Y + высота корпуса
-const EXIT_STOP_Y = ROAD_Y + CAR.height      // 240 — остановка выезда
+// [БАГ-РЕПОРТ-8-СТОП][СПЕЦ-Z8] остановка выезда — зеркально въезду, бампер
+// НЕ впритык: верх спрайта на 10px ниже линии ворот
+// => центр = ROAD_Y + высота корпуса + 10
+const EXIT_STOP_Y = ROAD_Y + CAR.height + 10  // 250 — остановка выезда
 const EXIT_CROSS_Y = ROAD_Y - CAR_EXIT_PULL_PAST // 160 — ожидание закрытия
 
 const buildHarness = (gateOverrides: Record<string, unknown> = {}) => {
@@ -148,15 +149,20 @@ describe('уступание машин у ворот ([БАГ-РЕПОРТ-6])'
     const motion = trackMotion([enter, exit])
     const startY = centerOf(exit).y
 
+    let enterLanded = false
     for (let i = 0; i < 80; i++) { // 4с
       h.physics.updateAiMovement(DT, { carGateId: 'car-gate-1', personGateId: '' })
       motion.step()
+      if (enter.state === 'waiting_after' || enter.state === 'moving_away') enterLanded = true
     }
 
     // встречная отъехала вниз (освободила посадку)
     expect(centerOf(exit).y - startY).toBeGreaterThanOrEqual(25)
-    // въезжающая плавно прошла ворота и ждёт закрытия
-    expect(enter.state).toBe('waiting_after')
+    // въезжающая плавно прошла ворота и была на посадке: при [П6] после
+    // паузы 0.8с она уезжает, не дожидаясь закрытия, поэтому к концу окна
+    // допустима уже moving_away
+    expect(enterLanded).toBe(true)
+    expect(['waiting_after', 'moving_away']).toContain(enter.state)
     // без телепортов: скачок за кадр не длиннее шага скорости + посадка
     expect(motion.maxJump()).toBeLessThanOrEqual(100 * DT + 3)
     // корпуса не пересекались (носовой зазор при старте — 18px, это норма)

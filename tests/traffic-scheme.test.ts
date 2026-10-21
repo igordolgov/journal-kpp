@@ -68,8 +68,9 @@ describe('simulatorTraffic: каноническая схема — вход', (
     expect(pts.spawn.x - PH).toBeGreaterThanOrEqual(SCENE.width)
     // спавн на линии дороги: подошва на нижней линии калитки (220)
     expect(pts.spawn.y + PH - 2).toBeCloseTo(220, 5)
-    // стоп: подошва ТОЖЕ на линии (не выше и не ниже), X — центр калитки
-    expect(pts.stop.y + PH - 2).toBeCloseTo(220, 5)
+    // стоп: подошва на 6 px ВЫШЕ линии ([СПЕЦ-Z5/Z7] не впритык к забору),
+    // X — центр калитки
+    expect(pts.stop.y + PH - 2).toBeCloseTo(214, 5)
     expect(pts.stop.x).toBeCloseTo(W_CX, 5)
     // проход: подошва на стоп-офсет ниже линии дороги
     expect(pts.cross.y + PH - 2).toBeCloseTo(220 + OFF_PERSON, 5)
@@ -101,8 +102,9 @@ describe('simulatorTraffic: каноническая схема — вход', (
     const enter = deriveTrafficPoints(gate, CAR, 'enter', SCENE)
     expect(enter.vertical).toBe(false)
     expect(enter.spawn.x - CH).toBeGreaterThanOrEqual(SCENE.width)
-    // стоп: бампер (низ спрайта) на нижней линии ворот, X — центр ворот
-    expect(enter.stop.y + CH).toBeCloseTo(220, 5)
+    // стоп: бампер (низ спрайта) на 6 px выше линии ворот ([СПЕЦ-Z7]),
+    // X — центр ворот
+    expect(enter.stop.y + CH).toBeCloseTo(214, 5)
     expect(enter.stop.x).toBeCloseTo(580, 5)
     // проход: бампер на 58px ниже линии
     expect(enter.cross.y + CH).toBeCloseTo(220 + OFF_CAR, 5)
@@ -110,10 +112,10 @@ describe('simulatorTraffic: каноническая схема — вход', (
 
     const exit = deriveTrafficPoints(gate, CAR, 'exit', SCENE)
     expect(exit.spawn.y - CH).toBeGreaterThanOrEqual(SCENE.height)
-    // [БАГ-РЕПОРТ-8-СТОП] стоп выезжающей — ЗЕРКАЛЬНО въезжающей: передний
-    // край (верх спрайта) НА нижней линии ворот (bottom = линия + h),
-    // раньше bottom = линия + 58 и бампер недоезжал 18px («далеко»)
-    expect(exit.stop.y + CH).toBeCloseTo(220 + 2 * CH, 5)
+    // [БАГ-РЕПОРТ-8-СТОП][СПЕЦ-Z8] стоп выезжающей — зеркально въезжающей,
+    // бампер НЕ впритык: верх спрайта на 10 px НИЖЕ линии ворот
+    // (bottom = линия + h + 10), по правке заказчика «не впритык к линии»
+    expect(exit.stop.y + CH).toBeCloseTo(220 + 2 * CH + 10, 5)
     // [БАГ-РЕПОРТ-5] ждёт закрытия и уезжает ВЫШЕ линии дороги
     // (CAR_EXIT_PULL_PAST): за шлагбаумом, на своей полосе
     expect(exit.cross.y + CH).toBeCloseTo(220 - CAR_EXIT_PULL_PAST, 5)
@@ -177,7 +179,7 @@ describe('simulatorTraffic: валидация настроенных оффсе
       },
     })
     const pts = trafficPointsFor(gate, PERSON, 'enter', SCENE)
-    expect(pts.stop.y + PERSON_HEIGHT / 2 - 2).toBeCloseTo(220, 0)
+    expect(pts.stop.y + PERSON_HEIGHT / 2 - 2).toBeCloseTo(214, 0)
     expect(pts.stop.x).toBeCloseTo(800, 5)
   })
 
@@ -253,27 +255,27 @@ const mkCar = (id: string, direction: 'enter' | 'exit', state: string, pos: { x:
 })
 
 describe('поведение: машина после ворот', () => {
-  it('машина в waiting_after ждёт ПОЛНОГО закрытия ворот (не уезжает при открытом шлагбауме)', () => {
+  it('машина в waiting_after уезжает после вежливой паузы 0.8с при открытых воротах ([П6])', () => {
     const h = buildCarHarness()
     // входящая машина уже проехала ворота: стоит в waiting_after под ними,
-    // ворота ОТКРЫТЫ (шлагбаум поднят)
+    // ворота ОТКРЫТЫ (шлагбаум поднят — закроется сам по расчистке створа)
     const car = mkCar('car-1', 'enter', 'waiting_after', { x: 540, y: 250 }, { x: 540, y: 250 })
     h.aiAgents.value = [car as any]
 
-    // 6с при открытых воротах — машина обязана стоять и ждать
-    for (let i = 0; i < 120; i++) {
+    // 0.7с — вежливая пауза ещё не истекла, машина стоит
+    for (let i = 0; i < 14; i++) {
       h.physics.updateAiMovement(DT, { carGateId: 'car-gate-1', personGateId: 'wicket-1' })
     }
     expect(car.state).toBe('waiting_after')
 
-    // ворота полностью закрылись — машина уезжает
-    h.carGate.settings.isOpen = false
-    h.carGate.settings.isAnimating = false
-    for (let i = 0; i < 60; i++) {
+    // после 0.8с — уезжает, НЕ дожидаясь закрытия ([П6])
+    for (let i = 0; i < 40; i++) {
       h.physics.updateAiMovement(DT, { carGateId: 'car-gate-1', personGateId: 'wicket-1' })
       if (car.state === 'moving_away') break
     }
     expect(car.state).toBe('moving_away')
+    // уезд вниз по afterTarget ([Z7]: за нижний край сцены)
+    expect(car.target.y).toBeGreaterThanOrEqual(SCENE.height)
   })
 
   it('машина в waiting_after уезжает по канонической схеме, не дожидаясь свободной стороны', () => {
@@ -309,8 +311,11 @@ describe('поведение: машина после ворот', () => {
 
   it('входящая машина тормозит перед стоящей на дороге машиной, а не проезжает сквозь', () => {
     const h = buildCarHarness()
-    // выезжающая машина стоит на линии дороги у центра ворот (ждёт закрытия)
-    const parked = mkCar('car-p', 'exit', 'waiting_after', { x: 580, y: 200 }, { x: 580, y: 200 })
+    // стоящее препятствие — машина, ждущая ОТКРЫТИЯ ворот: при [П6] стоящая
+    // в waiting_after уезжает после 0.8с, поэтому вечное препятствие —
+    // waiting_before (закрытые ворота, машина стоит на своей остановке)
+    h.carGate.settings.isOpen = false
+    const parked = mkCar('car-p', 'exit', 'waiting_before', { x: 580, y: 200 }, { x: 580, y: 200 })
     // входящая едет справа к той же остановке
     const enter = mkCar('car-e', 'enter', 'to_gate', { x: 1000, y: 200 }, { x: 580, y: 200 })
     h.aiAgents.value = [parked as any, enter as any]
@@ -344,15 +349,15 @@ describe('поведение: машина после ворот', () => {
     expect(fromLeft.state).not.toBe('to_gate')
   })
 
-  it('машина в to_gate: ретаргет приводит цель остановки к геометрии ворот (бампер на нижней линии)', () => {
+  it('машина в to_gate: ретаргет приводит цель остановки к геометрии ворот (бампер на 6px выше линии)', () => {
     const h = buildCarHarness()
     // ворота открыты; машина едет справа по дороге к остановке у ворот
     const car = mkCar('car-2', 'enter', 'to_gate', { x: 1000, y: 200 }, { x: 0, y: 0 })
     h.aiAgents.value = [car as any]
 
     h.physics.updateAiMovement(DT, { carGateId: 'car-gate-1', personGateId: 'wicket-1' })
-    // стоп: бампер на нижней линии ворот (220), X — центр ворот (580)
-    expect(car.target.y + CAR.height / 2).toBeCloseTo(220, 0)
+    // стоп: бампер на 6px выше нижней линии ворот ([СПЕЦ-Z7] = 214), X — центр ворот (580)
+    expect(car.target.y + CAR.height / 2).toBeCloseTo(214, 0)
     expect(car.target.x).toBeCloseTo(580, 0)
   })
 

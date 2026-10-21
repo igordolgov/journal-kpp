@@ -363,11 +363,13 @@ export const useAudioEngine = () => {
       // Параметры настройки:
       // - два осциллятора square (350 Гц и 440 Гц)
       // - фильтр bandpass 400 Гц, Q=1.5
-      // - длительность 1.5 сек, две короткие трели (с паузой 0)
+      // - [П4] «би-би»: два коротких сигнала по 0.3с с паузой 0.15с
+      //   (раньше каждая трель тянулась 1.5с и сливалась в один длинный
+      //   гудок; в жизни сигналят коротким двойным)
       // - громкость: volume * 0.4
       const now = currentCtx.currentTime
-      const duration = 1.5
-      const pause = 0.2
+      const duration = 0.3
+      const pause = 0.15
       const volumeFactor = 0.4
       const playBeep = (startTime: number) => {
         const osc1 = currentCtx.createOscillator()

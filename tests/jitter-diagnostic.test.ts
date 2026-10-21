@@ -340,4 +340,85 @@ describe('диагностика дёргания ([БАГ-РЕПОРТ-8])', ()
       expect(s.reversals).toBeLessThanOrEqual(2)
     }
   })
+
+  // [№10-РЫВОК-ДОТЯГИВАНИЯ] заказчик локализовал остаточное дёргание на
+  // финальном дотягивании к точке останова. Регрессия профиля торможения:
+  //  • скорость в тормозном окне (dist < 80) монотонно НЕ растёт;
+  //  • изменение скорости за кадр не больше физического торможения
+  //    (DECEL*2 = 200 px/с^2 -> ~3.4 px/с за кадр при 60 fps);
+  //  • шаг позиции за кадр не длиннее velocity*dt (нет прыжков);
+  //  • в окне дотягивания нет старт-стопа (скорость > 0 до самой посадки).
+  it('S8: дотягивание машины к остановке — монотонный профиль без скачков', () => {
+    const h = buildPhysics([makeCarGate(false)])
+    const car = mkCar('car-e', 'enter', 'to_gate', 1100, ROAD_Y, ENTER_STOP, ENTER_CROSS, { x: 580, y: 900 }, true)
+    h.aiAgents.value = [car]
+    let maxDv = 0
+    let vIncrease = 0
+    let maxStepExcess = 0
+    let prevV = Infinity
+    let prevPos = { x: car.element.x + 40, y: car.element.y + 20 }
+    let brakingFrames = 0
+    for (let i = 0; i < 30 * 60; i++) {
+      h.physics.updateAiMovement(DT, { carGateId: 'car-gate-1', personGateId: '' })
+      const cx = car.element.x + 40
+      const cy = car.element.y + 20
+      const t = car.target
+      const dist = Math.hypot(t.x - cx, t.y - cy)
+      const v = car.element.velocity || 0
+      if (dist < 80 && car.state === 'to_gate') {
+        brakingFrames++
+        if (prevV !== Infinity) {
+          maxDv = Math.max(maxDv, Math.abs(v - prevV))
+          if (v > prevV + 0.6) vIncrease++
+        }
+        maxStepExcess = Math.max(maxStepExcess, Math.hypot(cx - prevPos.x, cy - prevPos.y) - v * DT)
+      }
+      prevV = v
+      prevPos = { x: cx, y: cy }
+      if (car.state !== 'to_gate') break
+    }
+    console.log(`[S8 car] brakingFrames=${brakingFrames} maxDv=${maxDv.toFixed(2)} vIncrease=${vIncrease} stepExcess=${maxStepExcess.toFixed(4)}`)
+    expect(brakingFrames).toBeGreaterThan(10)
+    expect(maxDv).toBeLessThanOrEqual(200 * DT + 1.5)
+    expect(vIncrease).toBe(0)
+    expect(maxStepExcess).toBeLessThanOrEqual(0.01)
+  })
+
+  it('S9: дотягивание человека к калитке — монотонный профиль без скачков', () => {
+    const wicket = makeWicket(false)
+    const h = buildPhysics([wicket])
+    const p = mkPerson('p-in', 'enter', 'to_gate',
+      1100, W_ROAD_Y, { x: 625, y: W_ROAD_Y }, { x: 625, y: W_ROAD_Y + 30 }, { x: 625, y: 900 })
+    h.aiAgents.value = [p]
+    let maxDv = 0
+    let vIncrease = 0
+    let maxStepExcess = 0
+    let prevV = Infinity
+    let prevPos = { x: p.element.x + 20, y: p.element.y + 27.5 }
+    let brakingFrames = 0
+    for (let i = 0; i < 30 * 60; i++) {
+      h.physics.updateAiMovement(DT, { carGateId: '', personGateId: 'w1' })
+      const cx = p.element.x + 20
+      const cy = p.element.y + 27.5
+      const t = p.target
+      const dist = Math.hypot(t.x - cx, t.y - cy)
+      const v = p.element.velocity || 0
+      if (dist < 80 && p.state === 'to_gate') {
+        brakingFrames++
+        if (prevV !== Infinity) {
+          maxDv = Math.max(maxDv, Math.abs(v - prevV))
+          if (v > prevV + 0.6) vIncrease++
+        }
+        maxStepExcess = Math.max(maxStepExcess, Math.hypot(cx - prevPos.x, cy - prevPos.y) - v * DT)
+      }
+      prevV = v
+      prevPos = { x: cx, y: cy }
+      if (p.state !== 'to_gate') break
+    }
+    console.log(`[S9 person] brakingFrames=${brakingFrames} maxDv=${maxDv.toFixed(2)} vIncrease=${vIncrease} stepExcess=${maxStepExcess.toFixed(4)}`)
+    expect(brakingFrames).toBeGreaterThan(10)
+    expect(maxDv).toBeLessThanOrEqual(200 * DT + 1.5)
+    expect(vIncrease).toBe(0)
+    expect(maxStepExcess).toBeLessThanOrEqual(0.01)
+  })
 })

@@ -229,9 +229,9 @@ describe('доводка потока пешеходов', () => {
     const el = agent.element
     // [КАНОН «КАК РАНЬШЕ»] спавн — за ПРАВЫМ краем сцены (приходит сбоку)
     expect(el.x).toBeGreaterThanOrEqual(1280)
-    // стоп-точка (ЦЕНТР агента): визуальные ноги РОВНО на нижней линии
-    // калитки (centerY + h/2 - pad2 = gateBottom) — не выше и не ниже
-    expect(agent.target.y + PERSON_HEIGHT / 2 - 2).toBeCloseTo(gateBottom, 0)
+    // стоп-точка (ЦЕНТР агента): визуальные ноги на 6 px ВЫШЕ нижней линии
+    // калитки ([СПЕЦ-Z5] не впритык к забору: centerY + h/2 - pad2 = gateBottom - 6)
+    expect(agent.target.y + PERSON_HEIGHT / 2 - 2).toBeCloseTo(gateBottom - 6, 0)
     // X выровнен по центру калитки (760 + 80/2 = 800)
     expect(agent.target.x).toBeCloseTo(800, 5)
   })

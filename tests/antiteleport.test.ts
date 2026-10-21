@@ -1,15 +1,15 @@
 // tests/antiteleport.test.ts
 // [БАГ-РЕПОРТ-7] регрессии «телепорта в точку ожидания» и раннего уезда:
-//  1) въезжающая машина, остановленная вежливостью (встречная припаркована
-//     после прохода), СТОИТ на паузе сколько нужно и БЕЗ прыжков доезжает до
-//     своей остановки, когда коридор освободился (раньше сторож через 10с
-//     прыгал на цель — «мгновенно оказывается в месте ожидания»);
+//  1) въезжающая машина, остановленная проходящей встречной, БЕЗ прыжков
+//     доезжает до своей остановки и проходит следом ([П6]: встречная
+//     уезжает с полосы сама, не дожидаясь закрытия);
 //  2) пост-гейтовый пешеход, застрявший за стоящим у прохода, доводится
 //     «правами прохода» (bypass) МЯГКО — ни одного скачка позиции;
-//  3) машина в waiting_after уезжает, не дожидаясь полного закрытия ворот,
-//     если у ворот (с любой стороны) уже стоит другая машина;
-//  4) машина в waiting_after при БЕЗЛЮДНЫХ воротах ждёт полного закрытия
-//     (штатное поведение не сломано).
+//  3) машина в waiting_after уезжает, не дожидаясь закрытия, если у ворот
+//     стоит другая машина (ранний уезд);
+//  4) машина в waiting_after при пустых воротах уезжает после вежливой
+//     паузы 0.8с при ещё открытых воротах ([П6]: закрытие — по расчистке
+//     створа).
 
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { ref } from 'vue'
@@ -106,16 +106,18 @@ const makeCarGate = (isOpen = false) => ({
 })
 
 const ROAD_Y = 220 - CAR.height / 2 // 200
-const ENTER_STOP = { x: 580, y: ROAD_Y }
+// [СПЕЦ-Z7] остановка въезда — бампер на 6px выше линии дороги
+const ENTER_STOP = { x: 580, y: ROAD_Y - 6 }
 const ENTER_CROSS = { x: 580, y: ROAD_Y + CAR_STOP_OFFSET }
 const EXIT_CROSS = { x: 580, y: ROAD_Y - CAR_EXIT_PULL_PAST }
 
 describe('анти-телепорт ([БАГ-РЕПОРТ-7])', () => {
   afterEach(() => vi.restoreAllMocks())
 
-  it('въезжающая, остановленная припаркованной встречной, доезжает БЕЗ прыжков (никаких watchdog-телепортов)', () => {
-    // ворота открыты и НЕ закрываются: встречная (выезжающая) после прохода
-    // вечно ждёт закрытия — въезжающая всё это время стоит в коридоре
+  it('въезжающая, остановленная проходящей встречной, доезжает БЕЗ прыжков и проходит следом ([П6])', () => {
+    // ворота открыты: встречная (выезжающая) проходит, садится на полосу и
+    // после вежливой паузы уезжает сама ([П6]); въезжающая стартует следом
+    // на ещё открытых воротах
     const h = buildPhysics([makeCarGate(true)])
     const exit = mkCar('car-x', 'exit', 'crossing',
       580, ENTER_CROSS.y, EXIT_CROSS, EXIT_CROSS, { x: 1300, y: EXIT_CROSS.y }, false)
@@ -124,28 +126,15 @@ describe('анти-телепорт ([БАГ-РЕПОРТ-7])', () => {
     h.aiAgents.value = [enter, exit]
     const motion = jumpTracker([enter, exit])
 
-    // 25с: подход, стоп за встречной (crossing -> waiting_after), ожидание
+    // 25с: проход встречной, пауза на полосе, уезд; подъезд и проход въезжающей
     for (let i = 0; i < 250; i++) {
       h.physics.updateAiMovement(DT, { carGateId: 'car-gate-1', personGateId: '' })
       motion.step()
     }
-    // встречная припарковалась выше дороги и ждёт закрытия (таймер 10с+
-    // истёк бы, но hasActiveAgents держит ворота открытыми)
-    expect(exit.state).toBe('waiting_after')
-    // въезжающая в очереди перед воротами — и НИ ОДНОГО ПРЫЖКА
-    expect(['to_gate', 'waiting_before']).toContain(enter.state)
-    expect(motion.maxJump()).toBeLessThanOrEqual(100 * DT + 3)
-    expect(h.warns.filter(w => w.includes('[watchdog]'))).toEqual([])
-
-    // ворота закрыли — встречная уезжает вбок, въезжающая плавно доезжает
-    h.simElements.value[0].settings.isOpen = false
-    for (let i = 0; i < 200; i++) {
-      h.physics.updateAiMovement(DT, { carGateId: 'car-gate-1', personGateId: '' })
-      motion.step()
-      if (enter.state === 'waiting_before') break
-    }
-    expect(enter.state).toBe('waiting_before')
-    expect(Math.abs(centerOf(enter).x - 580)).toBeLessThanOrEqual(1)
+    // встречная уехала с полосы (или уже завершена) — БЕЗ сторожей
+    expect(['moving_away', 'done']).toContain(exit.state)
+    // въезжающая дошла до прохода/за ворота — и НИ ОДНОГО ПРЫЖКА
+    expect(['crossing', 'waiting_after', 'moving_away', 'done']).toContain(enter.state)
     expect(motion.maxJump()).toBeLessThanOrEqual(100 * DT + 3)
     expect(h.warns.filter(w => w.includes('[watchdog]'))).toEqual([])
   })
@@ -183,11 +172,14 @@ describe('анти-телепорт ([БАГ-РЕПОРТ-7])', () => {
     // въезжающая прошла ворота и ждёт закрытия на посадке (580,258)
     const enter = mkCar('car-e', 'enter', 'waiting_after',
       580, ENTER_CROSS.y, ENTER_CROSS, ENTER_CROSS, { x: 580, y: 900 }, true)
-    // выезжающая подошла к воротам с базовой стороны и ждёт открытия
-    const exit = mkCar('car-x', 'exit', 'waiting_before',
-      580, ROAD_Y + CAR_STOP_OFFSET, { x: 580, y: ROAD_Y + CAR_STOP_OFFSET },
-      EXIT_CROSS, { x: 1300, y: EXIT_CROSS.y }, false)
-    h.aiAgents.value = [enter, exit]
+    // следующая въезжающая стоит на остановке у ворот и ждёт открытия —
+    // её ворота тоже нужны ([СПЕЦ-M12]), поэтому первая уезжает раньше
+    // закрытия после вежливой паузы 0.8с. ([№10] прежний вариант с
+    // выезжающей на посадке больше не годится: по [D12] выезжающая
+    // уступает-отъезжает от посадки въезжающей и уходит из зоны створа)
+    const follower = mkCar('car-x', 'enter', 'waiting_before',
+      580, ENTER_STOP.y, ENTER_STOP, ENTER_CROSS, { x: 580, y: 900 }, true)
+    h.aiAgents.value = [enter, follower]
 
     for (let i = 0; i < 20; i++) { // 2с
       h.physics.updateAiMovement(DT, { carGateId: 'car-gate-1', personGateId: '' })
@@ -197,16 +189,23 @@ describe('анти-телепорт ([БАГ-РЕПОРТ-7])', () => {
     expect(h.simElements.value[0].settings.isOpen).toBe(true)
   })
 
-  it('машина в waiting_after при пустых воротах ждёт ПОЛНОГО закрытия (штат)', () => {
+  it('машина в waiting_after при пустых воротах уезжает после паузы 0.8с при открытых воротах ([П6])', () => {
     const h = buildPhysics([makeCarGate(true)])
     const enter = mkCar('car-e', 'enter', 'waiting_after',
       580, ENTER_CROSS.y, ENTER_CROSS, ENTER_CROSS, { x: 580, y: 900 }, true)
     h.aiAgents.value = [enter]
 
-    for (let i = 0; i < 30; i++) { // 3с
+    for (let i = 0; i < 7; i++) { // 0.7с — вежливая пауза не истекла
       h.physics.updateAiMovement(DT, { carGateId: 'car-gate-1', personGateId: '' })
     }
-    // ворота открыты, рядом никого — ждём (уезд только по закрытию/таймауту)
     expect(enter.state).toBe('waiting_after')
+
+    for (let i = 0; i < 10; i++) {
+      h.physics.updateAiMovement(DT, { carGateId: 'car-gate-1', personGateId: '' })
+      if (enter.state === 'moving_away') break
+    }
+    // уезд при ещё ОТКРЫТЫХ воротах: закрытие придёт позже, по расчистке створа
+    expect(enter.state).toBe('moving_away')
+    expect(h.simElements.value[0].settings.isOpen).toBe(true)
   })
 })

@@ -9,6 +9,8 @@ import { DESPAWN_MARGIN } from '~/utils/simulatorConstants'
 import { dot, cross, normalizeAngle } from '~/utils/simulatorMath'
 // [СХЕМА-ТРАЕКТОРИЙ] единый с спавном пересчёт цели остановки из геометрии ворот
 import { trafficPointsFor } from '~/utils/simulatorTraffic'
+// [П1] темп шага: накопление «паузы анимации» для CSS-фазы ног
+import { walkHoldStep } from '~/utils/simTuning'
 
 export function useSimulatorPhysics(
   simElements: Ref<SceneElement[]>,
@@ -69,7 +71,10 @@ export function useSimulatorPhysics(
   const dirBlockByAgentId = new Map<string, number>()
   const DIR_BLOCK_MAX = 25        // сек
   const GATE_ZONE_PERSON = 70     // px: радиус зоны прохода для пешеходов
-  const GATE_ZONE_CAR = 160       // px: радиус зоны прохода для машин
+  // [СПЕЦ-M9/D2] зона створа для машин: 80 px (правка заказчика, было 160).
+  // Створ считается занятым встречным потоком (очередь направлений) и
+  // приоритет выезда работает, когда выезжающая в 80 px от центра ворот.
+  const GATE_ZONE_CAR = 80        // px: радиус зоны прохода для машин
   // [БАГ-РЕПОРТ-5-ЗОНЫ] уступание (торможение перед чужим корпусом, боковое
   // расхождение, «держись правее») работает ТОЛЬКО при входе/выходе — у
   // СВОИХ ворот. Вдали от ворот (горизонтальное движение по дороге) агенты
@@ -103,9 +108,12 @@ export function useSimulatorPhysics(
   const CAR_YIELD_NEAR_STOP = 100
   const CAR_YIELD_REAPPROACH = 4 // px: отъезд, после которого нужен возврат
   // встречная стоит ПРЯМО НА моей остановке (посадке прохода) — отъезжаю:
-  // радиус меньше CAR_EXIT_PULL_PAST (40), чтобы ожидающая выше дороги
-  // машина не считалась «стоящей на моей остановке»
-  const CAR_YIELD_ON_MY_SPOT = 35
+  // радиус меньше расстояния до полосы ожидания выезда, чтобы ожидающая
+  // выше дороги машина не считалась «стоящей на моей остановке».
+  // [СПЕЦ-Z7] остановка въезда поднята на 6 px (STOP_STANDOFF_ENTER),
+  // расстояние до полосы выезда стало 40-6=34 px — радиус 35 нарушил бы
+  // инвариант «полоса выезда НЕ считается моей остановкой», пересчитан 35->28.
+  const CAR_YIELD_ON_MY_SPOT = 28
 
   // [ФИКС-УСТУПИ-ДОРОГУ] параметры мягкого расхождения пешеходов: ближе
   // PERSON_SEP_RADIUS движущиеся пешеходы плавно смещаются друг от друга
@@ -123,11 +131,10 @@ export function useSimulatorPhysics(
   // [БАГ-РЕПОРТ-4-ДЁРГАНИЕ] зона расширена 34 -> 70: покрывает весь
   // тормозной отрезок (dist < 80), поэтому подход к линии ворот плавный
   const ARRIVE_QUIET_ZONE = 70   // px
-  // [БАГ-РЕПОРТ-4-ЗАКРЫТИЕ] приехавшая машина ждёт ПОЛНОГО закрытия ворот
-  // (и свободной стороны выезда — уступание машин).
-  // Предохранитель: если ворота не закрылись/не освободилась дорога за
-  // WAIT_AFTER_MAX секунд — уезжаем принудительно (не виснем навечно)
-  const WAIT_AFTER_MAX = simOpts.waitAfterMax ?? 30  // сек
+  // [П6] машина на посадке (waiting_after) больше НЕ ждёт закрытия ворот:
+  // уезд после вежливой паузы 0.8с, шлагбаум закрывается сам после
+  // расчистки створа (свип закрытия в конце тика). Прежний предохранитель
+  // WAIT_AFTER_MAX (30с ожидания закрытия) стал не нужен — уезд безусловный.
   const FORCE_CROSS_AFTER = 5        // сек: одиночка / лидер группы
   const FORCE_CROSS_GROUP_AFTER = 12 // сек: член группы, даже если предыдущий не прошёл
   
@@ -179,6 +186,22 @@ export function useSimulatorPhysics(
     )
   }
 
+  // [СПЕЦ-M9/D2] машина в зоне створа GATE_ZONE_CAR, мерянной ОТ ЛИНИИ
+  // ДОРОГИ F (нижняя линия ворот), а не от центра прямоугольника ворот:
+  // высота ворот на сцене бывает большой (тестовые — 120px), и замер от
+  // центра относил бы СТОЯЩУЮ на своей остановке выезжающую (30px ниже F)
+  // к «вне створа» — ломая приоритет выезда и ранний уезд ([№9]).
+  // Горизонтальная полоса 100px — как в проверке коридора своего потока:
+  // стоящие/проходящие машины всегда на оси ворот.
+  const nearCarGateLine = (o: AiAgent, gate: SceneElement | undefined): boolean => {
+    if (!gate) return false
+    const gcx = gate.x + gate.width / 2
+    const gBottom = gate.y + gate.height
+    const ocx = o.element.x + o.element.width / 2
+    const ocy = o.element.y + o.element.height / 2
+    return Math.abs(ocx - gcx) <= 100 && Math.abs(ocy - gBottom) <= GATE_ZONE_CAR
+  }
+
   // [БАГ-РЕПОРТ-6-АНТИ-СКАЧОК] свободна ли зона текущей цели: телепорт
   // сторожа на занятую кем-то цель выглядел как «агент мгновенно прыгнул на
   // другое место» (и вообще на другого агента). Занято — ждём дальше.
@@ -226,7 +249,7 @@ export function useSimulatorPhysics(
           (o.state === 'to_gate' || o.state === 'waiting_before')) {
         const ocyYield = o.element.y + o.element.height / 2
         if (ocyYield > gate.y + gate.height - 10 &&
-            distToGateCenter(o, gate) <= GATE_ZONE_CAR) {
+            nearCarGateLine(o, gate)) {
           return nearStop ? 2 : 1
         }
       }
@@ -400,7 +423,7 @@ export function useSimulatorPhysics(
           if (o.state !== 'to_gate' && o.state !== 'waiting_before') continue
           const ocyOcc = o.element.y + o.element.height / 2
           if (ocyOcc <= gBottomOcc - 10) continue
-          if (distToGateCenter(o, gate) > GATE_ZONE_CAR) continue
+          if (!nearCarGateLine(o, gate)) continue
           return true
         }
       }
@@ -410,7 +433,13 @@ export function useSimulatorPhysics(
         if (o.state === 'crossing' || o.state === 'waiting_after') return true
         const ocx = o.element.x + o.element.width / 2
         const ocy = o.element.y + o.element.height / 2
-        if (Math.hypot(ocx - gcx, ocy - gcy) >= zoneR) continue
+        // [СПЕЦ-M9/D2] для машин зона створа меряется ОТ ЛИНИИ ДОРОГИ F
+        // (nearCarGateLine) — высокая геометрия ворот не должна выводить
+        // стоящую на своей остановке машину из зоны; у людей — от центра.
+        const inCorridor = agent.type === 'car'
+          ? nearCarGateLine(o, gate)
+          : Math.hypot(ocx - gcx, ocy - gcy) < zoneR
+        if (!inCorridor) continue
         if (o.state === 'waiting_before') {
           // [№9-ПРИОРИТЕТ-ВЫЕЗДА] выезд не ждёт очереди у въезжающей, стоящей
           // на дороге (её бампер не ниже линии ворот): въезжающая уступает
@@ -800,44 +829,19 @@ export function useSimulatorPhysics(
 
       if (agent.state === 'waiting_after') {
         el.velocity = 0
-        // [ФИКС-висяки-2] страховка от вечного ожидания: таймер закрытия
-        // одноразовый и мог сгореть впустую (isAnimating в момент
-        // срабатывания, gateCloseDelay=0, ворота удалены) — машина стояла
-        // во дворе бесконечно, а следующая замирала в очереди за ней.
         const waitedAfter = (waitAfterByAgentId.get(agent.id) ?? 0) + dt
         waitAfterByAgentId.set(agent.id, waitedAfter)
-        // [БАГ-РЕПОРТ-4-ЗАКРЫТИЕ] приехавшая машина стоит, пока ворота НЕ
-        // закроются ПОЛНОСТЬЮ (шлагбаум опущен, анимация закончена): раньше
-        // CAR_LEAVE_DELAY 1.6с выпроваживал её при ещё поднименном шлагбауме.
-        // [БАГ-РЕПОРТ-4-УСТУПАНИЕ-МАШИН] выезжаем только на СВОБОДНУЮ
-        // сторону дороги: раньше машина выезжала направо «в лоб» очереди
-        // встречных машин (они вообще не тормозили перед ней). Занятая
-        // сторона => ждём освобождения; обе заняты => ждём (предохранитель
-        // WAIT_AFTER_MAX уводит в менее загруженную сторону).
-        const gateFullyClosed = !gate ||
-          (!gate.settings?.isOpen && !gate.settings?.isAnimating && !gate.settings?.isStopping)
-        // [БАГ-РЕПОРТ-7-УЕЗД] у ворот (с любой стороны) уже стоит/проходит
-        // другая машина — ждать полного закрытия бессмысленно: ворота всё
-        // равно тут же понадобятся ей (таймер закрытия их и не закроет, пока
-        // она активна). Уезжаем после короткой вежливой паузы, не дожидаясь
-        // полного закрытия.
-        const anotherCarAtGate = gate ? aiAgents.value.some(o =>
-          o.id !== agent.id && o.type === 'car' && o.state !== 'done' &&
-          (o.state === 'waiting_before' || o.state === 'crossing') &&
-          distToGateCenter(o, gate) < GATE_ZONE_CAR
-        ) : false
+        // [П6] машина НЕ ждёт закрытия ворот: шлагбаум опустится сам после
+        // расчистки створа (свип закрытия в конце тика, [G2]). На посадке —
+        // вежливая пауза 0.8 с (завершение события проезда), затем уезд.
+        // Так в жизни: машина ушла от линии — шлагбаум закрыли. Прежнее
+        // «ждать полного закрытия» при П6 дало бы взаимную блокировку:
+        // машина ждёт закрытия, ворота ждут расчистки створа.
         // [БАГ-РЕПОРТ-5-РАЗЪЕЗД] уезд по КАНОНИЧЕСКОЙ схеме, без выбора
-        // «свободной стороны»: ожидание свободной стороны при занятой дороге
-        // взаимно блокировало машины («не могут разъехаться»). Въехавшая
-        // уезжает ВНИЗ за нижний край (afterTarget из спавна), выехавшая —
-        // ВБОК по СВОЕЙ полосе выше дороги (CAR_EXIT_PULL_PAST): её путь не
-        // пересекает полосу дороги, уступать встречным/попутным не нужно —
-        // на дороге машины расходятся «сквозь» (уступание только у ворот).
-        if ((gateFullyClosed || anotherCarAtGate) && waitedAfter > 0.8) {
-          agent.state = 'moving_away'
-          agent.target = { x: agent.afterTarget.x, y: agent.afterTarget.y, width: 0, height: 0 }
-        } else if (waitedAfter > WAIT_AFTER_MAX) {
-          // [ПРЕДОХРАНИТЕЛЬ] ворота так и не закрылись — уезжаем
+        // «свободной стороны»: въехавшая уезжает ВНИЗ за нижний край
+        // (afterTarget из спавна), выехавшая — ВБОК по СВОЕЙ полосе выше
+        // дороги (CAR_EXIT_PULL_PAST); пути не пересекают полосу дороги.
+        if (waitedAfter > 0.8) {
           agent.state = 'moving_away'
           agent.target = { x: agent.afterTarget.x, y: agent.afterTarget.y, width: 0, height: 0 }
         }
@@ -1042,37 +1046,12 @@ export function useSimulatorPhysics(
                 gateCloseTimers.set(gateId, timer)
               }
             }
-          } 
-          else {
-            el.velocity = 0 // машина встаёт на точку останова после ворот
+          } else {
+            // [П6] машина встала на посадку после ворот. Таймер закрытия
+            // здесь больше не ставится: отсчёт [G2] запускает свип закрытия
+            // в конце тика, когда корпус ПОЛНОСТЬЮ покинул зону створа.
+            el.velocity = 0
             agent.state = 'waiting_after'
-            // [ФИКС-висяки-2] closeDelay=0: раньше таймер не ставился вовсе —
-            // ворота не закрывались никогда, машина стояла в ожидании вечно.
-            if (gate && gate.settings?.isOpen && !gate.settings?.isAnimating && closeDelay >= 0 && !gateCloseTimers.has(gateId) && !gate.settings?.isStopping) {
-              if (closeDelay === 0) {
-                const hasActiveAgents = aiAgents.value.some(a =>
-                  (a.state === 'crossing' || (a.state === 'waiting_before' && !dirBlockByAgentId.has(a.id) && !carBackoffByAgentId.has(a.id))) &&
-                  ((a.type === 'car' && String(gate.id) === cfg.carGateId) ||
-                   (a.type === 'person' && String(gate.id) === cfg.personGateId))
-                )
-                if (!hasActiveAgents) closeGateFn(gate)
-              }
-              else {
-              const timer = setTimeout(() => {
-                const currentGate = simElements.value.find(g => String(g.id) === gateId)
-                if (currentGate && currentGate.settings?.isOpen && !currentGate.settings?.isAnimating && !currentGate.settings?.isStopping) {
-                  const hasActiveAgents = aiAgents.value.some(a =>
-                    (a.state === 'crossing' || (a.state === 'waiting_before' && !dirBlockByAgentId.has(a.id) && !carBackoffByAgentId.has(a.id))) &&
-                    ((a.type === 'car' && String(currentGate.id) === cfg.carGateId) ||
-                     (a.type === 'person' && String(currentGate.id) === cfg.personGateId))
-                  )
-                  if (!hasActiveAgents) closeGateFn(currentGate)
-                }
-                gateCloseTimers.delete(gateId)
-              }, closeDelay * 1000)
-              gateCloseTimers.set(gateId, timer)
-              }
-            }
           }
         } 
         else if (agent.state === 'moving_away') {
@@ -1202,9 +1181,16 @@ export function useSimulatorPhysics(
           // считается: иначе куча сбившихся в точку агентов взаимно
           // замораживается навсегда (hold «leader» у каждого гасил сторож —
           // телепортов больше нет). Куча расходится ходом + сепарацией.
+          // [П6-ФИКС-ВЗАИМНАЯ-ВЕЖЛИВОСТЬ] активно уступающая машина (отъезд
+          // по [№9] идёт, carBackoff) — НЕ стена: она расчищает коридор.
+          // Раньше отъезжающая, остановленная стражем заднего хода ПОЗАДИ
+          // пересекающей (v=0, но backoff>0), считалась «легальной стоянкой»
+          // с перекрытием курса — пересекающая замирала навсегда: она ждёт
+          // расчистки коридора, уступающая ждёт, пока та освободит ей зад.
           const oMoving = (other.element.velocity || 0) > 0.5
           const oLegalPark = other.state === 'waiting_before' || other.state === 'waiting_after'
-          if (!oMoving && !oLegalPark) continue
+          const oHardPark = oLegalPark && !carBackoffByAgentId.has(other.id)
+          if (!oMoving && !oHardPark) continue
           if (distanceToLeader > 0) {
             distanceToLeader = 0
             leaderSpeed = other.element.velocity || 0
@@ -1346,11 +1332,26 @@ export function useSimulatorPhysics(
       // крейсерских 40 px/с — видимый рывок «внезапно сорвался». Половина
       // ACCEL даёт естественный набор шага ~0.8с. Торможение не трогаем:
       // резкая остановка перед препятствием — это безопасность, не дёргание.
-      const accel = agent.type === 'person' ? ACCEL * 0.5 : ACCEL
+      // [П2] машина трогается мягче: потолок разгона 60 px/с² (в жизни
+      // легковушка набирает ход за ~1с). ACCEL из настроек остаётся общим
+      // регулятором, но для машин не поднимается выше 60; люди — ACCEL/2.
+      const accel = agent.type === 'person' ? ACCEL * 0.5 : Math.min(ACCEL, 60)
       if ((el.velocity || 0) < targetSpeed) {
         el.velocity = Math.min(targetSpeed, (el.velocity || 0) + accel * dt)
       } else {
         el.velocity = Math.max(targetSpeed, (el.velocity || 0) - DECEL * dt * 2)
+      }
+
+      // [П1] темп шага = скорости ходьбы: пока человек идёт медленнее
+      // крейсерской (уступание, дотягивание), накопленная пауза _walkHold
+      // сдвигает фазу CSS-анимации ног назад — ноги перебирают реже,
+      // корпус не «скользит». На крейсерской прирост 0 — в DOM не пишем.
+      if (agent.type === 'person') {
+        const hold = walkHoldStep(dt, el.velocity || 0, agent.speed)
+        if (hold > 0) {
+          const ws = el.settings ?? (el.settings = {})
+          ws._walkHold = (((ws as any)._walkHold as number) || 0) + hold
+        }
       }
 
       // [ФИКС-КАПОТ] машина рисуется в ПРОФИЛЬ (нос вправо) и НЕ вращается
@@ -1475,6 +1476,71 @@ export function useSimulatorPhysics(
           el.y + el.height < -DESPAWN_MARGIN || el.y > sceneSize.value.height + DESPAWN_MARGIN) {
         agent.state = 'done'
       }
+    }
+
+    // [П6-ЗАКРЫТИЕ-ПО-СТВОРУ] шлагбаум закрывается ПОСЛЕ того, как корпус
+    // машины полностью покинул зону створа (80 px от линии дороги F, ось
+    // +/-100 px), а не от момента посадки: ворота меньше висят открытыми
+    // «в пустоту», полоса освобождается сразу, следующий поток стартует
+    // при ещё открытых воротах. Отсчёт [G2] (gateCloseDelay) стартует на
+    // чистом створе; вошедший в створ корпус снимает отложенное закрытие.
+    // Очередь [G3] проверяется и при старте отсчёта, и при срабатывании.
+    // Калитка (wicket) живёт по своим правилам [G2] — здесь не трогается.
+    for (const gate of simElements.value) {
+      if (gate.category !== 'gate' && gate.category !== 'barrier') continue
+      const gs: any = gate.settings
+      if (!gs || gs.gateType === 'wicket') continue
+      const gateId = String(gate.id)
+      const normalOpen = gs.isOpen && !gs.isAnimating && !gs.isStopping && !gs.isStopped
+      if (!normalOpen) {
+        // закрыты/анимируются/остановлены — отложенный отсчёт не имеет смысла
+        cancelCloseTimer(gateId)
+        continue
+      }
+      // корпус машины в створе (проход/посадка по факту, подход/уезд по
+      // геометрии) — закрывать нельзя, отсчёт снимается
+      const occupied = aiAgents.value.some(o => {
+        if (o.type !== 'car' || o.state === 'done') return false
+        if (o.gateId === gateId && (o.state === 'crossing' || o.state === 'waiting_after')) return true
+        return nearCarGateLine(o, gate)
+      })
+      if (occupied) {
+        cancelCloseTimer(gateId)
+        continue
+      }
+      // отсчёт уже идёт (створ чист) — не перезапускаем
+      if (gateCloseTimers.has(gateId)) continue
+      // [G3] очередь перед закрытием: ждущий у прохода держит ворота
+      const hasQueue = aiAgents.value.some(a =>
+        a.state === 'waiting_before' && !dirBlockByAgentId.has(a.id) && !carBackoffByAgentId.has(a.id) &&
+        ((a.type === 'person' && String(gate.id) === cfg.personGateId) ||
+         (a.type === 'car' && String(gate.id) === cfg.carGateId)))
+      if (hasQueue) continue
+      if (gateCloseDelay === 0) {
+        closeGateFn(gate)
+        continue
+      }
+      const timer = setTimeout(() => {
+        gateCloseTimers.delete(gateId)
+        const currentGate = simElements.value.find(g => String(g.id) === gateId)
+        if (!currentGate || !currentGate.settings?.isOpen ||
+            currentGate.settings?.isAnimating || currentGate.settings?.isStopping ||
+            currentGate.settings?.isStopped) return
+        // за время отсчёта в створ мог войти корпус (лаг кадра) — не закрывать
+        const occupiedNow = aiAgents.value.some(o => {
+          if (o.type !== 'car' || o.state === 'done') return false
+          if (o.gateId === gateId && (o.state === 'crossing' || o.state === 'waiting_after')) return true
+          return nearCarGateLine(o, currentGate)
+        })
+        if (occupiedNow) return
+        const hasQueueNow = aiAgents.value.some(a =>
+          a.state === 'waiting_before' && !dirBlockByAgentId.has(a.id) && !carBackoffByAgentId.has(a.id) &&
+          ((a.type === 'person' && String(currentGate.id) === cfg.personGateId) ||
+           (a.type === 'car' && String(currentGate.id) === cfg.carGateId)))
+        if (hasQueueNow) return
+        closeGateFn(currentGate)
+      }, gateCloseDelay * 1000)
+      gateCloseTimers.set(gateId, timer)
     }
   }
 

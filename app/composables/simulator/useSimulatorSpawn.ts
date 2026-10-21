@@ -14,6 +14,8 @@ import {
 // [СХЕМА-ТРАЕКТОРИЙ] единый вывод точек спавна/остановки/прохода/ухода из геометрии ворот
 import { trafficPointsFor, FOOT_PAD_PERSON, type TrafficPoints } from '~/utils/simulatorTraffic'
 import { getCarSvg, generateRealPersonSvg } from '~/utils/simulatorSvg'
+// [П7] индивидуальный темп людей 0.85..1.15 (у группы — общий)
+import { randomPersonPace } from '~/utils/simTuning'
 import type { SceneElement, Direction, TravelMode, TrafficConfig, AiAgent, PersonInfo } from '~/types/simulator'
 // [PAYROLL] реестр проходов (ground truth) и шина событий оплаты
 import { takePayrollPass } from '~/utils/payrollPass'
@@ -223,7 +225,9 @@ export function useSimulatorSpawn(
   ): boolean => {
     const width = simOpts.value.personWidth
     const height = simOpts.value.personHeight
-    const speed = cfg.personSpeed
+    // [П7] индивидуальный темп: множитель 0.85..1.15 на спавне; у группы
+    // общий (берётся один раз на создание группы) — колонна не растягивается
+    const speed = cfg.personSpeed * randomPersonPace()
     const stopOffset = PERSON_STOP_OFFSET
     const fixedX = fixedXPerson.value
     const fixedY = fixedYPerson.value
@@ -355,7 +359,9 @@ export function useSimulatorSpawn(
   ): boolean => {
     const width = simOpts.value.personWidth
     const height = simOpts.value.personHeight
-    const speed = cfg.personSpeed
+    // [П7] индивидуальный темп: множитель 0.85..1.15 на спавне; у группы
+    // общий (берётся один раз на создание группы) — колонна не растягивается
+    const speed = cfg.personSpeed * randomPersonPace()
     const stopOffset = PERSON_STOP_OFFSET
     const fixedX = fixedXPerson.value
     const fixedY = fixedYPerson.value

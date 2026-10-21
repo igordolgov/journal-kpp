@@ -98,16 +98,19 @@ export function renderPersonSvg(
   const decor = computeHeadDecor(look, view, geo.head)
 
   // --- CSS-анимация ---
+  // [П1] var(--walk-hold) сдвигает фазу цикла назад на накопленную паузу
+  // (симулятор копит её в settings._walkHold при ходе медленнее
+  // крейсерского). Вне симулятора переменная не задана — пауза 0.
   const animStyle = isMoving ? (() => {
     const kf = buildKeyframes(look)
     return `
     <defs>
       <style>
-        .anim-arm-l { animation: arm-l ${kf.duration}s linear infinite; transform-origin: ${geo.armBack.shoulderX}px ${geo.armBack.shoulderY}px; }
-        .anim-arm-r { animation: arm-r ${kf.duration}s linear infinite; transform-origin: ${geo.armFront.shoulderX}px ${geo.armFront.shoulderY}px; }
-        .anim-leg-l { animation: leg-l ${kf.duration}s linear infinite; transform-origin: ${geo.legBack.hipX}px ${geo.legBack.hipY}px; }
-        .anim-leg-r { animation: leg-r ${kf.duration}s linear infinite; transform-origin: ${geo.legFront.hipX}px ${geo.legFront.hipY}px; }
-        .body-bounce { animation: body-bounce ${kf.duration}s linear infinite; }
+        .anim-arm-l { animation: arm-l ${kf.duration}s linear infinite; animation-delay: calc(var(--walk-hold, 0) * -1s); transform-origin: ${geo.armBack.shoulderX}px ${geo.armBack.shoulderY}px; }
+        .anim-arm-r { animation: arm-r ${kf.duration}s linear infinite; animation-delay: calc(var(--walk-hold, 0) * -1s); transform-origin: ${geo.armFront.shoulderX}px ${geo.armFront.shoulderY}px; }
+        .anim-leg-l { animation: leg-l ${kf.duration}s linear infinite; animation-delay: calc(var(--walk-hold, 0) * -1s); transform-origin: ${geo.legBack.hipX}px ${geo.legBack.hipY}px; }
+        .anim-leg-r { animation: leg-r ${kf.duration}s linear infinite; animation-delay: calc(var(--walk-hold, 0) * -1s); transform-origin: ${geo.legFront.hipX}px ${geo.legFront.hipY}px; }
+        .body-bounce { animation: body-bounce ${kf.duration}s linear infinite; animation-delay: calc(var(--walk-hold, 0) * -1s); }
         @keyframes leg-l { ${kf.legL} }
         @keyframes leg-r { ${kf.legR} }
         @keyframes arm-l { ${kf.armL} }

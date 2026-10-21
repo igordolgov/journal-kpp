@@ -31,9 +31,9 @@ const GATE = {
 }
 
 const ROAD_Y = 220 - CAR.height / 2              // 200
-const ENTER_STOP_Y = ROAD_Y                      // остановка въезда
+const ENTER_STOP_Y = ROAD_Y - 6                // остановка въезда ([СПЕЦ-Z7] 6px выше линии)
 const ENTER_CROSS_Y = ROAD_Y + CAR_STOP_OFFSET   // 258 — посадка въезда
-const EXIT_STOP_Y = ROAD_Y + CAR.height          // 240 — остановка выезда
+const EXIT_STOP_Y = ROAD_Y + CAR.height + 10     // 250 — остановка выезда ([СПЕЦ-Z8])
 const EXIT_CROSS_Y = ROAD_Y - CAR_EXIT_PULL_PAST // 160 — ожидание закрытия
 
 const buildHarness = (gateOverrides: Record<string, unknown> = {}) => {
@@ -111,7 +111,7 @@ const trackPair = (a: any, b: any) => {
 describe('приоритет выезда у ворот ([БАГ-РЕПОРТ-9])', () => {
   afterEach(() => vi.restoreAllMocks())
 
-  it('въезжающая не заезжает в стоящую выезжающую: выезд первым, въезжающая отъезжает', () => {
+  it('въезжающая не заезжает в выезжающую: выезд проходит и уезжает первым ([П6]), въезд стартует по расчистке створа', () => {
     const h = buildHarness()
     const enter = mkCar({
       id: 'car-e', direction: 'enter', state: 'waiting_before',
@@ -126,24 +126,25 @@ describe('приоритет выезда у ворот ([БАГ-РЕПОРТ-9]
     })
     h.aiAgents.value = [enter, exit]
     const pair = trackPair(enter, exit)
-    const startX = centerOf(enter).x
-    let maxX = startX
-    let enterEverCrossed = false
+    let exitLanded = false
+    let premature = false
 
     for (let i = 0; i < 220; i++) { // 11с
       h.physics.updateAiMovement(DT, { carGateId: 'car-gate-1', personGateId: '' })
       pair.check()
-      maxX = Math.max(maxX, centerOf(enter).x)
-      if (enter.state === 'crossing' || enter.state === 'waiting_after') enterEverCrossed = true
+      if (exit.state === 'waiting_after') exitLanded = true
+      const exitOccupies = exit.state === 'crossing' || exit.state === 'waiting_after'
+      if (exitOccupies && (enter.state === 'crossing' || enter.state === 'waiting_after')) premature = true
     }
 
-    // выезжающая прошла ворота и ждёт закрытия на своей полосе
-    expect(exit.state).toBe('waiting_after')
-    expect(centerOf(exit).y).toBeLessThan(ENTER_STOP_Y)
-    // въезжающая НЕ проезжала (не толкает выезжающую корпусом)
-    expect(enterEverCrossed).toBe(false)
-    // ...и при этом освобождала полосу: отъезд назад по дороге >= 25px
-    expect(maxX - startX).toBeGreaterThanOrEqual(25)
+    // выезжающая прошла ворота (садилась на полосу) и уехала, не дожидаясь
+    // закрытия ([П6]: уезд с посадки после вежливой паузы)
+    expect(exitLanded).toBe(true)
+    expect(['moving_away', 'done']).toContain(exit.state)
+    // въезжающая не стартовала, пока створ занимал выезд ([D1]/[D2])
+    expect(premature).toBe(false)
+    // ...и прошла следом на ещё открытых воротах (закрытие — по расчистке)
+    expect(['crossing', 'waiting_after', 'moving_away', 'done']).toContain(enter.state)
     // корпуса не пересекались ни разу
     expect(pair.overlapped()).toBe(false)
     // сторож/капы/очередь молчат — пара разъезжается штатно
@@ -152,7 +153,7 @@ describe('приоритет выезда у ворот ([БАГ-РЕПОРТ-9]
     expect(bad).toEqual([])
   })
 
-  it('пара полностью разъезжается: выезд уезжает, въезжающая проходит на следующем открытии', () => {
+  it('пара полностью разъезжается: выезд проезжает и уезжает, въезжающая проходит следом ([П6])', () => {
     const h = buildHarness()
     const enter = mkCar({
       id: 'car-e', direction: 'enter', state: 'waiting_before',
@@ -168,50 +169,27 @@ describe('приоритет выезда у ворот ([БАГ-РЕПОРТ-9]
     h.aiAgents.value = [enter, exit]
     const pair = trackPair(enter, exit)
 
-    // Фаза 1 (8с): выезд проходит первым, въезжающая уступает и не проезжает
-    for (let i = 0; i < 160; i++) {
-      h.physics.updateAiMovement(DT, { carGateId: 'car-gate-1', personGateId: '' })
-      pair.check()
-    }
-    expect(exit.state).toBe('waiting_after')
-    expect(enter.state).not.toBe('crossing')
-    expect(enter.state).not.toBe('waiting_after')
+    let exitLanded = false
+    let premature = false
+    let enterCrossed = false
 
-    // Фаза 2: охранник закрыл ворота (вручную — setTimeout в юнит-тесте не тикает)
-    h.gate.settings.isOpen = false
-    h.gate.settings.isAnimating = false
-    let exitGoneAt = -1
-    for (let i = 0; i < 400; i++) { // 20с на уезд выезжающей за край
+    // 45с: полный цикл пары без ручного вмешательства и без предохранителей:
+    // выезд проходит, после вежливой паузы уезжает ([П6]), въезд стартует
+    // по расчистке створа и тоже уезжает
+    for (let i = 0; i < 900; i++) {
       h.physics.updateAiMovement(DT, { carGateId: 'car-gate-1', personGateId: '' })
       pair.check()
-      const exitGone = !h.aiAgents.value.some(a => a.id === 'car-x')
-      if (exitGone) { exitGoneAt = i; break }
-    }
-    expect(exitGoneAt).toBeGreaterThan(0)
-    expect(exitGoneAt * DT).toBeLessThan(20)
-
-    // Фаза 3: коридор свободен, охранник снова открыл — въезжающая проходит
-    let enterCrossedAfterExitGone = false
-    for (let i = 0; i < 900; i++) { // 45с: проход + ожидание закрытия + уезд
-      if (h.aiAgents.value.some(a => a.id === 'car-e' && a.state === 'waiting_before') &&
-          Math.abs(centerOf(enter).x - 580) < 8 &&
-          !h.gate.settings.isOpen && !h.gate.settings.isAnimating) {
-        h.gate.settings.isOpen = true // охранник открыл
-      }
-      // ворота закрывает «таймер» — вручную после посадки въезжающей
-      if (enter.state === 'waiting_after') {
-        h.gate.settings.isOpen = false
-        h.gate.settings.isAnimating = false
-      }
-      h.physics.updateAiMovement(DT, { carGateId: 'car-gate-1', personGateId: '' })
-      pair.check()
-      if (enter.state === 'crossing') enterCrossedAfterExitGone = true
+      if (exit.state === 'waiting_after') exitLanded = true
+      const exitOccupies = exit.state === 'crossing' || exit.state === 'waiting_after'
+      if (exitOccupies && (enter.state === 'crossing' || enter.state === 'waiting_after')) premature = true
+      if (enter.state === 'crossing' || enter.state === 'waiting_after') enterCrossed = true
       if (h.aiAgents.value.length === 0) break
     }
-    // въезжающая прошла только ПОСЛЕ уезда выезжающей
-    expect(enterCrossedAfterExitGone).toBe(true)
-    // обе машины ушли со сцены
-    expect(h.aiAgents.value.length).toBe(0)
+
+    expect(exitLanded).toBe(true)            // выезд прошёл первым
+    expect(premature).toBe(false)            // створ обслуживал по одной машине
+    expect(enterCrossed).toBe(true)          // въезд прошёл следом
+    expect(h.aiAgents.value.length).toBe(0)  // обе машины ушли со сцены
     // без пересечений корпусов и без сторожей
     expect(pair.overlapped()).toBe(false)
     const bad = h.warns.filter(w =>

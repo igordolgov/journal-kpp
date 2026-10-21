@@ -121,7 +121,7 @@
           .person-avatar.w-full.h-full.relative(
             v-else-if="el.asset?.type === 'person'"
             :class="{ 'is-paused': el.isPaused ?? ((el.velocity || 0) < 0.1), 'is-exit': el.direction === 'exit' }"
-            :style="el.direction === 'exit' ? { transform: 'scaleX(-1)' } : undefined"
+            :style="personAvatarStyle(el)"
           )
             //- [ФИКС-ЗЕРКАЛО] выходящие зеркалятся inline-стилем на обёртке:
             //- прежнее правило .person-avatar.is-exit :deep(svg) в сборке
@@ -397,6 +397,18 @@ const { allPeople, usedPeopleIds } = integration
 const { getElementStyle: _getElementStyle, getGateStyle, ...core } = useSimulatorCore(simElements)
 const getElementStyle = (el: any, enableRotation: boolean): CSSProperties =>
   _getElementStyle(el, enableRotation) as CSSProperties
+
+// [П1] темп шага: --walk-hold сдвигает фазу CSS-анимации ходьбы на
+// накопленную паузу (физика пишет settings._walkHold, когда агент идёт
+// медленнее крейсерской — ноги перебирают реже). Выходящие сохраняют
+// зеркало на этой же обёртке.
+const personAvatarStyle = (el: any): Record<string, string> => {
+  const style: Record<string, string> = {
+    '--walk-hold': String((el.settings as any)?._walkHold ?? 0),
+  }
+  if (el.direction === 'exit') style.transform = 'scaleX(-1)'
+  return style
+}
 
 // [ФИКС-флуд-4] интервалы машин: дефолт 90-180с (было 60-120с), пол 60с,
 // потолок минимума 180с. Санитизация — чистая функция
