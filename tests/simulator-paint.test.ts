@@ -5,6 +5,7 @@ import { describe, it, expect } from 'vitest'
 import {
   agentTransform, labelTransform, gateTransform, isAgentPaused,
   paintAgent, paintLabel, paintGate, paintCommandLine,
+  paintCoord, snapshotPrevPositions,
 } from '~/utils/simulatorPaint'
 
 const fakeNode = () => {
@@ -131,5 +132,56 @@ describe('paintLabel / paintGate / paintCommandLine', () => {
     paintCommandLine(line, { x: 0, y: 0, width: 40, height: 80 } as any, { x: 100, y: 200, width: 20, height: 10 } as any)
     expect(line.attrs).toEqual({ x1: '20', y1: '40', x2: '110', y2: '205' })
     expect(() => paintCommandLine(line, null, null)).not.toThrow()
+  })
+})
+
+// ------------------------------------------------------------------
+// [№15-ФИКС-ШАГ] Интерполяция рендера: физика идёт подшагами 1/60с,
+// paint берёт prev + (cur - prev) * alpha — движение равномерно при
+// неровном кадре. prev-позиции снимает snapshotPrevPositions.
+// ------------------------------------------------------------------
+describe('№15: интерполяция рендера (fixed timestep)', () => {
+  it('paintCoord: alpha>=1 или нет prev — текущая позиция', () => {
+    const el: any = { x: 10, y: 20 }
+    expect(paintCoord(el, 'x', 1)).toBe(10)
+    expect(paintCoord(el, 'y', 0.5)).toBe(20) // _py нет — fallback на cur
+    expect(paintCoord(el, 'x', 1.5)).toBe(10)
+  })
+
+  it('paintCoord: alpha=0.5 — половина пути от prev к текущей', () => {
+    const el: any = { x: 10, y: 100, _px: 0, _py: 0 }
+    expect(paintCoord(el, 'x', 0.5)).toBe(5)
+    expect(paintCoord(el, 'y', 0.25)).toBe(25)
+    // alpha=0 (аккумулятор исчерпан подшагами до нуля) — рендер текущей позиции
+    expect(paintCoord(el, 'x', 0)).toBe(10)
+  })
+
+  it('paintCoord: невалидный prev (NaN/строка) игнорируется', () => {
+    const el: any = { x: 10, _px: NaN }
+    expect(paintCoord(el, 'x', 0.5)).toBe(10)
+    const el2: any = { x: 10, _px: 'гы' }
+    expect(paintCoord(el2, 'x', 0.5)).toBe(10)
+  })
+
+  it('snapshotPrevPositions снимает _px/_py у всех с числовыми координатами', () => {
+    const a: any = { x: 1, y: 2 }
+    const b: any = { x: 3, y: 4 }
+    const c: any = { name: 'ворота' } // без x — пропускается
+    snapshotPrevPositions([a, b, c])
+    expect(a._px).toBe(1); expect(a._py).toBe(2)
+    expect(b._px).toBe(3); expect(b._py).toBe(4)
+    expect(c._px).toBeUndefined()
+  })
+
+  it('agentTransform с alpha интерполирует translate3d, зеркало не ломается', () => {
+    const car: any = { x: 10, y: 20, _px: 0, _py: 0, category: 'car', direction: 'enter' }
+    expect(agentTransform(car, false, 0.5)).toBe('translate3d(5px, 10px, 0) scaleX(-1)')
+    const person: any = { x: 10, y: 20, _px: 0, _py: 0 }
+    expect(agentTransform(person, false, 0.5)).toBe('translate3d(5px, 10px, 0)')
+  })
+
+  it('labelTransform с alpha следует за агентом', () => {
+    const el: any = { x: 10, y: 50, _px: 0, _py: 0, width: 40, height: 20 }
+    expect(labelTransform(el, 0.5)).toBe('translate3d(25px, -25px, 0) translateX(-50%)')
   })
 })

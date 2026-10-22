@@ -10,6 +10,8 @@ div.min-h-screen.bg-base-200
   UiAppToaster
   //- Глобальный диалог подтверждения (замена нативного confirm)
   UiConfirmDialog
+  //- Глобальный диалог ввода (замена нативного prompt) [№15-UX]
+  UiPromptDialog
 </template>
 
 <script setup lang="ts">

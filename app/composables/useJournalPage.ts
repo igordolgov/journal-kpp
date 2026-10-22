@@ -193,10 +193,15 @@ export const useJournalPage = () => {
     ...getSavedWidths()
   })
 
+  // [№15-ПЕРФ] debounce 300мс: ресайз колонок генерирует десятки мутаций
+  // в секунду — раньше каждая синхронно писала JSON.stringify в localStorage
+  let widthsSaveTimer: ReturnType<typeof setTimeout> | null = null
   watch(columnWidths, (newVal) => {
-    if (import.meta.client) {
+    if (!import.meta.client) return
+    if (widthsSaveTimer) clearTimeout(widthsSaveTimer)
+    widthsSaveTimer = setTimeout(() => {
       localStorage.setItem(STORAGE_KEY_WIDTHS, JSON.stringify(newVal))
-    }
+    }, 300)
   }, { deep: true })
 
   /**

@@ -21,6 +21,8 @@ describe('настройки поповера симулятора (localStorage
       carIntervalMax: null,
       maxGroupSize: 3,
       maxNonFamily: 1,
+      volume: 0.8,
+      muted: true,
     })
     const loaded = loadWidgetSettings(localStorage)
     expect(loaded.maxAgents).toBe(7)
@@ -29,6 +31,23 @@ describe('настройки поповера симулятора (localStorage
     expect(loaded.carIntervalMin).toBeNull()
     expect(loaded.maxGroupSize).toBe(3)
     expect(loaded.maxNonFamily).toBe(1)
+    // [№15-ЗВУК] громкость/тишина переживают roundtrip
+    expect(loaded.volume).toBe(0.8)
+    expect(loaded.muted).toBe(true)
+  })
+
+  it('[№15-ЗВУК] громкость зажимается в 0..1; 0 допустим (mute)', () => {
+    localStorage.clear()
+    saveWidgetSettings(localStorage, { ...defaultWidgetSettings(), volume: 5, muted: false })
+    expect(loadWidgetSettings(localStorage).volume).toBe(1)
+    saveWidgetSettings(localStorage, { ...defaultWidgetSettings(), volume: -2, muted: false })
+    expect(loadWidgetSettings(localStorage).volume).toBe(0)
+    saveWidgetSettings(localStorage, { ...defaultWidgetSettings(), volume: 0, muted: false })
+    expect(loadWidgetSettings(localStorage).volume).toBe(0)
+    localStorage.setItem(WIDGET_SETTINGS_KEY, JSON.stringify({ volume: 'мусор', muted: 'yes' }))
+    const loaded = loadWidgetSettings(localStorage)
+    expect(loaded.volume).toBeNull()
+    expect(loaded.muted).toBe(false) // строго boolean true
   })
 
   it('пустые строки и мусор -> null (значение «не задано»)', () => {

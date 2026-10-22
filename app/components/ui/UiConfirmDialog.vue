@@ -6,6 +6,7 @@
     (опасные действия — привычнее подтверждать осознанно). -->
 <template lang="pug">
 .dialog.modal(
+  ref="dialogRootRef"
   :class="state.isOpen ? 'modal-open' : ''"
   @keydown.esc.prevent="cancel"
 )
@@ -61,10 +62,10 @@ watch(() => state.value.isOpen, async (open) => {
   }
 })
 
-// Глобальный Esc (модалка не в фокусе, если клик был мимо input'ов)
-const onGlobalKey = (e: KeyboardEvent) => {
-  if (state.value.isOpen && e.key === 'Escape') cancel()
-}
-onMounted(() => window.addEventListener('keydown', onGlobalKey))
-onUnmounted(() => window.removeEventListener('keydown', onGlobalKey))
+// [№15-A11Y] Esc/ловушка фокуса/возврат фокуса — общий useModalA11y:
+// стек модалок гарантирует, что Esc закрывает только ВЕРХНЮЮ (confirm
+// поверх формы не закрывает форму одним нажатием).
+const dialogRootRef = ref<HTMLElement | null>(null)
+import { useModalA11y } from '~/composables/useModalA11y'
+useModalA11y({ isOpen: () => state.value.isOpen, onClose: cancel, root: dialogRootRef })
 </script>

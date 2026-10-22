@@ -173,52 +173,6 @@
               label.label.cursor-pointer(title="Выключите, чтобы журнал заполнялся вручную — заработают бонусы и штрафы за записи")
                 span.label-text Автозапись журнала
                 input.toggle.toggle-sm.toggle-primary(type="checkbox" v-model="simSettings.autoJournal")
-        .border.border-base-300.rounded-xl.p-4.bg-base-200
-          .flex.items-center.gap-2.mb-3
-            span.text-xl ⚙️
-            h5.font-bold Физика движения
-          .grid.grid-cols-2.gap-x-4.gap-y-2
-            .form-control
-              label.label
-                span.label-text Ускорение (px/сек²)
-              input.input.input-xs.input-bordered(type="number" v-model.number="simSettings.ACCEL" step="10")
-            .form-control
-              label.label
-                span.label-text Торможение (px/сек²)
-              input.input.input-xs.input-bordered(type="number" v-model.number="simSettings.DECEL" step="10")
-            .form-control
-              label.label
-                span.label-text Время реакции (сек)
-              input.input.input-xs.input-bordered(type="number" step="0.1" v-model.number="simSettings.REACTION_TIME")
-            .form-control
-              label.label
-                span.label-text Буфер (px)
-              input.input.input-xs.input-bordered(type="number" v-model.number="simSettings.MIN_BUFFER")
-            .form-control
-              label.label
-                span.label-text Дальность (px)
-              input.input.input-xs.input-bordered(type="number" v-model.number="simSettings.MAX_LOOKAHEAD")
-            .form-control
-              label.label
-                span.label-text Время до отката (сек)
-              input.input.input-xs.input-bordered(type="number" step="0.5" v-model.number="simSettings.DEADLOCK_TIME")
-            .form-control
-              label.label
-                span.label-text Время реверса (сек)
-              input.input.input-xs.input-bordered(type="number" step="0.1" v-model.number="simSettings.REVERSE_TIME")
-            .form-control
-              label.label
-                span.label-text Скорость реверса (px/сек)
-              input.input.input-xs.input-bordered(type="number" v-model.number="simSettings.REVERSE_SPEED")
-            .form-control
-              label.label
-                span.label-text Смещение спрайта (рад)
-              input.input.input-xs.input-bordered(type="number" step="0.1" v-model.number="simSettings.SPRITE_ORIENTATION_OFFSET")
-              span.label-text-alt.text-xs.mt-1 (0=вправо, 1.57=вниз)
-            .form-control
-              label.label
-                span.label-text Порог прибытия (px)
-              input.input.input-xs.input-bordered(type="number" v-model.number="simSettings.ARRIVE_THRESHOLD" step="0.5")
 </template>
 
 <script setup lang="ts">

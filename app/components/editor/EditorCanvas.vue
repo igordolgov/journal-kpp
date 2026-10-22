@@ -43,7 +43,7 @@
   //- Холст
   .absolute.top-5.left-5.bg-gray-600(
     :style="{ width: canvasWidth + 'px', height: canvasHeight + 'px' }"
-    @mousedown.self="handleCanvasMouseDown"
+    @pointerdown.self="handleCanvasMouseDown"
   )
     .absolute.inset-0.pointer-events-none(:style="sceneBackgroundStyle")
     .absolute.inset-0.pointer-events-none(
@@ -56,7 +56,7 @@
       .absolute.cursor-move.transition-colors(
         :style="getElementStyle(el)"
         :class="isSelected(el.id) ? 'ring-2 ring-blue-400 z-10' : 'hover:ring-2 hover:ring-gray-500'"
-        @mousedown.stop="handleElementMouseDown($event, el.id)"
+        @pointerdown.stop="handleElementMouseDown($event, el.id)"
       )
         //- [ИСПРАВЛЕНО] el.width/height опциональны — fallback до number
         //- (400x120 — дефолт дорожки из библиотеки)
@@ -229,7 +229,7 @@
       .absolute.cursor-move.transition-colors(
         :style="getPanelStyle(panel)"
         :class="isPanelSelected(panel.id) ? 'ring-2 ring-purple-400 z-10' : 'hover:ring-2 hover:ring-gray-500'"
-        @mousedown.stop="handlePanelMouseDown($event, panel.id)"
+        @pointerdown.stop="handlePanelMouseDown($event, panel.id)"
       )
         .absolute.top-0.left-0.right-0.h-6.bg-gray-700.text-gray-200.text-xs.flex.items-center.px-2.rounded-t-md(
           style="cursor: move; user-select: none;"
@@ -302,7 +302,7 @@
         class="rounded-sm"
         :style="getHandleStyle(handle.pos, getSelectedElement())"
         :class="handle.cursor"
-        @mousedown.stop="startResize($event, handle.pos, getSelectedElement())"
+        @pointerdown.stop="startResize($event, handle.pos, getSelectedElement())"
       )
 
   //- Ресайз-хендлы для панелей
@@ -312,7 +312,7 @@
         class="rounded-sm"
         :style="getHandleStyle(handle.pos, getSelectedPanel())"
         :class="handle.cursor"
-        @mousedown.stop="startPanelResize($event, handle.pos, getSelectedPanel())"
+        @pointerdown.stop="startPanelResize($event, handle.pos, getSelectedPanel())"
       )
 </template>
 
@@ -348,6 +348,9 @@ const emit = defineEmits<{
   (e: 'select-panel', id: string | null): void
   (e: 'select-control', panelId: string, controlId: string): void
   (e: 'delete-panel', id: string): void
+  // [№15-ПЕРФ] жестовые снапшоты: один на drag/resize вместо ~60/сек
+  (e: 'history-begin'): void
+  (e: 'history-end'): void
 }>()
 
 const activeIntercoms = ref(new Set<any>())
@@ -521,17 +524,18 @@ const dragState = ref({
 })
 const startDrag = (e: MouseEvent, type: 'element' | 'panel', targetId?: string) => {
   dragState.value = { isDragging: true, startX: e.clientX, startY: e.clientY, type, targetId: targetId || '', elementsStart: [], panelStart: null }
+  emit('history-begin') // [№15] один снапшот на жест
   if (type === 'element') dragState.value.elementsStart = props.elements.filter(el => isSelected(el.id)).map(el => ({ id: el.id, x: el.x, y: el.y }))
   else if (type === 'panel' && targetId) { const panel = props.panels.find(p => p.id === targetId); if (panel) dragState.value.panelStart = { id: panel.id, x: panel.x || 0, y: panel.y || 0 } }
-  window.addEventListener('mousemove', onDrag); window.addEventListener('mouseup', endDrag)
+  window.addEventListener('pointermove', onDrag); window.addEventListener('pointerup', endDrag)
 }
-const onDrag = (e: MouseEvent) => {
+const onDrag = (e: PointerEvent) => {
   if (!dragState.value.isDragging) return
   const dx = e.clientX - dragState.value.startX; const dy = e.clientY - dragState.value.startY
   if (dragState.value.type === 'element') dragState.value.elementsStart.forEach(s => emit('update:element', s.id, { x: s.x + dx, y: s.y + dy }))
   else if (dragState.value.type === 'panel' && dragState.value.panelStart) emit('update:panel', dragState.value.panelStart.id, { x: dragState.value.panelStart.x + dx, y: dragState.value.panelStart.y + dy })
 }
-const endDrag = () => { dragState.value.isDragging = false; window.removeEventListener('mousemove', onDrag); window.removeEventListener('mouseup', endDrag) }
+const endDrag = () => { dragState.value.isDragging = false; window.removeEventListener('pointermove', onDrag); window.removeEventListener('pointerup', endDrag); emit('history-end') }
 
 const handleElementMouseDown = (e: MouseEvent, id: string) => {
   if (props.selectedPanelId) emit('select-panel', null)
@@ -553,9 +557,10 @@ const resizeState = ref({ isResizing: false, handle: '', startX: 0, startY: 0, s
 const startResize = (e: MouseEvent, handle: string, el: SceneElement | null) => {
   if (!el) return
   resizeState.value = { isResizing: true, handle, startX: e.clientX, startY: e.clientY, startEl: { ...el } }
-  window.addEventListener('mousemove', onResize); window.addEventListener('mouseup', endResize)
+  emit('history-begin') // [№15] один снапшот на жест
+  window.addEventListener('pointermove', onResize); window.addEventListener('pointerup', endResize)
 }
-const onResize = (e: MouseEvent) => {
+const onResize = (e: PointerEvent) => {
   if (!resizeState.value.isResizing || !resizeState.value.startEl) return
   const el = resizeState.value.startEl; const dx = e.clientX - resizeState.value.startX; const dy = e.clientY - resizeState.value.startY
   const { w: origW, h: origH } = getElSize(el); let newX = el.x, newY = el.y, newW = origW, newH = origH
@@ -565,15 +570,16 @@ const onResize = (e: MouseEvent) => {
   if (resizeState.value.handle.includes('n')) { newH = Math.max(20, newH - dy); newY = el.y + (origH - newH) }
   emit('update:element', el.id, { x: newX, y: newY, width: newW, height: newH })
 }
-const endResize = () => { resizeState.value.isResizing = false; window.removeEventListener('mousemove', onResize); window.removeEventListener('mouseup', endResize) }
+const endResize = () => { resizeState.value.isResizing = false; window.removeEventListener('pointermove', onResize); window.removeEventListener('pointerup', endResize); emit('history-end') }
 
 const panelResizeState = ref({ isResizing: false, handle: '', startX: 0, startY: 0, startPanel: null as Panel | null })
 const startPanelResize = (e: MouseEvent, handle: string, panel: Panel | null) => {
   if (!panel) return
   panelResizeState.value = { isResizing: true, handle, startX: e.clientX, startY: e.clientY, startPanel: { ...panel } }
-  window.addEventListener('mousemove', onPanelResize); window.addEventListener('mouseup', endPanelResize)
+  emit('history-begin') // [№15] один снапшот на жест
+  window.addEventListener('pointermove', onPanelResize); window.addEventListener('pointerup', endPanelResize)
 }
-const onPanelResize = (e: MouseEvent) => {
+const onPanelResize = (e: PointerEvent) => {
   if (!panelResizeState.value.isResizing || !panelResizeState.value.startPanel) return
   const p = panelResizeState.value.startPanel; const dx = e.clientX - panelResizeState.value.startX; const dy = e.clientY - panelResizeState.value.startY
   let newX = p.x || 0, newY = p.y || 0, newW = p.width || 200, newH = p.height || 150
@@ -583,14 +589,14 @@ const onPanelResize = (e: MouseEvent) => {
   if (panelResizeState.value.handle.includes('n')) { newH = Math.max(80, newH - dy); newY = (p.y || 0) + ((p.height || 150) - newH) }
   emit('update:panel', p.id, { x: newX, y: newY, width: newW, height: newH })
 }
-const endPanelResize = () => { panelResizeState.value.isResizing = false; window.removeEventListener('mousemove', onPanelResize); window.removeEventListener('mouseup', endPanelResize) }
+const endPanelResize = () => { panelResizeState.value.isResizing = false; window.removeEventListener('pointermove', onPanelResize); window.removeEventListener('pointerup', endPanelResize); emit('history-end') }
 
 const selectionState = ref({ isSelecting: false, startX: 0, startY: 0, currentX: 0, currentY: 0 })
-const startSelectionRect = (e: MouseEvent) => { selectionState.value = { isSelecting: true, startX: e.offsetX, startY: e.offsetY, currentX: e.offsetX, currentY: e.offsetY }; window.addEventListener('mousemove', onSelectionRect); window.addEventListener('mouseup', endSelectionRect) }
-const onSelectionRect = (e: MouseEvent) => { if (!selectionState.value.isSelecting || !canvasRef.value) return; const r = canvasRef.value.getBoundingClientRect(); selectionState.value.currentX = e.clientX - r.left - RULER_SIZE; selectionState.value.currentY = e.clientY - r.top - RULER_SIZE }
+const startSelectionRect = (e: PointerEvent) => { selectionState.value = { isSelecting: true, startX: e.offsetX, startY: e.offsetY, currentX: e.offsetX, currentY: e.offsetY }; window.addEventListener('pointermove', onSelectionRect); window.addEventListener('pointerup', endSelectionRect) }
+const onSelectionRect = (e: PointerEvent) => { if (!selectionState.value.isSelecting || !canvasRef.value) return; const r = canvasRef.value.getBoundingClientRect(); selectionState.value.currentX = e.clientX - r.left - RULER_SIZE; selectionState.value.currentY = e.clientY - r.top - RULER_SIZE }
 const endSelectionRect = () => {
   if (selectionState.value.isSelecting) { const r = selectionBox.value; if (r.width > 5 && r.height > 5) { const ids = props.elements.filter(el => { const { w, h } = getElSize(el); return el.x < r.x + r.width && el.x + w > r.x && el.y < r.y + r.height && el.y + h > r.y }).map(el => el.id); emit('update:selection', ids) } }
-  selectionState.value.isSelecting = false; window.removeEventListener('mousemove', onSelectionRect); window.removeEventListener('mouseup', endSelectionRect)
+  selectionState.value.isSelecting = false; window.removeEventListener('pointermove', onSelectionRect); window.removeEventListener('pointerup', endSelectionRect)
 }
 const selectionBox = computed(() => { const s = selectionState.value; return { x: Math.min(s.startX, s.currentX), y: Math.min(s.startY, s.currentY), width: Math.abs(s.currentX - s.startX), height: Math.abs(s.currentY - s.startY) } })
 const selectionBoxStyle = computed(() => ({ left: `${selectionBox.value.x}px`, top: `${selectionBox.value.y}px`, width: `${selectionBox.value.width}px`, height: `${selectionBox.value.height}px` }))
@@ -657,7 +663,7 @@ const getHandleStyle = (pos: string, target: any): Record<string, string> => {
   return HANDLE_POSITIONS(l, t, r, b, w, h, o)[pos] ?? {}
 }
 
-const handleCanvasMouseDown = (e: MouseEvent) => { if (!e.shiftKey) { emit('update:selection', []); emit('select-panel', null) } startSelectionRect(e) }
+const handleCanvasMouseDown = (e: PointerEvent) => { if (!e.shiftKey) { emit('update:selection', []); emit('select-panel', null) } startSelectionRect(e) }
 
 const isGateControl = (ctrl: any) => ctrl.settings?.actionType?.includes('gate') || ctrl.settings?.actionType?.includes('wicket')
 
@@ -688,6 +694,11 @@ const getSvgStyle = (el: any) => {
 </script>
 
 <style scoped>
+/* [№15-TOUCH] pointer-events drag: запрещаем браузерные тач-жесты на канвасе */
+.relative.w-full.h-full.overflow-hidden {
+  touch-action: none;
+}
+
 .editor-element :deep(svg) { width: 100%; height: 100%; display: block; object-fit: fill; }
 .gate-wrapper { width: 100%; height: 100%; overflow: visible; }
 .control-item { transition: all 0.1s ease; }

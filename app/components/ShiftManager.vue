@@ -38,6 +38,8 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { useShift } from '../composables/useShift';
+// [№15-UX] alert() заменён тостом — единый стиль уведомлений
+import { useToast } from '../composables/useToast';
 
 // Получаем все нужные данные из useShift
 const { 
@@ -64,6 +66,6 @@ const openBreakModal = () => { breakCoverName.value = ''; isBreakModalOpen.value
 
 const handleEndBreak = async () => {
   await endBreak();
-  alert('Вернулись с перерыва');
+  useToast().info('Вернулись с перерыва');
 };
 </script>

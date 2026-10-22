@@ -87,6 +87,8 @@
         :selected-panel-id="panelSelectedId"
         :selected-ctrl-id="controlSelectedId"
         :is-simulating="false" 
+        @history-begin="beginHistoryGesture"
+        @history-end="endHistoryGesture"
         @update:element="handleUpdateElement"
         @update:panel="handleUpdatePanel"
         @update:selection="handleSelectionUpdate"
@@ -190,6 +192,8 @@ import { ref, onMounted, computed, watch, onUnmounted } from 'vue'
 import { useEditorLogic } from '../composables/useEditorLogic'
 import { useConfig } from '~/composables/useConfig'
 import { useToast } from '~/composables/useToast'
+// [№15-UX] диалог ввода вместо window.prompt
+import { usePrompt } from '~/composables/usePrompt'
 import EditorHeader from '../components/editor/EditorHeader.vue'
 import EditorSidebarLeft from '../components/editor/EditorSidebarLeft.vue'
 import EditorSidebarRight from '../components/editor/EditorSidebarRight.vue'
@@ -200,6 +204,7 @@ import { FolderOpen, X, Boxes, ChevronRight } from '@lucide/vue'
 definePageMeta({ layout: false })
 
 const toast = useToast()
+const { promptDialog } = usePrompt()
 
 const STORAGE_KEY_SCENE = 'journal_kpp_last_scene'
 
@@ -212,7 +217,7 @@ const {
   handleSaveDb, openLoadModal, loadSelectedScene, importScene,
   selectControl, initEditor, updateElement, updateScript,
   updateSettings, addScript, deleteScript, toggleSimulator,
-  undo, saveSceneCopy,
+  undo, redo, saveSceneCopy,
   saveHistory
 } = useEditorLogic()
 
@@ -277,7 +282,12 @@ const handleImport = (e: Event) => {
 }
 
 const handleSaveAs = async () => {
-  const newName = prompt('Введите название новой сцены', sceneConfig.value.name + ' (копия)')
+  // [№15-UX] window.prompt -> UiPromptDialog (единый стиль модалок, Esc/Enter/фокус)
+  const newName = await promptDialog({
+    title: 'Название новой сцены',
+    value: sceneConfig.value.name + ' (копия)',
+    confirmLabel: 'Сохранить копию',
+  })
   if (!newName) return
   const copy = JSON.parse(JSON.stringify(sceneConfig.value))
   copy.id = undefined
@@ -397,7 +407,15 @@ const handleGlobalUndo = (e: KeyboardEvent) => {
   // e.code не зависит от раскладки — 'KeyZ' всегда 'KeyZ'
   if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ') {
     e.preventDefault()
-    undo()
+    // [№15] Ctrl+Shift+Z = redo (привычная связка), Ctrl+Z = undo
+    if (e.shiftKey) redo()
+    else undo()
+    return
+  }
+  // [№15] redo по Ctrl+Y
+  if ((e.ctrlKey || e.metaKey) && e.code === 'KeyY') {
+    e.preventDefault()
+    redo()
   }
 }
 
@@ -420,11 +438,19 @@ const handleSelectionUpdate = (ids: string[]) => {
 }
 
 // --- ОБРАБОТЧИКИ ЭЛЕМЕНТОВ ---
+// [№15-ПЕРФ] история drag/resize: один снапшот на жест (history-begin/end от
+// канваса), а не JSON.stringify всей сцены на каждый mousemove (~60/сек).
+// Сайдбарные правки полей остаются поштучными (вне жеста — пишутся как раньше).
+let historyGesture = false
+const beginHistoryGesture = () => { saveHistory(); historyGesture = true }
+const endHistoryGesture = () => { historyGesture = false; saveHistory() }
+const saveIfNotGesture = () => { if (!historyGesture) saveHistory() }
+
 const handleUpdateElement = (id: string, changes: Partial<any>) => {
   const el = sceneConfig.value.elements.find(e => e.id === id)
   if (el) {
     Object.assign(el, changes)
-    saveHistory()
+    saveIfNotGesture()
   }
 }
 
@@ -644,7 +670,7 @@ const handleUpdatePanel = (panelId: string, changes: any) => {
   if (panel) {
     Object.assign(panel, changes)
     sceneConfig.value.panels = [...sceneConfig.value.panels]
-    saveHistory()
+    saveIfNotGesture()
   }
 }
 

@@ -12,6 +12,7 @@
 <template lang="pug">
 dialog.modal(
   v-if="isOpen"
+  ref="modalRootRef"
   class="modal-open"
 )
   .modal-box.max-w-4xl.p-0.bg-base-200
@@ -312,6 +313,10 @@ const props = withDefaults(defineProps<{
 
 // --- Emits ---
 const emit = defineEmits(['close', 'edit', 'delete', 'assign', 'edit-vehicle', 'update', 'open-person'])
+// [№15-A11Y] Esc закрывает, Tab не уходит под фон, при закрытии возвращается фокус
+const modalRootRef = ref<HTMLElement | null>(null)
+import { useModalA11y } from '~/composables/useModalA11y'
+useModalA11y({ isOpen: () => props.isOpen, onClose: () => emit('close'), root: modalRootRef })
 
 // --- Composables ---
 const { isChild } = useCompanions()

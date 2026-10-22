@@ -6,6 +6,7 @@
 Teleport(to="body")
   div(
     v-if="isOpen"
+    ref="modalRootRef"
     class="fixed inset-0 z-[9999] bg-gray-900 text-white overflow-hidden"
   )
     PersonDesigner(
@@ -18,12 +19,16 @@ Teleport(to="body")
 <script setup lang="ts">
 import PersonDesigner from '~/components/simulator/PersonDesigner.vue'
 
-defineProps({
+const props = defineProps({
   isOpen: Boolean,
   person: Object
 })
 
 const emit = defineEmits(['close', 'save'])
+// [№15-A11Y] Esc закрывает, Tab не уходит под фон, при закрытии возвращается фокус
+const modalRootRef = ref<HTMLElement | null>(null)
+import { useModalA11y } from '~/composables/useModalA11y'
+useModalA11y({ isOpen: () => props.isOpen, onClose: () => emit('close'), root: modalRootRef })
 
 const handleSave = (updatedData: any) => {
   emit('save', updatedData)

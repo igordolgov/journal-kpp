@@ -14,6 +14,9 @@ export interface SimulatorWidgetSettings {
   carIntervalMax: number | null
   maxGroupSize: number | null
   maxNonFamily: number | null
+  // [№15-ЗВУК] громкость/тишина симулятора (кнопка mute в хедере + слайдер в поповере)
+  volume: number | null // 0..1, null = дефолт 0.6
+  muted: boolean
 }
 
 export const WIDGET_SETTINGS_KEY = 'jkpp-sim-widget-settings-v1'
@@ -26,9 +29,16 @@ export const defaultWidgetSettings = (): SimulatorWidgetSettings => ({
   carIntervalMax: null,
   maxGroupSize: null,
   maxNonFamily: null,
+  volume: null,
+  muted: false,
 })
 
-const WIDGET_KEYS: (keyof SimulatorWidgetSettings)[] = [
+// [№15] только числовые ключи: keyof-универсал после добавления volume/muted
+// делает тип записи clean[key] пересечением всех типов значений (never)
+const WIDGET_KEYS: (
+  'maxAgents' | 'personIntervalMin' | 'personIntervalMax' |
+  'carIntervalMin' | 'carIntervalMax' | 'maxGroupSize' | 'maxNonFamily'
+)[] = [
   'maxAgents', 'personIntervalMin', 'personIntervalMax',
   'carIntervalMin', 'carIntervalMax', 'maxGroupSize', 'maxNonFamily',
 ]
@@ -41,6 +51,13 @@ const toNumOrNull = (v: unknown): number | null => {
   return Number.isFinite(n) && n > 0 ? n : null
 }
 
+// [№15-ЗВУК] громкость 0 ДОПУСТИМА (mute), диапазон 0..1
+const toVolumeOrNull = (v: unknown): number | null => {
+  if (v === null || v === undefined || v === '') return null
+  const n = Number(v)
+  return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : null
+}
+
 export const loadWidgetSettings = (storage: Storage | null): SimulatorWidgetSettings => {
   const out = defaultWidgetSettings()
   if (!storage) return out
@@ -49,9 +66,12 @@ export const loadWidgetSettings = (storage: Storage | null): SimulatorWidgetSett
     if (!raw) return out
     const parsed = JSON.parse(raw)
     if (parsed && typeof parsed === 'object') {
+      const rec = parsed as Record<string, unknown>
       for (const key of WIDGET_KEYS) {
-        out[key] = toNumOrNull((parsed as Record<string, unknown>)[key])
+        out[key] = toNumOrNull(rec[key])
       }
+      out.volume = toVolumeOrNull(rec.volume)
+      out.muted = rec.muted === true
     }
   } catch (e) {
     console.warn('[widget-settings] не удалось прочитать, использую дефолты', e)
@@ -64,6 +84,8 @@ export const saveWidgetSettings = (storage: Storage | null, s: SimulatorWidgetSe
   try {
     const clean = defaultWidgetSettings()
     for (const key of WIDGET_KEYS) clean[key] = toNumOrNull(s[key])
+    clean.volume = toVolumeOrNull(s.volume)
+    clean.muted = s.muted === true
     storage.setItem(WIDGET_SETTINGS_KEY, JSON.stringify(clean))
   } catch (e) {
     console.warn('[widget-settings] не удалось сохранить', e)

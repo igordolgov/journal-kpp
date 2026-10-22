@@ -163,6 +163,7 @@ dialog.modal.modal-open(
 //- saving-флагом от двойной фиксации
 dialog.modal.modal-open(
   v-if="isExitModalOpen"
+  ref="exitModalRef"
 )
   .modal-box.max-w-xs.p-0.overflow-hidden(
     class="bg-base-100 shadow-2xl border border-base-200/50 rounded-xl"
@@ -256,6 +257,7 @@ dialog.modal.modal-open(
 //- 3. Модалка Возврата
 dialog.modal.modal-open(
   v-if="isReturnModalOpen"
+  ref="returnModalRef"
 )
   .modal-box.max-w-md.p-0.overflow-hidden(
     class="bg-base-100 shadow-2xl border border-base-200/50 rounded-xl"
@@ -594,29 +596,36 @@ const handleGroupClick = () => {
 }
 
 // --- Логика ресайза колонок ---
+// [№15-A11Y] Esc/фокус для модалок выезда и возврата
+const exitModalRef = ref<HTMLElement | null>(null)
+const returnModalRef = ref<HTMLElement | null>(null)
+import { useModalA11y } from '~/composables/useModalA11y'
+useModalA11y({ isOpen: () => isExitModalOpen.value, onClose: () => (isExitModalOpen.value = false), root: exitModalRef })
+useModalA11y({ isOpen: () => isReturnModalOpen.value, onClose: () => (isReturnModalOpen.value = false), root: returnModalRef })
+
 const scrollContainer = ref<HTMLElement | null>(null)
 const resizingKey = ref<string | null>(null)
 const startX = ref(0)
 const startWidth = ref(0)
 
-const startResize = (e: MouseEvent, key: string) => {
+const startResize = (e: PointerEvent, key: string) => {
   resizingKey.value = key
   startX.value = e.pageX
   startWidth.value = columnWidths.value[key] || 100
 
-  document.addEventListener('mousemove', onResizeMove)
-  document.addEventListener('mouseup', stopResize)
+  document.addEventListener('pointermove', onResizeMove)
+  document.addEventListener('pointerup', stopResize)
 }
 
-const onResizeMove = (e: MouseEvent) => {
+const onResizeMove = (e: PointerEvent) => {
   if (!resizingKey.value) return
   columnWidths.value[resizingKey.value] = Math.max(50, startWidth.value + (e.pageX - startX.value))
 }
 
 const stopResize = () => {
   resizingKey.value = null
-  document.removeEventListener('mousemove', onResizeMove)
-  document.removeEventListener('mouseup', stopResize)
+  document.removeEventListener('pointermove', onResizeMove)
+  document.removeEventListener('pointerup', stopResize)
 }
 </script>
 

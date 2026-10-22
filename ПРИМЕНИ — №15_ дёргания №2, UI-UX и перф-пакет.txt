@@ -1,0 +1,88 @@
+ПРИМЕНИ — №15: дёргания №2 (фиксированный шаг + интерполяция), UI/UX и перф-пакет
+
+ЧТО ЭТО
+1) ДЁРГАНИЯ ПОСЛЕ №14 — причина №2: неравномерное ВРЕМЯ КАДРА. Физика делала
+   один шаг на длительность реального кадра (до 0.1с) — каждый неровный кадр
+   (dev-рантайм, GC, HMR) удваивал визуальный шаг на медленном ходу.
+   GSAP не поможет: твины живут в том же rAF-бюджете.
+   РЕШЕНИЕ: физика идёт ФИКСИРОВАННЫМИ подшагами 1/60с (аккумулятор, максимум
+   4 за кадр — при большом лаге симуляция замедляется, а не телепортируется),
+   а рендер ИНТЕРПОЛИРУЕТ: prev + (cur - prev) * alpha. Неровность кадра
+   меняет только число подшагов, а не их длину — движение равномерное.
+   ФИЗИКА И ПРАВИЛА ПОВЕДЕНИЯ АГЕНТОВ НЕ МЕНЯЛИСЬ — только шаг по времени
+   и путь данных до экрана.
+2) Пакет UI/UX и быстродействия (полная ревизия, все пункты согласованы):
+   - БЕЗОПАСНОСТЬ: подсветка поиска в журнале экранирует HTML до v-html
+     (раньше <img onerror=...> из ФИО/заметок исполнялся).
+   - ЖУРНАЛ: пагинация 100 записей/стр + empty state; поиск — debounce 300мс;
+     ширины колонок пишутся в localStorage с debounce (было на каждый mousemove).
+   - АУДИО: кнопка звука в шапке симулятора + слайдер в поповере (сохраняется);
+     при сворачивании окна двигатели глушатся (visibilitychange).
+   - РЕДАКТОР: redo (Ctrl+Y / Ctrl+Shift+Z); первый Ctrl+Z больше не «съедается»;
+     drag/resize пишут ОДИН снапшот истории на жест (было ~60 JSON.stringify/сек).
+   - МОДАЛКИ: Esc закрывает только верхнюю (стек), Tab не уходит под фон,
+     фокус возвращается при закрытии — confirm, prompt и все формы БД/журнала.
+   - НАСТРОЙКИ: применяются сразу после «Сохранить» (перезагрузка страницы
+     убрана); удалён дубль блока «Физика движения» на вкладке симулятора.
+   - МЕЛОЧИ: alert→тост (смены), prompt→UiPromptDialog (редактор);
+     /scenario-editor и /generator связаны с меню; drag/ресайзы на Pointer
+     Events (тач-планшеты); кэш getTrafficConfig (был до 3000 фильтров/сек).
+   - УДАЛЁН МЁРТВЫЙ КОД (см. шаг 3) — SimulatorSettings.vue,
+     GeneratorControl.vue, useScenarioRunner.ts.
+
+ФАЙЛЫ (новые)
+  app/utils/journalHighlight.ts        экранирующая подсветка (+тесты)
+  app/composables/useModalA11y.ts      стек модалок: Esc/ловушка фокуса/фокус
+  app/composables/usePrompt.ts         диалог ввода (замена prompt)
+  app/components/ui/UiPromptDialog.vue глобальный диалог ввода
+  tests/journal-highlight.test.ts      7 тестов XSS
+ИЗМЕНЁННЫЕ
+  app/utils/simulatorPaint.ts          paintCoord/snapshotPrevPositions (alpha)
+  app/utils/widgetSettings.ts          +volume/muted
+  app/components/SimulatorWidget.vue   подшаги физики, кэш конфига, звук
+  app/components/JournalTable.vue      экранирование, пагинация, empty state
+  app/components/JournalSidebar.vue    debounce поиска
+  app/composables/useEditorLogic.ts    undo/redo (указательная модель)
+  app/composables/useJournalPage.ts    debounce ширин колонок
+  app/components/editor/EditorCanvas.vue  жестовая история, Pointer Events
+  app/pages/editor.vue                 redo-хоткеи, prompt-диалог
+  app/pages/index.vue                  a11y модалок, ресайз на pointer
+  app/pages/settings.vue               живое применение
+  app/components/settings/SettingsSimulator.vue  дубль физики удалён
+  app/components/ui/UiConfirmDialog.vue  общий стек модалок
+  app/components/database/*.vue (5)    a11y модалок
+  app/components/designer/DesignerModal.vue  a11y
+  app/components/ShiftManager.vue      alert→тост
+  app/layouts/default.vue              маршруты Сценарии/Генератор в меню
+  app/app.vue                          монтирование UiPromptDialog
+  tests/simulator-paint.test.ts        +6 (интерполяция)
+  tests/widget-settings.test.ts        +громкость
+  README.md                            блок «Фикс №15»
+
+КАК ПРИМЕНИТЬ
+1) Скопируйте файлы поверх своего проекта (структура совпадает).
+   ПАКЕТ ВКЛЮЧАЕТ И НЕПРИМЕНЁННЫЙ №14 — ставится одним архивом.
+2) УДАЛИТЕ мёртвые файлы (архив их не удаляет):
+   app/components/SimulatorSettings.vue
+   app/components/GeneratorControl.vue
+   app/composables/useScenarioRunner.ts
+3) pnpm install (если ещё не после прошлых пакетов)
+4) pnpm test — ожидается: 194 passed | 1 skipped (28 файлов)
+5) pnpm dev и проверьте в браузере:
+   - дотягивание машин и ходьба людей — плавно ДАЖЕ при открытых devtools
+     (это и был тест неравномерного кадра);
+   - кнопка звука в шапке симулятора, слайдер в поповере (шестерёнка);
+   - сверните окно при работающей симуляции — звук глохнет, развернули — вернулся;
+   - журнал: прокрутите до низа — появятся «Стр. 1 из N» (при >100 записей);
+     при пустом журнале — дружелюбный empty state;
+   - редактор: перетащите элемент, Ctrl+Z вернёт, Ctrl+Y повторит;
+   - Esc закрывает модалки, Tab не уходит под фон;
+   - Настройки → Сохранить — страница больше не перезагружается.
+6) commit + push; exe при желании пересобрать по прежнему рецепту.
+
+ПРОВЕРЕНО
+- vitest: 194 passed | 1 skipped; vue-tsc: 0 ошибок; nuxi generate: OK.
+- Dev-сервер проверен в headless-браузере на 6 страницах
+  (/, /editor, /settings, /database, /reports, /scenario-editor,
+  /generator) — 0 ошибок консоли.
+- Спецификация обновлена: Логика-движения-агентов.txt (версия №15, 14.10).

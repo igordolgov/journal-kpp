@@ -51,8 +51,15 @@
             :value="opt.value"
           ) {{ opt.label }}
 
+  //- [№15-UX] empty state: раньше пустой журнал рендерил пустой tbody — белое полотно
+  .flex-1.overflow-auto(v-if="processedJournal.length === 0")
+    .flex.flex-col.items-center.justify-center.h-full.text-center.p-8
+      Inbox.w-12.h-12.mb-3(class="text-base-content/25")
+      p.text-base.font-semibold(class="text-base-content/60") Журнал пуст
+      p.text-sm(class="text-base-content/40") Записи появятся после первой фиксации прохода — в симуляторе или вручную
+
   //- Таблица
-  .flex-1.overflow-auto
+  .flex-1.overflow-auto(v-else)
     table.table.table-zebra.w-full(
       :class="tableClasses"
       :style="tableFontStyle"
@@ -77,7 +84,7 @@
             .resize-handle.absolute.top-0.bottom-0(
               class="z-20 hover:bg-primary/20 w-2 cursor-col-resize"
               style="right: -4px;"
-              @mousedown.stop="$emit('resize', $event, col.key)"
+              @pointerdown.stop="$emit('resize', $event, col.key)"
             )
 
           th(:style="{ width: '90px', minWidth: '90px' }")
@@ -191,6 +198,25 @@
                         .flex.justify-between.gap-2
                           span.font-bold.shrink-0 Редактор:
                           span.text-right {{ item.data.updated_by || 'Не указан' }}
+  //- [№15-ПЕРФ] пагинация журнала
+  .flex-none.p-2.flex.justify-between.items-center.gap-3.bg-base-200.border-t.border-base-300(
+    v-if="totalRows > JOURNAL_PAGE_SIZE"
+  )
+    span.text-xs(class="text-base-content/60") Показано {{ pageRangeStart }}–{{ pageRangeEnd }} из {{ totalRows }}
+    .flex.items-center.gap-2
+      button.btn.btn-xs(
+        :disabled="currentPage <= 1"
+        @click="currentPage--"
+        aria-label="Предыдущая страница"
+      )
+        ChevronLeft.w-4.h-4
+      span.text-xs Стр. {{ currentPage }} из {{ totalPages }}
+      button.btn.btn-xs(
+        :disabled="currentPage >= totalPages"
+        @click="currentPage++"
+        aria-label="Следующая страница"
+      )
+        ChevronRight.w-4.h-4
 </template>
 
 <script setup lang="ts">
@@ -199,8 +225,10 @@
 // независима от сортировки режима «По дням», персист в localStorage.
 import { computed, ref, unref, watch } from 'vue'
 import { useState } from 'nuxt/app'
-import { Pencil, Info } from '@lucide/vue'
+import { Pencil, Info, Inbox, ChevronLeft, ChevronRight } from '@lucide/vue'
 import { useJournal } from '../composables/useJournal'
+// [№15-БЕЗОПАСНОСТЬ] подсветка с экранированием HTML (ФИО/транспорт идут в v-html)
+import { highlightSearchText } from '../utils/journalHighlight'
 
 const props = withDefaults(defineProps<{
   processedJournal?: any[]
@@ -345,7 +373,12 @@ const groupedRows = computed(() => {
   let lastDayStr = ''
   let headerIndex = 0
 
-  sortedRows.value.forEach((row: any) => {
+  // [№15-ПЕРФ] пагинация ДО группировки: страница = 100 записей,
+  // день первой записи страницы получает свой заголовок
+  const startIdx = (currentPage.value - 1) * JOURNAL_PAGE_SIZE
+  const pagedSource = sortedRows.value.slice(startIdx, startIdx + JOURNAL_PAGE_SIZE)
+
+  pagedSource.forEach((row: any) => {
     const dateVal = row.timestamp_out || row.timestamp_in || row.created_at
     if (!dateVal) return
 
@@ -415,10 +448,30 @@ const timelineRows = computed(() => {
     .map(x => ({ type: 'row', data: x.row, uniqueId: x.row.id }))
 })
 
-// Единая точка рендера для v-for: группировка или лента
-const displayRows = computed(() =>
-  props.displayMode === 'timeline' ? timelineRows.value : groupedRows.value
+// Единая точка рендера для v-for: группировка или лента.
+// [№15-ПЕРФ] пагинация: раньше рендерились ВСЕ записи разом — при тысячах
+// строк журнал начинал лагать (каждая строка — DOM-узлы с функциями в ячейках).
+const JOURNAL_PAGE_SIZE = 100
+const currentPage = ref(1)
+
+const totalRows = computed(() =>
+  props.displayMode === 'timeline' ? timelineRows.value.length : sortedRows.value.length
 )
+const totalPages = computed(() => Math.max(1, Math.ceil(totalRows.value / JOURNAL_PAGE_SIZE)))
+const displayRows = computed(() =>
+  props.displayMode === 'timeline'
+    ? timelineRows.value.slice((currentPage.value - 1) * JOURNAL_PAGE_SIZE, currentPage.value * JOURNAL_PAGE_SIZE)
+    : groupedRows.value
+)
+const pageRangeStart = computed(() => (totalRows.value === 0 ? 0 : (currentPage.value - 1) * JOURNAL_PAGE_SIZE + 1))
+const pageRangeEnd = computed(() => Math.min(currentPage.value * JOURNAL_PAGE_SIZE, totalRows.value))
+
+// Смена фильтров/сортировки — к первой странице; защита от выхода за диапазон
+watch([
+  () => props.displayMode, () => props.sortField, () => props.sortOrder,
+  timelineSort, searchQuery, showClosed,
+], () => { currentPage.value = 1 })
+watch(totalPages, (tp) => { if (currentPage.value > tp) currentPage.value = tp })
 // ============================================================
 
 const getShortFio = (fio: string) => {
@@ -446,15 +499,9 @@ const getShortFio = (fio: string) => {
 }
 
 // Подсветка поискового вхождения — единая функция
-const highlightText = (text: string, query: any) => {
-  const q = unref(query) || query?.value || ''
-  if (!q || !text) return text
-
-  const searchTerm = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const regex = new RegExp(`(${searchTerm})`, 'gi')
-
-  return String(text).replace(regex, '<span class="bg-warning/40 px-0.5 rounded">$1</span>')
-}
+// [№15-БЕЗОПАСНОСТЬ] перенос в utils/journalHighlight: текст экранируется ДО v-html.
+// Раньше <img onerror=...> из ФИО/заметок исполнялся (в database.vue экранирование было).
+const highlightText = (text: string, query: any) => highlightSearchText(text, query)
 
 const applyHighlight = (text: string, queryVal: string) => highlightText(text, queryVal)
 

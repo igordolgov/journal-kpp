@@ -42,6 +42,14 @@
         title="Настройки"
       )
         SlidersHorizontal.w-4.h-4
+      //- [№15-ЗВУК] mute/громкость симулятора
+      button.btn.btn-xs.btn-ghost.btn-square(
+        @click="userMuted = !userMuted"
+        :class="userMuted ? 'text-error bg-error/20' : 'text-base-content/40'"
+        :title="userMuted ? 'Включить звук' : 'Выключить звук'"
+      )
+        VolumeX.w-4.h-4(v-if="userMuted")
+        Volume2.w-4.h-4(v-else)
       button.btn.btn-xs.btn-ghost.btn-square(
         class="hover:text-error text-base-content/40"
         @click="$emit('close')"
@@ -87,6 +95,11 @@
         )
           span Макс. чужих в группе
           input.input.input-xs(type="number" v-model.number="userMaxNonFamily" min="0" max="4" placeholder="1")
+        label.flex.flex-col.text-xs(
+          class="text-base-content/60"
+        )
+          span Громкость звука ({{ Math.round(userVolume * 100) }}%)
+          input(type="range" min="0" max="100" step="5" v-model.number="userVolume" @input="userMuted = false")
         button.btn.btn-xs.btn-outline.btn-error.mt-2(@click="resetSettings") Сбросить
 
   //- Основной холст симуляции
@@ -305,12 +318,12 @@ import {
 // напрямую (paintScene из gameLoop), Vue перерисовывает только структурные события
 import {
   paintAgent, paintLabel, paintGate, paintCommandLine,
-  isAgentPaused, labelTransform,
+  isAgentPaused, labelTransform, snapshotPrevPositions,
 } from '~/utils/simulatorPaint'
 // [Фаза 5] Lucide: хедер и empty state
 import {
   CarFront, Activity, SlidersHorizontal, X,
-  MonitorX, PencilRuler, ShieldAlert
+  MonitorX, PencilRuler, ShieldAlert, Volume2, VolumeX
 } from '@lucide/vue'
 
 const audio = useAudioEngine()
@@ -353,6 +366,18 @@ const userCarIntervalMax = ref<number | null>(null)
 const userMaxGroupSize = ref<number | null>(null)
 const userMaxNonFamily = ref<number | null>(null)
 
+// [№15-ЗВУК] громкость/тишина симулятора: кнопка mute в хедере + слайдер
+// в поповере. setMasterVolume в движке существовал, но не вызывался никем.
+const userVolume = ref(0.6)
+const userMuted = ref(false)
+const effectiveVolume = computed(() => (userMuted.value ? 0 : userVolume.value))
+const applyMasterVolume = () => audio.setMasterVolume(effectiveVolume.value)
+// Сворачивание окна: rAF замирает, а зацикленные двигатели продолжают
+// звучать с последней громкостью — глушим masterGain до возврата.
+const onVisibilityChange = () => {
+  audio.setMasterVolume(document.hidden ? 0 : effectiveVolume.value)
+}
+
 const resetSettings = () => {
   userMaxAgents.value = null
   userPersonIntervalMin.value = null
@@ -380,13 +405,16 @@ const applySavedWidgetSettings = () => {
   userCarIntervalMax.value = saved.carIntervalMax
   userMaxGroupSize.value = saved.maxGroupSize
   userMaxNonFamily.value = saved.maxNonFamily
+  userVolume.value = saved.volume ?? 0.6
+  userMuted.value = saved.muted ?? false
 }
 applySavedWidgetSettings()
 
 let widgetSaveTimer: ReturnType<typeof setTimeout> | null = null
 watch(
   [userMaxAgents, userPersonIntervalMin, userPersonIntervalMax,
-   userCarIntervalMin, userCarIntervalMax, userMaxGroupSize, userMaxNonFamily],
+   userCarIntervalMin, userCarIntervalMax, userMaxGroupSize, userMaxNonFamily,
+   userVolume, userMuted],
   () => {
     if (widgetSaveTimer) clearTimeout(widgetSaveTimer)
     widgetSaveTimer = setTimeout(() => {
@@ -398,6 +426,8 @@ watch(
         carIntervalMax: userCarIntervalMax.value,
         maxGroupSize: userMaxGroupSize.value,
         maxNonFamily: userMaxNonFamily.value,
+        volume: userVolume.value,
+        muted: userMuted.value,
       })
     }, 400)
   }
@@ -549,9 +579,19 @@ const onAgentCrossing = (agent: any, waitMs: number, gate?: any) => {
   }
 }
 
+// [№15-ПЕРФ] кэш getTrafficConfig: раньше вызывался на КАЖДОГО агента в
+// КАЖДОМ кадре из updateAgentAudio (фильтр всей сцены: 50 агентов x 60 кадров
+// = до 3000 лишних фильтров/сек). Теперь один расчёт на кадр: gameLoop сбрасывает
+// кэш первым вызовом, аудио и остальные подсистемы читают готовый объект.
+let trafficConfigCache: ReturnType<typeof getTrafficConfig> | null = null
+const getCachedTrafficConfig = () => {
+  if (!trafficConfigCache) trafficConfigCache = getTrafficConfig()
+  return trafficConfigCache
+}
+
 const audioCtrl = useSimulatorAudio(
   simElements, aiAgents, sceneSize,
-  () => getTrafficConfig(),
+  () => getCachedTrafficConfig(),
   activeIntercoms
 )
 const { visibleAgentLabels, initAudioPools, updateAllAudio, resetAllAudioTimers, stopAllCarEngines, cleanupAgentSounds } = audioCtrl
@@ -756,16 +796,16 @@ watch(() => simElements.value.length, prunePaintMaps)
 
 // Покадровая запись: агенты (позиция/слой/пауза ног/фаза шага), лейблы,
 // стрелы ворот, линии команд. Чтение через toRaw — без прокси и без отслеживания.
-const paintScene = () => {
+const paintScene = (alpha = 1) => {
   const rot = enableVisualRotation.value
   const els = simElements.value
   for (let i = 0; i < els.length; i++) {
     const el = toRaw(els[i]) as any
     const id = String(el.id)
     const rec = agentNodes.get(id)
-    if (rec) paintAgent(rec, el, rot)
+    if (rec) paintAgent(rec, el, rot, alpha)
     const ln = labelNodes.get(id)
-    if (ln) paintLabel(ln, el)
+    if (ln) paintLabel(ln, el, alpha)
     const gn = gateNodes.get(id)
     if (gn) paintGate(gn, el.settings)
   }
@@ -773,12 +813,21 @@ const paintScene = () => {
   for (let i = 0; i < cmds.length; i++) {
     const cmd = toRaw(cmds[i]) as any
     if (!cmd.actor || !cmd.target || cmd.isReversing) continue
-    paintCommandLine(lineNodes.get(String(cmd.id)) ?? null, cmd.actor, cmd.target)
+    paintCommandLine(lineNodes.get(String(cmd.id)) ?? null, cmd.actor, cmd.target, alpha)
   }
 }
 
 let animationFrameId: number | null = null
 let lastTime = 0
+
+// [№15-ФИКС-ШАГ] Физика — фиксированными подшагами 1/60с (аккумулятор),
+// рендер — интерполяция между prev-снимком и текущим состоянием (alpha).
+// Раньше dt равнялся длительности реального кадра (до 0.1с): каждый неровный
+// кадр (dev-рантайм, GC, HMR) удваивал визуальный шаг — остаточные дёргания.
+// Теперь неровность кадра меняет только ЧИСЛО подшагов, а не их длину.
+const PHYSICS_FIXED_DT = 1 / 60
+const PHYSICS_MAX_SUBSTEPS = 4 // анти-спираль: при лаге >66мс симуляция замедляется, а не телепортируется
+let physicsAccumulator = 0
 
 const gameLoop = (timestamp: number) => {
   if (!props.isRunning) return
@@ -790,15 +839,27 @@ const gameLoop = (timestamp: number) => {
   // не спасали, потому что физика тоже больше не вызывалась. Каждый шаг
   // изолирован; requestAnimationFrame вне try — кадр всегда перевыстраивается.
   try {
-    const cfg = getTrafficConfig()
+    trafficConfigCache = null
+    const cfg = getCachedTrafficConfig()
     // [ФИКС-ЗАСТРЯНИЕ] сторож ворот: лечит зависшие isAnimating/isOpen
     core.updateGateWatchdog(dt)
+    let paintAlpha = 1 // [№15] доля подшага для интерполяции рендера
     if (cfg.enabled) {
       try {
         spawn.updateSpawnLogic(dt, cfg, allPeople.value.length > 0, cfg.maxAgents)
       } catch (e) { console.error('[gameLoop] спавн:', e) }
       try {
-        physics.updateAiMovement(dt, { carGateId: cfg.carGateId, personGateId: cfg.personGateId })
+        // [№15-ФИКС-ШАГ] prev-снимок + подшаги фиксированной длины
+        snapshotPrevPositions(simElements.value.map(e => toRaw(e) as any))
+        physicsAccumulator = Math.min(physicsAccumulator + dt, PHYSICS_FIXED_DT * (PHYSICS_MAX_SUBSTEPS + 1))
+        let substeps = 0
+        while (physicsAccumulator >= PHYSICS_FIXED_DT && substeps < PHYSICS_MAX_SUBSTEPS) {
+          physics.updateAiMovement(PHYSICS_FIXED_DT, { carGateId: cfg.carGateId, personGateId: cfg.personGateId })
+          physicsAccumulator -= PHYSICS_FIXED_DT
+          substeps++
+        }
+        if (substeps === PHYSICS_MAX_SUBSTEPS) physicsAccumulator = 0 // сброс хвоста при лаге
+        paintAlpha = Math.min(1, physicsAccumulator / PHYSICS_FIXED_DT)
       } catch (e) { console.error('[gameLoop] физика:', e) }
       try { scriptsHandler.processScriptLogic(dt) } catch (e) { console.error('[gameLoop] скрипты:', e) }
       try { scriptsHandler.updateActiveCommands(dt) } catch (e) { console.error('[gameLoop] команды:', e) }
@@ -806,7 +867,7 @@ const gameLoop = (timestamp: number) => {
     try { updateAllAudio(dt) } catch (e) { console.error('[gameLoop] аудио:', e) }
     // [№14-ПЛАВНОСТЬ-DEV] покадровая запись стилей напрямую в DOM (агенты,
     // лейблы, стрелы ворот, линии команд) — без ререндера Vue
-    try { paintScene() } catch (e) { console.error('[gameLoop] paint:', e) }
+    try { paintScene(paintAlpha) } catch (e) { console.error('[gameLoop] paint:', e) }
   } catch (e) {
     console.error('[gameLoop] кадр:', e)
   }
@@ -876,6 +937,9 @@ let resizeObserver: ResizeObserver | null = null
 
 onMounted(async () => {
   window.addEventListener('keydown', handleKeyDown)
+  // [№15-ЗВУК] обработчик сворачивания окна + стартовая громкость
+  document.addEventListener('visibilitychange', onVisibilityChange)
+  applyMasterVolume()
 
   await integration.loadAllData()
 
@@ -912,6 +976,7 @@ onMounted(async () => {
       c.resume().then(() => console.log('AudioContext resumed'))
     }
     window.removeEventListener('click', unlock)
+    applyMasterVolume() // [№15-ЗВУК] masterGain создан — применяем сохранённую громкость
   }
   window.addEventListener('click', unlock, { once: true })
   const c0 = audio.ctx()
@@ -937,6 +1002,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeyDown)
+  document.removeEventListener('visibilitychange', onVisibilityChange)
   if (resizeObserver) resizeObserver.disconnect()
   if (animationFrameId) cancelAnimationFrame(animationFrameId)
   cleanupScaling()

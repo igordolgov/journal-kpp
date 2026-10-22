@@ -545,8 +545,17 @@ const fusePeople = computed(() => new Fuse(toRaw(availablePeople.value) || [], f
 const fuseVehicles = computed(() => new Fuse(toRaw(props.vehiclesList) || [], fuseVehicleOptions))
 
 // ---- dropdownResults ----
+// [№15-ПЕРФ] debounce 300мс: Fuse-поиск по всем людям/ТС пересчитывался
+// на каждую клавишу (в database.vue debounce уже был, в журнале — нет).
+const debouncedSearch = ref(globalSearch.value)
+let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null
+watch(globalSearch, (val) => {
+  if (searchDebounceTimer) clearTimeout(searchDebounceTimer)
+  searchDebounceTimer = setTimeout(() => { debouncedSearch.value = val }, 300)
+})
+
 const dropdownResults = computed(() => {
-  const query = globalSearch.value.trim()
+  const query = debouncedSearch.value.trim()
 
   if (query.length < 1) {
     return availablePeople.value.map(p => ({

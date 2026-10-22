@@ -77,21 +77,38 @@ export const useEditorLogic = () => {
   const toggleSimulator = () => { showSimulatorPanel.value = !showSimulatorPanel.value }
   const simulatorKey = ref(0)
 
-  // --- ИСТОРИЯ (UNDO) ---
+  // --- ИСТОРИЯ (UNDO/REDO) ---
+  // [№15] указательная модель: снапшот ПОСЛЕ изменения (как раньше), но с
+  // индексом текущего состояния — работает redo. Прежний undo делал pop
+  // верхнего снапшота, а это ТЕКУЩЕЕ состояние: первый Ctrl+Z не менял ничего.
   const historyStack = ref<string[]>([])
-  const MAX_HISTORY = 50 // [НАСТРОЙКА] глубина undo
+  const historyIndex = ref(-1)
+  const MAX_HISTORY = 50 // [НАСТРОЙКА] глубина undo/redo
 
   const saveHistory = () => {
     const snapshot = JSON.stringify(sceneConfig.value)
+    historyStack.value.splice(historyIndex.value + 1) // обрезаем redo-хвост
     historyStack.value.push(snapshot)
     if (historyStack.value.length > MAX_HISTORY) historyStack.value.shift()
+    historyIndex.value = historyStack.value.length - 1
   }
 
   const undo = () => {
-    if (historyStack.value.length === 0) return
-    const snapshot = historyStack.value.pop()!
-    sceneConfig.value = JSON.parse(snapshot)
+    if (historyIndex.value <= 0) return
+    historyIndex.value--
+    const snapshot = historyStack.value[historyIndex.value]
+    if (snapshot !== undefined) sceneConfig.value = JSON.parse(snapshot)
   }
+
+  const redo = () => {
+    if (historyIndex.value >= historyStack.value.length - 1) return
+    historyIndex.value++
+    const snapshot = historyStack.value[historyIndex.value]
+    if (snapshot !== undefined) sceneConfig.value = JSON.parse(snapshot)
+  }
+
+  const canUndo = computed(() => historyIndex.value > 0)
+  const canRedo = computed(() => historyIndex.value < historyStack.value.length - 1)
 
   // --- COMPUTED ---
   const sortedElements = computed(() =>
@@ -357,7 +374,7 @@ export const useEditorLogic = () => {
     updateSettings,
     autoSortLayers, locateObject, handleSaveDb, openLoadModal, loadSelectedScene, importScene, initEditor,
     addVariable, deleteVariable, handleAddChild, deleteSelectedNode,
-    undo, saveSceneCopy,
+    undo, redo, canUndo, canRedo, saveSceneCopy,
     saveHistory
   }
 }

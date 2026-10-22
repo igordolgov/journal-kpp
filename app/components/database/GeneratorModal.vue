@@ -6,6 +6,7 @@
 <template lang="pug">
 dialog.modal(
   v-if="isOpen"
+  ref="modalRootRef"
   class="modal-open"
 )
   .modal-box.flex.flex-col.max-w-2xl.p-0.bg-base-200(
@@ -113,6 +114,10 @@ import { useToast } from '~/composables/useToast'
 // --- Props & Emits ---
 const props = defineProps({ isOpen: Boolean })
 const emit = defineEmits(['close', 'generated'])
+// [№15-A11Y] Esc закрывает, Tab не уходит под фон, при закрытии возвращается фокус
+const modalRootRef = ref<HTMLElement | null>(null)
+import { useModalA11y } from '~/composables/useModalA11y'
+useModalA11y({ isOpen: () => props.isOpen, onClose: () => emit('close'), root: modalRootRef })
 
 // --- Composables ---
 // updateItem — для восстановления связей после импорта
