@@ -103,8 +103,12 @@
       :style="{ width: sceneSize.width + 'px', height: sceneSize.height + 'px', transform: `scale(${scale})`, transformOrigin: 'top left' }"
     )
       template(v-for="el in simElements" :key="el.id")
+        //- [№14-ПЛАВНОСТЬ-DEV] :ref-колбеки регистрируют узлы в реестрах paint-моста;
+        //- монтирующие стили читают RAW-объект (см. getElementStyle), поэтому рендер
+        //- не подписывается на x/y/zIndex — покадровые записи делает paintScene
         .absolute.cursor-pointer(
           :style="getElementStyle(el, enableVisualRotation)"
+          :ref="n => setAgentNode(el, n)"
           class="hover:z-50"
           @click="onElementClick(el)"
         )
@@ -120,8 +124,9 @@
           )
           .person-avatar.w-full.h-full.relative(
             v-else-if="el.asset?.type === 'person'"
-            :class="{ 'is-paused': el.isPaused ?? ((el.velocity || 0) < 0.1), 'is-exit': el.direction === 'exit' }"
+            :class="{ 'is-paused': mountPaused(el), 'is-exit': el.direction === 'exit' }"
             :style="personAvatarStyle(el)"
+            :ref="n => setAvatarNode(el, n)"
           )
             //- [ФИКС-ЗЕРКАЛО] выходящие зеркалятся inline-стилем на обёртке:
             //- прежнее правило .person-avatar.is-exit :deep(svg) в сборке
@@ -134,6 +139,7 @@
             v-else-if="el.asset?.type === 'svg'"
             :data-gate-id="el.id"
             :style="getGateStyle(el)"
+            :ref="n => setGateNode(el, n)"
           )
             div(v-html="getDynamicSvg(el)")
           .w-full.h-full(v-else :style="{ backgroundColor: el.asset?.content || '#888' }")
@@ -192,8 +198,9 @@
         template(v-for="cmd in activeCommands" :key="cmd.id")
           line(
             v-if="cmd.target && cmd.actor && !cmd.isReversing"
-            :x1="cmd.actor.x + cmd.actor.width/2" :y1="cmd.actor.y + cmd.actor.height/2"
-            :x2="cmd.target.x + cmd.target.width/2" :y2="cmd.target.y + cmd.target.height/2"
+            :x1="cmdCenter(cmd.actor, 'x', 'width')" :y1="cmdCenter(cmd.actor, 'y', 'height')"
+            :x2="cmdCenter(cmd.target, 'x', 'width')" :y2="cmdCenter(cmd.target, 'y', 'height')"
+            :ref="n => setLineNode(cmd, n)"
             stroke="#22c55e" stroke-width="2" stroke-dasharray="4"
           )
 
@@ -202,6 +209,7 @@
           .absolute.text-label(
             v-if="(el.asset?.type === 'person' || el.asset?.type === 'car') && visibleAgentLabels.has(el.id)"
             :style="getLabelStyle(el)"
+            :ref="n => setLabelNode(el, n)"
           )
             .flex.flex-col.items-center
               template(v-if="el.asset?.type === 'car'")
@@ -263,7 +271,7 @@
 // литералы ('flex'/'absolute'/'none') без контекстного типа расширяются до
 // string и не проходят CSSProperties; функции из useSimulatorUI/useSimulatorCore
 // обёрнуты с приведением (их исходники возвращают widening-объекты).
-import { ref, watch, onMounted, onUnmounted, nextTick, computed } from 'vue'
+import { ref, watch, onMounted, onUnmounted, nextTick, computed, toRaw } from 'vue'
 import type { CSSProperties } from 'vue'
 import TrafficRoad from './editor/TrafficRoad.vue'
 // [PAYROLL] HUD баланса смены — оверлей поверх холста
@@ -293,6 +301,12 @@ import {
   CAR_WIDTH,
   CAR_HEIGHT
 } from '~/utils/simulatorConstants'
+// [№14-ПЛАВНОСТЬ-DEV] императивный мост физика -> DOM: покадровые стили пишутся
+// напрямую (paintScene из gameLoop), Vue перерисовывает только структурные события
+import {
+  paintAgent, paintLabel, paintGate, paintCommandLine,
+  isAgentPaused, labelTransform,
+} from '~/utils/simulatorPaint'
 // [Фаза 5] Lucide: хедер и empty state
 import {
   CarFront, Activity, SlidersHorizontal, X,
@@ -394,9 +408,13 @@ const { allPeople, usedPeopleIds } = integration
 
 // [ИСПРАВЛЕНО] алиасы + типизированные обёртки: возврат core/ui-функций —
 // объекты с расширенными до string литералами, приведение через as CSSProperties
-const { getElementStyle: _getElementStyle, getGateStyle, ...core } = useSimulatorCore(simElements)
+const { getElementStyle: _getElementStyle, getGateStyle: _getGateStyle, ...core } = useSimulatorCore(simElements)
+// [№14-ПЛАВНОСТЬ-DEV] монтирующие стили читают СЫРЫЙ объект (toRaw): чтение прокси
+// в рендере подписывало бы виджет на x/y/zIndex/settings — пересборка каждый кадр.
+// Реактивными остаются только структурные поля (id, name, occupants, asset).
 const getElementStyle = (el: any, enableRotation: boolean): CSSProperties =>
-  _getElementStyle(el, enableRotation) as CSSProperties
+  _getElementStyle(toRaw(el), enableRotation) as CSSProperties
+const getGateStyle = (el: any): CSSProperties => _getGateStyle(toRaw(el)) as CSSProperties
 
 // [П1][№12] темп шага: --walk-hold задаёт ФАЗУ CSS-анимации ходьбы
 // (секунды). Физика наращивает фазу пропорционально пути
@@ -404,10 +422,11 @@ const getElementStyle = (el: any, enableRotation: boolean): CSSProperties =>
 // ноги перебирают реже и никогда быстрее естественного темпа.
 // Выходящие сохраняют зеркало на этой же обёртке.
 const personAvatarStyle = (el: any): Record<string, string> => {
+  const r = toRaw(el)
   const style: Record<string, string> = {
-    '--walk-hold': String((el.settings as any)?._walkHold ?? 0),
+    '--walk-hold': String((r.settings as any)?._walkHold ?? 0),
   }
-  if (el.direction === 'exit') style.transform = 'scaleX(-1)'
+  if (r.direction === 'exit') style.transform = 'scaleX(-1)'
   return style
 }
 
@@ -596,12 +615,13 @@ const handleControlClick = (ctrl: any, panel: any, pos: { x: number; y: number }
 // [ИСПРАВЛЕНО] аннотация CSSProperties: pointerEvents/'center'/'break-word'
 // остаются литералами благодаря контекстной типизации
 const getLabelStyle = (el: any): CSSProperties => {
-  const left = el.x + el.width / 2
-  const top = el.y - 50
+  // [№14-ПЛАВНОСТЬ-DEV] позиция translate3d от 0/0 (RAW): прежние left/top
+  // пересчитывали layout каждый кадр; покадрово пишет paintScene (paintLabel)
+  const r = toRaw(el)
   return {
-    left: `${left}px`,
-    top: `${top}px`,
-    transform: 'translateX(-50%)',
+    left: '0px',
+    top: '0px',
+    transform: labelTransform(r),
     position: 'absolute',
     whiteSpace: 'normal',
     backgroundColor: 'rgba(0, 0, 0, 0.85)',
@@ -675,11 +695,86 @@ const onElementClick = (el: any) => {
 // [ИСПРАВЛЕНО] генераторы принимают 3 аргумента — 4-й (isOpen) не существует
 const getDynamicSvg = (el: any): string => {
   if (el.category === 'gate' || el.category === 'barrier' || el.type === 'gate') {
-    const s = el.settings || {}
+    const s = toRaw(el.settings) || {}
     if (s.gateType === 'wicket') return generateWicketSVG(el.width || 80, el.height || 120, s)
     return generateSlidingGateSVG(el.width || 320, el.height || 120, s)
   }
   return el.asset?.content || ''
+}
+
+// ---------------------------------------------------------------------------
+// [№14-ПЛАВНОСТЬ-DEV] императивный paint-мост: реестры DOM-узлов + покадровая
+// запись стилей из gameLoop, минуя ререндер Vue. Шаблон регистрирует узлы (:ref),
+// Vue перерисовывает только структурные события (спавн/деспавн/клики/настройки).
+// ---------------------------------------------------------------------------
+const agentNodes = new Map<string, { node: HTMLElement | null; avatar: HTMLElement | null }>()
+const labelNodes = new Map<string, HTMLElement | null>()
+const gateNodes = new Map<string, HTMLElement | null>()
+const lineNodes = new Map<string, SVGLineElement | null>()
+
+const setAgentNode = (el: any, n: any) => {
+  const id = String(el.id)
+  const rec = agentNodes.get(id) ?? { node: null, avatar: null }
+  rec.node = (n as HTMLElement) || null
+  agentNodes.set(id, rec)
+}
+const setAvatarNode = (el: any, n: any) => {
+  const id = String(el.id)
+  const rec = agentNodes.get(id) ?? { node: null, avatar: null }
+  rec.avatar = (n as HTMLElement) || null
+  agentNodes.set(id, rec)
+}
+const setLabelNode = (el: any, n: any) => {
+  labelNodes.set(String(el.id), (n as HTMLElement) || null)
+}
+const setGateNode = (el: any, n: any) => {
+  gateNodes.set(String(el.id), (n as HTMLElement) || null)
+}
+const setLineNode = (cmd: any, n: any) => {
+  lineNodes.set(String(cmd.id), (n as SVGLineElement) || null)
+}
+
+// Начальный класс паузы конечностей (RAW — без подписки рендера)
+const mountPaused = (el: any): boolean => isAgentPaused(toRaw(el))
+
+// Центр элемента для линий команд на монтировании (RAW)
+const cmdCenter = (el: any, axis: 'x' | 'y', size: 'width' | 'height'): string => {
+  const r = toRaw(el) as any
+  return String((r?.[axis] ?? 0) + (r?.[size] ?? 0) / 2)
+}
+
+// Чистка реестров при структурных изменениях (спавн/деспавн меняют длину)
+const prunePaintMaps = () => {
+  const ids = new Set<string>()
+  for (const e of simElements.value) ids.add(String(toRaw(e).id))
+  for (const k of Array.from(agentNodes.keys())) if (!ids.has(k)) agentNodes.delete(k)
+  for (const k of Array.from(labelNodes.keys())) if (!ids.has(k)) labelNodes.delete(k)
+  for (const k of Array.from(gateNodes.keys())) if (!ids.has(k)) gateNodes.delete(k)
+  for (const k of Array.from(lineNodes.keys())) if (!ids.has(k)) lineNodes.delete(k)
+}
+watch(() => simElements.value.length, prunePaintMaps)
+
+// Покадровая запись: агенты (позиция/слой/пауза ног/фаза шага), лейблы,
+// стрелы ворот, линии команд. Чтение через toRaw — без прокси и без отслеживания.
+const paintScene = () => {
+  const rot = enableVisualRotation.value
+  const els = simElements.value
+  for (let i = 0; i < els.length; i++) {
+    const el = toRaw(els[i]) as any
+    const id = String(el.id)
+    const rec = agentNodes.get(id)
+    if (rec) paintAgent(rec, el, rot)
+    const ln = labelNodes.get(id)
+    if (ln) paintLabel(ln, el)
+    const gn = gateNodes.get(id)
+    if (gn) paintGate(gn, el.settings)
+  }
+  const cmds = activeCommands.value
+  for (let i = 0; i < cmds.length; i++) {
+    const cmd = toRaw(cmds[i]) as any
+    if (!cmd.actor || !cmd.target || cmd.isReversing) continue
+    paintCommandLine(lineNodes.get(String(cmd.id)) ?? null, cmd.actor, cmd.target)
+  }
 }
 
 let animationFrameId: number | null = null
@@ -709,6 +804,9 @@ const gameLoop = (timestamp: number) => {
       try { scriptsHandler.updateActiveCommands(dt) } catch (e) { console.error('[gameLoop] команды:', e) }
     }
     try { updateAllAudio(dt) } catch (e) { console.error('[gameLoop] аудио:', e) }
+    // [№14-ПЛАВНОСТЬ-DEV] покадровая запись стилей напрямую в DOM (агенты,
+    // лейблы, стрелы ворот, линии команд) — без ререндера Vue
+    try { paintScene() } catch (e) { console.error('[gameLoop] paint:', e) }
   } catch (e) {
     console.error('[gameLoop] кадр:', e)
   }
@@ -846,6 +944,7 @@ onUnmounted(() => {
   resetAllAudioTimers()
   stopAllCarEngines()
   for (const agent of aiAgents.value) cleanupAgentSounds(agent.id)
+  agentNodes.clear(); labelNodes.clear(); gateNodes.clear(); lineNodes.clear()
   if ((window as any).__cleanupScale) (window as any).__cleanupScale()
 })
 </script>
