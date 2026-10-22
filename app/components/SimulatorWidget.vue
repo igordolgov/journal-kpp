@@ -398,10 +398,11 @@ const { getElementStyle: _getElementStyle, getGateStyle, ...core } = useSimulato
 const getElementStyle = (el: any, enableRotation: boolean): CSSProperties =>
   _getElementStyle(el, enableRotation) as CSSProperties
 
-// [П1] темп шага: --walk-hold сдвигает фазу CSS-анимации ходьбы на
-// накопленную паузу (физика пишет settings._walkHold, когда агент идёт
-// медленнее крейсерской — ноги перебирают реже). Выходящие сохраняют
-// зеркало на этой же обёртке.
+// [П1][№12] темп шага: --walk-hold задаёт ФАЗУ CSS-анимации ходьбы
+// (секунды). Физика наращивает фазу пропорционально пути
+// (settings._walkHold), когда человек идёт медленнее крейсерской, —
+// ноги перебирают реже и никогда быстрее естественного темпа.
+// Выходящие сохраняют зеркало на этой же обёртке.
 const personAvatarStyle = (el: any): Record<string, string> => {
   const style: Record<string, string> = {
     '--walk-hold': String((el.settings as any)?._walkHold ?? 0),

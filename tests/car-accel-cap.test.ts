@@ -83,16 +83,19 @@ describe('потолок разгона машин 60 px/с² ([П2])', () => {
     expect(car.element.velocity).toBeLessThanOrEqual(31)
   })
 
-  it('люди разгоняются по-прежнему ACCEL/2 (потолок машин их не касается)', () => {
+  it('люди НЕ ускоряются вообще: скорость сразу равна целевой ([№13])', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     const h = buildPhysics()
     const person = mkPerson('p-1', 1000, 400, 40) as any
     h.aiAgents.value = [person]
-    for (let i = 0; i < 3; i++) { // 0.3с
+    h.physics.updateAiMovement(DT, { carGateId: '', personGateId: '' })
+    // [№13-НОГИ] фаза ног ∝ пути (№12): любой разгон-рампа был бы виден
+    // как «ноги набирают темп». Скорость = целевая с первого кадра.
+    expect(person.element.velocity).toBe(40)
+    for (let i = 0; i < 3; i++) {
       h.physics.updateAiMovement(DT, { carGateId: '', personGateId: '' })
     }
-    // 50 px/с² * 0.3с = 15 px/с (потолок машин 60 не применяется)
-    expect(person.element.velocity).toBeGreaterThanOrEqual(14)
-    expect(person.element.velocity).toBeLessThanOrEqual(16)
+    // рампы нет: скорость не растёт постепенно, а сразу равна крейсерской
+    expect(person.element.velocity).toBe(40)
   })
 })

@@ -76,31 +76,39 @@ describe('[ФИКС-ДЁРГАНИЕ] is-paused с гистерезисом', ()
   })
 
   it('в полосе гистерезиса (0.1..1.5) флаг не мигает — держит прежнее значение', () => {
-    // Медленный разгон: [№8] разгон людей = ACCEL/2 => ACCEL=5 даёт +0.25 px/с
-    // за кадр: 0.5 -> 0.75 -> 1.0 -> 1.25 -> 1.5 -> 1.75 -> 2.0.
+    // Медленный разгон на МАШИНЕ (у людей разгона больше нет — [№13]:
+    // скорость сразу целевая; плавный набор остался только у машин, [П2]):
+    // ACCEL=5 даёт +0.5 px/с за кадр: 0.5 -> 1.0 -> 1.5 -> 2.0.
     // Флаг читается в НАЧАЛЕ кадра, поэтому граница > 1.5 снимает паузу
     // только на кадре, когда сверху пришла скорость 1.75.
-    const { aiAgents, physics } = buildPhysics({ ACCEL: 5, DECEL: 2 })
-    const person = makePerson({ state: 'to_gate' })
-    person.element.y = 600
-    person.target = { x: 590, y: 80, width: 0, height: 0 }
-    person.element.velocity = 0.5
-    person.element.isPaused = true
-    aiAgents.value = [person]
-    physics.updateAiMovement(DT, CFG) // флаг(0.5): полоса -> держится; v := 0.75
-    expect(person.element.velocity).toBeCloseTo(0.75, 5)
-    expect(person.element.isPaused).toBe(true)
-    physics.updateAiMovement(DT, CFG) // флаг(0.75): полоса -> держится; v := 1.0
-    expect(person.element.velocity).toBeCloseTo(1.0, 5)
-    expect(person.element.isPaused).toBe(true)
-    physics.updateAiMovement(DT, CFG) // флаг(1.0): полоса -> держится; v := 1.25
-    expect(person.element.velocity).toBeCloseTo(1.25, 5)
-    expect(person.element.isPaused).toBe(true)
-    physics.updateAiMovement(DT, CFG) // флаг(1.25): полоса -> держится; v := 1.5
-    expect(person.element.isPaused).toBe(true)
-    physics.updateAiMovement(DT, CFG) // флаг(1.5): строгое > -> держится; v := 1.75
-    expect(person.element.isPaused).toBe(true)
-    physics.updateAiMovement(DT, CFG) // флаг(1.75): выше 1.5 -> пауза снята
-    expect(person.element.isPaused).toBe(false)
+    const { simElements, aiAgents, physics } = buildPhysics({ ACCEL: 5, DECEL: 2 })
+    const car = {
+      id: 'c1',
+      element: {
+        id: 'c1', x: 560, y: 600, width: 80, height: 40,
+        rotation: 0, velocity: 0.5, zIndex: 200,
+        asset: { type: 'car' }, direction: 'enter',
+        settings: { _facingLeft: true },
+      },
+      state: 'to_gate',
+      target: { x: 560, y: 80, width: 0, height: 0 },
+      afterTarget: { x: 560, y: 900, width: 0, height: 0 },
+      speed: 60, type: 'car', direction: 'enter', travelMode: 'car',
+    } as any
+    car.element.velocity = 0.5
+    car.element.isPaused = true
+    simElements.value = []
+    aiAgents.value = [car]
+    const CFG2 = { carGateId: '', personGateId: 'w1' }
+    physics.updateAiMovement(DT, CFG2) // флаг(0.5): полоса -> держится; v := 1.0
+    expect(car.element.velocity).toBeCloseTo(1.0, 5)
+    expect(car.element.isPaused).toBe(true)
+    physics.updateAiMovement(DT, CFG2) // флаг(1.0): полоса -> держится; v := 1.5
+    expect(car.element.velocity).toBeCloseTo(1.5, 5)
+    expect(car.element.isPaused).toBe(true)
+    physics.updateAiMovement(DT, CFG2) // флаг(1.5): строгое > -> держится; v := 2.0
+    expect(car.element.isPaused).toBe(true)
+    physics.updateAiMovement(DT, CFG2) // флаг(2.0): выше 1.5 -> пауза снята
+    expect(car.element.isPaused).toBe(false)
   })
 })

@@ -130,6 +130,12 @@ describe('анти-телепорт ([БАГ-РЕПОРТ-7])', () => {
     for (let i = 0; i < 250; i++) {
       h.physics.updateAiMovement(DT, { carGateId: 'car-gate-1', personGateId: '' })
       motion.step()
+      // [№13] оператор опускает шлагбаум за спиной въехавшей — та уезжает
+      // после полного закрытия (в реальном таймер отсчёта не тикает)
+      const g: any = h.simElements.value[0]
+      if (enter.state === 'waiting_after' && g.settings.isOpen && !g.settings.isAnimating) {
+        g.settings.isOpen = false
+      }
     }
     // встречная уехала с полосы (или уже завершена) — БЕЗ сторожей
     expect(['moving_away', 'done']).toContain(exit.state)
@@ -189,7 +195,7 @@ describe('анти-телепорт ([БАГ-РЕПОРТ-7])', () => {
     expect(h.simElements.value[0].settings.isOpen).toBe(true)
   })
 
-  it('машина в waiting_after при пустых воротах уезжает после паузы 0.8с при открытых воротах ([П6])', () => {
+  it('машина в waiting_after ждёт ПОЛНОГО закрытия ворот и уезжает после него ([№13])', () => {
     const h = buildPhysics([makeCarGate(true)])
     const enter = mkCar('car-e', 'enter', 'waiting_after',
       580, ENTER_CROSS.y, ENTER_CROSS, ENTER_CROSS, { x: 580, y: 900 }, true)
@@ -202,10 +208,19 @@ describe('анти-телепорт ([БАГ-РЕПОРТ-7])', () => {
 
     for (let i = 0; i < 10; i++) {
       h.physics.updateAiMovement(DT, { carGateId: 'car-gate-1', personGateId: '' })
+    }
+    // [№13-БЕЗОПАСНОСТЬ] пауза истекла, но ворота открыты: машина НЕ уезжает —
+    // ждёт ПОЛНОГО закрытия (основное правило КПП: ворота не остаются
+    // открытыми без машин рядом)
+    expect(enter.state).toBe('waiting_after')
+
+    // оператор опускает шлагбаум — машина уезжает за ним
+    h.simElements.value[0].settings.isOpen = false
+    for (let i = 0; i < 10; i++) {
+      h.physics.updateAiMovement(DT, { carGateId: 'car-gate-1', personGateId: '' })
       if (enter.state === 'moving_away') break
     }
-    // уезд при ещё ОТКРЫТЫХ воротах: закрытие придёт позже, по расчистке створа
     expect(enter.state).toBe('moving_away')
-    expect(h.simElements.value[0].settings.isOpen).toBe(true)
+    expect(h.simElements.value[0].settings.isOpen).toBe(false)
   })
 })

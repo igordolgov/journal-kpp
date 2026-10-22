@@ -1,9 +1,10 @@
 // tests/walk-pace.test.ts
-// [П1] темп шага = скорости ходьбы: пока человек идёт медленнее крейсерской
-// (уступание, дотягивание), накопленная пауза settings._walkHold сдвигает
-// фазу CSS-анимации ног назад — ноги перебирают реже, корпус не «скользит».
-// На крейсерской прирост нулевой — обычное воспроизведение. Машины паузу
-// не накапливают.
+// [П1][№12] темп шага = скорости ходьбы: фаза CSS-анимации (settings._walkHold,
+// секунды) растёт пропорционально пройденному пути — при торможении ноги
+// перебирают РЕЖЕ и НИКОГДА не быстрее естественного темпа. Прежняя версия
+// копила «паузу» dt*(1 - v/cruise): фаза убегала вперёд, до 2x при остановке —
+// «ускорение ног при торможении» (баг-репорт №12), устранено. Машины фазу
+// шага не двигают вовсе.
 
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { ref } from 'vue'
@@ -58,34 +59,48 @@ const mkCar = (id: string, state: string, cx: number, cy: number, target: { x: n
   gateId: '',
 })
 
-describe('walkHoldStep — математика паузы шага ([П1])', () => {
-  it('на крейсерской прирост нулевой', () => {
-    expect(walkHoldStep(0.1, 40, 40)).toBe(0)
-    expect(walkHoldStep(0.1, 50, 40)).toBe(0) // выше крейсерской — клэмп
+describe('walkHoldStep — математика фазы шага ([П1][№12])', () => {
+  it('на крейсерской прирост равен кадру (естественное воспроизведение)', () => {
+    expect(walkHoldStep(0.1, 40, 40)).toBeCloseTo(0.1, 6)
+    expect(walkHoldStep(0.1, 50, 40)).toBeCloseTo(0.1, 6) // выше крейсерской — клэмп
   })
 
-  it('на половине скорости пауза растёт вдвое медленнее хода', () => {
+  it('чем медленнее ход, тем реже шаг: прирост пропорционален скорости', () => {
     expect(walkHoldStep(0.1, 20, 40)).toBeCloseTo(0.05, 6)
-    expect(walkHoldStep(0.1, 10, 40)).toBeCloseTo(0.075, 6)
+    expect(walkHoldStep(0.1, 10, 40)).toBeCloseTo(0.025, 6)
   })
 
-  it('на месте пауза растёт со временем кадра', () => {
-    expect(walkHoldStep(0.1, 0, 40)).toBeCloseTo(0.1, 6)
+  it('на месте фаза не растёт (анимацию ставит на паузу is-paused)', () => {
+    expect(walkHoldStep(0.1, 0, 40)).toBe(0)
   })
 
-  it('нулевая крейсерская не даёт деления на ноль', () => {
-    expect(walkHoldStep(0.1, 20, 0)).toBe(0)
+  it('нулевая крейсерская не даёт деления на ноль (фолбэк на естественный темп)', () => {
+    expect(walkHoldStep(0.1, 20, 0)).toBeCloseTo(0.1, 6)
+  })
+
+  it('[№12] ноги НИКОГДА не быстрее естественного темпа — регрессия «ускорения при торможении»', () => {
+    // при любой скорости прирост за кадр не превышает длительность кадра,
+    // а при замедлении (торможение) темп только падает — монотонность по v
+    for (let v = 0; v <= 80; v += 2) {
+      expect(walkHoldStep(0.1, v, 40)).toBeLessThanOrEqual(0.1 + 1e-9)
+    }
+    let prev = -1
+    for (let v = 0; v <= 80; v += 2) {
+      const cur = walkHoldStep(0.1, v, 40)
+      expect(cur).toBeGreaterThanOrEqual(prev - 1e-9)
+      prev = cur
+    }
   })
 })
 
-describe('интеграция: пауза шага у агентов ([П1])', () => {
+describe('интеграция: фаза шага у агентов ([П1][№12])', () => {
   afterEach(() => vi.restoreAllMocks())
 
-  it('человек на дотягивании (тормозной участок) накапливает паузу, машина — нет', () => {
+  it('человек на дотягивании (тормозной участок) наращивает фазу, машина — нет', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     const h = buildPhysics()
     // человек идёт к остановке: последние 80 px — тормозной участок
-    // (скорость ниже крейсерской) — пауза обязана накопиться
+    // (скорость ниже крейсерской) — фаза обязана нарастать
     const person = mkPerson('p-1', 'to_gate', 1000, 400, { x: 800, y: 400 }, { x: 800, y: 20 })
     h.aiAgents.value = [person as any]
     let landed = false
@@ -97,7 +112,7 @@ describe('интеграция: пауза шага у агентов ([П1])', 
     const hold = (person.element.settings as any)?._walkHold ?? 0
     expect(hold).toBeGreaterThan(0.05)
 
-    // машина тот же путь — паузы шага нет вовсе
+    // машина тот же путь — фазу шага не двигает вовсе
     const car = mkCar('car-1', 'to_gate', 1000, 400, { x: 800, y: 400 })
     h.aiAgents.value = [car as any]
     let carLanded = false
@@ -109,7 +124,7 @@ describe('интеграция: пауза шага у агентов ([П1])', 
     expect((car.element.settings as any)?._walkHold ?? 0).toBe(0)
   })
 
-  it('на крейсерской пауза НЕ растёт (копится только на разгоне/торможении)', () => {
+  it('на крейсерской фаза НЕ растёт (пишется только на ходе ниже крейсерской)', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     const h = buildPhysics()
     const person = mkPerson('p-2', 'to_gate', 100, 400, { x: 1000, y: 400 }, { x: 1000, y: 20 })
@@ -119,13 +134,13 @@ describe('интеграция: пауза шага у агентов ([П1])', 
     }
     expect(person.element.velocity || 0).toBeGreaterThanOrEqual(40) // крейсерская
     const holdAt2s = (person.element.settings as any)?._walkHold ?? 0
-    // вклад разгона: 0.8с набора скорости даёт малую паузу...
+    // вклад разгона: 0.8с набора скорости даёт фазу ~0.4 (интеграл v/cruise)
     expect(holdAt2s).toBeLessThan(0.45)
     for (let i = 0; i < 10; i++) { // ещё 1с чистой крейсерской
       h.physics.updateAiMovement(DT, { carGateId: '', personGateId: '' })
     }
     const holdAt3s = (person.element.settings as any)?._walkHold ?? 0
-    // ...на крейсерской пауза заморожена — ноги идут в темп хода
+    // на крейсерской фаза заморожена — естественное воспроизведение
     expect(holdAt3s - holdAt2s).toBeCloseTo(0, 6)
   })
 })

@@ -4,7 +4,7 @@
 //     агент обязан прибыть, а не дрожать вечно — на старом коде дистанция
 //     циклится (5 -> 3 -> 1 -> 1 -> ...) и никогда не опускается ниже 1px;
 //  2) машина в waiting_after при НИКОГДА не закрывающихся воротах —
-//     уезжает по страховочному таймауту (closeDelay + 15с);
+//     уезжает по предохранителю gateCloseWaitMax ([№13]);
 //  3) waiting_before при исчезнувших воротах — принудительный проход (5с);
 //  4) NaN-цель в moving_away — watchdog восстанавливает цель из afterTarget.
 
@@ -30,9 +30,9 @@ const buildPhysics = (gates: any[], opts: any = {}) => {
     gateCloseDelay: opts.gateCloseDelay ?? 10,
     wicketCloseDelay: 0,
     stallEscalateTime: 10,
-    // [БАГ-РЕПОРТ-4-ЗАКРЫТИЕ] страховка waiting_after настраивается: в тестах
-    // с «вечно открытыми» воротами укорачиваем, чтобы не гонять 30+ секунд
-    waitAfterMax: opts.waitAfterMax ?? 30,
+    // [№13] предохранитель ожидания закрытия настраивается: в тестах с
+    // «вечно открытыми» воротами укорачиваем, чтобы не гонять 45+ секунд
+    gateCloseWaitMax: opts.gateCloseWaitMax ?? 45,
   }
   const physics = useSimulatorPhysics(
     simElements as any, aiAgents, sceneSize,
@@ -78,14 +78,14 @@ describe('застревания после ворот ([ФИКС-висяки-2
     expect(aiAgents.value.length).toBe(0)
   })
 
-  it('машина уезжает из waiting_after по страховочному таймауту, даже если ворота так и не закрылись', () => {
+  it('машина уезжает из waiting_after по предохранителю gateCloseWaitMax, даже если ворота так и не закрылись ([№13])', () => {
     const barrier = {
       id: 'barrier-1', x: 600, y: 100, width: 320, height: 120,
       rotation: 0, velocity: 0, category: 'barrier', type: 'gate',
       name: 'Шлагбаум', zIndex: 300,
       settings: { gateType: 'sliding', isOpen: true, isAnimating: false },
     }
-    const { aiAgents, simElements, physics } = buildPhysics([barrier], { waitAfterMax: 3 })
+    const { aiAgents, simElements, physics } = buildPhysics([barrier], { gateCloseWaitMax: 3 })
     const el: any = {
       id: 'c1', x: 635, y: 238, width: 80, height: 40,
       rotation: 0, velocity: 0, category: 'car', type: 'actor',
@@ -101,8 +101,8 @@ describe('застревания после ворот ([ФИКС-висяки-2
     }
     aiAgents.value.push(agent)
 
-    // ворота навечно открыты; страховка waitAfterMax=3с уводит машину;
-    // 40с хватает с запасом (таймаут + проезд за край + деспавн)
+    // ворота навечно открыты; предохранитель gateCloseWaitMax=3с уводит
+    // машину; 40с хватает с запасом (таймаут + проезд за край + деспавн)
     runFrames(physics, 40, { carGateId: 'barrier-1', personGateId: '' })
 
     expect(aiAgents.value.length).toBe(0)

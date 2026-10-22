@@ -174,11 +174,16 @@ describe('приоритет выезда у ворот ([БАГ-РЕПОРТ-9]
     let enterCrossed = false
 
     // 45с: полный цикл пары без ручного вмешательства и без предохранителей:
-    // выезд проходит, после вежливой паузы уезжает ([П6]), въезд стартует
-    // по расчистке створа и тоже уезжает
+    // выезд проходит, уезжает (очередь въезда легально держит ворота),
+    // въезд стартует по расчистке створа и уезжает после ПОЛНОГО закрытия
+    // ([№13]: оператор опускает шлагбаум за спиной въехавшей — таймер
+    // отсчёта в юнит-тесте не тикает)
     for (let i = 0; i < 900; i++) {
       h.physics.updateAiMovement(DT, { carGateId: 'car-gate-1', personGateId: '' })
       pair.check()
+      if (enter.state === 'waiting_after' && h.gate.settings.isOpen && !h.gate.settings.isAnimating) {
+        h.gate.settings.isOpen = false
+      }
       if (exit.state === 'waiting_after') exitLanded = true
       const exitOccupies = exit.state === 'crossing' || exit.state === 'waiting_after'
       if (exitOccupies && (enter.state === 'crossing' || enter.state === 'waiting_after')) premature = true

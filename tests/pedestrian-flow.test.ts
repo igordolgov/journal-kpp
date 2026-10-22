@@ -5,8 +5,8 @@
 //     (обнуление ставило анимацию ходьбы на паузу — видимый «дёрганчик»
 //     в точке останова после калитки);
 //  2) посадка в цель точная, без перескока (шаг кадра не длиннее остатка);
-//  3) встречные пешеходы ВДАЛИ ОТ ВОРОТ проходят сквозь друг друга
-//     (уступание — только у ворот, [БАГ-РЕПОРТ-5-ЗОНЫ]);
+//  3) встречные пешеходы ВДАЛИ ОТ ВОРОТ расходятся, не проходя друг
+//     сквозь друга ([№13-НЕ-СКВОЗЬ]: расхождение действует по всей сцене);
 //  4) приходящие из города подходят к калитке с уровнем ног не ниже
 //     нижней линии калитки (клэмп Y линии подхода).
 
@@ -178,13 +178,13 @@ describe('доводка потока пешеходов', () => {
     expect(Math.abs(el.y + el.height / 2 - (167 + PERSON_HEIGHT / 2))).toBeLessThan(0.02)
   })
 
-  it('встречные на одной линии ВДАЛИ ОТ ВОРОТ проходят сквозь (горизонтальное движение)', () => {
+  it('встречные на одной линии ВДАЛИ ОТ ВОРОТ расходятся в стороны, не проходя друг сквозь друга ([№13])', () => {
     const scene = buildScene([])
     scene.simElements.value = []
     const mk = (id: string, x: number, dirX: number, direction: 'enter' | 'exit') => ({
       id, element: {
         id, x: x - PERSON_WIDTH / 2, y: 200 - PERSON_HEIGHT / 2,
-        width: PERSON_WIDTH, height: PERSON_HEIGHT, rotation: 0, velocity: 40,
+        width: PERSON_WIDTH, height: PERSON_HEIGHT, rotation: dirX > 0 ? 0 : Math.PI, velocity: 0,
         category: 'human', type: 'actor', direction,
       },
       state: 'moving_away',
@@ -208,13 +208,51 @@ describe('доводка потока пешеходов', () => {
       const by = b.element.y + b.element.height / 2
       if (ax > bx) crossed = true
       minDist = Math.min(minDist, Math.hypot(ax - bx, ay - by))
-      if (crossed && minDist < Infinity && i > 100) break
+      if (crossed && i > 100) break
     }
+    // [№13-НЕ-СКВОЗЬ] встречные разошлись (дрейф «держись правее» +
+    // торможение personNearAhead действуют по ВСЕЙ сцене) и продолжили
+    // движение — никто не застрял и никто не прошёл сквозь другого
     expect(crossed).toBe(true)
-    // [БАГ-РЕПОРТ-5-ЗОНЫ] вдали от ворот уступания больше нет: центры
-    // сближаются до ~0 (проход насквозь), но агенты НЕ застревают и
-    // продолжают движение. Уступание работает только у ворот.
-    expect(minDist).toBeLessThan(24)
+    expect(minDist).toBeGreaterThanOrEqual(24)
+  })
+
+  it('встречные в БАЗЕ на одной вертикали (входящий вниз, выходящий вверх) расходятся, не проходя друг сквозь друга ([№13])', () => {
+    const scene = buildScene([])
+    scene.simElements.value = []
+    const mk = (id: string, y: number, dirY: number, direction: 'enter' | 'exit') => ({
+      id, element: {
+        id, x: 800 - PERSON_WIDTH / 2, y: y - PERSON_HEIGHT / 2,
+        width: PERSON_WIDTH, height: PERSON_HEIGHT, rotation: dirY > 0 ? Math.PI / 2 : -Math.PI / 2, velocity: 0,
+        category: 'human', type: 'actor', direction,
+      },
+      state: 'moving_away',
+      target: { x: 800, y: y + dirY * 900, width: 0, height: 0 },
+      afterTarget: { x: 800, y: y + dirY * 900, width: 0, height: 0 },
+      exitPoint: { x: 800, y, width: 0, height: 0 },
+      speed: 40, type: 'person', direction, travelMode: 'walk',
+    })
+    // A (входящий) уходит вниз за нижний край, B (выходящий) поднимается
+    // к калитке — ровно по одной вертикали x=800, как в базе у ворот
+    scene.aiAgents.value = [mk('a', 320, 1, 'enter'), mk('b', 420, -1, 'exit')]
+
+    let minDist = Infinity
+    let crossed = false
+    for (let i = 0; i < 800; i++) {
+      scene.physics.updateAiMovement(DT, { carGateId: '', personGateId: 'wicket-1' })
+      const [a, b] = scene.aiAgents.value
+      if (!a || !b) break
+      const ay = a.element.y + a.element.height / 2
+      const by = b.element.y + b.element.height / 2
+      const ax = a.element.x + a.element.width / 2
+      const bx = b.element.x + b.element.width / 2
+      if (ay > by) crossed = true
+      minDist = Math.min(minDist, Math.hypot(ax - bx, ay - by))
+      if (crossed && i > 100) break
+    }
+    // разошлись в стороны и продолжили движение — сквозь друг друга нельзя
+    expect(crossed).toBe(true)
+    expect(minDist).toBeGreaterThanOrEqual(24)
   })
 
   it('приходящий спавнится за правым краем на линии дороги и подходит ногами ровно к нижней линии калитки', async () => {

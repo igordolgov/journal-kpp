@@ -266,17 +266,20 @@ describe('уступание машин у ворот ([БАГ-РЕПОРТ-6])'
     const backedOffY = centerOf(exit).y
     expect(backedOffY).toBeGreaterThan(EXIT_STOP_Y + 20)
 
-    // фаза 2: ворота закрыли (вручную, без таймеров) — въезжающая уезжает вниз
+    // фаза 2: ворота закрыли (вручную, без таймеров) — въезжающая уезжает.
+    // [№12-РАЗЪЕЗД] коридор уезда занят отъехавшей выезжающей (та стоит на
+    // оси ниже) — прежний «уезд вниз мимо отъехавшей» давал тупик «лоб в лоб».
+    // Новое решение заказчика: въезжающая уезжает НАЛЕВО, освобождая ось.
     h.gate.settings.isOpen = false
     h.gate.settings.isAnimating = false
-    for (let i = 0; i < 140; i++) { // 7с: уезд вниз мимо отъехавшей машины
+    let leftTargetSet = false
+    for (let i = 0; i < 140; i++) { // 7с: уезд налево за боковой край сцены
       h.physics.updateAiMovement(DT, { carGateId: 'car-gate-1', personGateId: '' })
-      if (!h.aiAgents.value.some(a => a.id === 'car-e')) break
+      if (enter.afterTarget.x < 0) leftTargetSet = true
     }
-    // въезжающая ушла вниз (деспавн за нижним краем)
-    const enterGone = !h.aiAgents.value.some(a => a.id === 'car-e')
-    const enterBelow = enterGone || centerOf(enter).y > centerOf(exit).y + 40
-    expect(enterBelow).toBe(true)
+    // точка ухода переписана налево, машина покидает ось ворот
+    expect(leftTargetSet).toBe(true)
+    expect(centerOf(enter).x).toBeLessThan(580 - 100)
 
     // фаза 3: коридор свободен — выезжающая вернулась на остановку
     for (let i = 0; i < 160; i++) { // 8с

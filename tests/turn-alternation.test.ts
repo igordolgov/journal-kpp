@@ -204,43 +204,49 @@ describe('очерёдность направлений у прохода', () =
     expect(['crossing', 'moving_away', 'done']).toContain(exit.state)
   })
 
-  it('машины: въезжающая проходит первым, ворота не закрываются, пока выезжающая ждёт ([П6])', () => {
+  it('машины: въезжающая проходит первым и уезжает после закрытия; выезжающая проходит следом ([№13])', () => {
     const scene = buildScene(makeCarGate(true), 'car-gate-1')
+    // Каноническая геометрия ворот (600,100,320,120): ось 760, линия дороги
+    // F=220, дорога 200. Стоп въезда (760,194), посадка въезда (760,258),
+    // стоп выезда (760,250), посадка выезда (760,154).
     // въезжающая машина на остановке у ворот
-    const enter = mkCar('c-enter', 'enter', 780, 240)
+    const enter = mkCar('c-enter', 'enter', 720, 174)
     enter.state = 'waiting_before'
-    enter.target = { x: 780, y: 240, width: 0, height: 0 }
+    enter.target = { x: 760, y: 194, width: 0, height: 0 }
+    enter.exitPoint = { x: 760, y: 258, width: 0, height: 0 }
+    enter.afterTarget = { x: 760, y: 900, width: 0, height: 0 }
     scene.aiAgents.value.push(enter)
     run(scene, 0.5) // начинает проход первой (встречных пока нет)
     expect(enter.state).toBe('crossing')
 
-    // выезжающая машина приходит к воротам
-    const exit = mkCar('c-exit', 'exit', 820, 120)
-    exit.state = 'waiting_before'
-    exit.target = { x: 820, y: 120, width: 0, height: 0 }
+    // выезжающая машина в глубине базы идёт к своей остановке
+    const exit = mkCar('c-exit', 'exit', 720, 380)
+    exit.state = 'to_gate'
+    exit.target = { x: 760, y: 250, width: 0, height: 0 }
+    exit.exitPoint = { x: 760, y: 154, width: 0, height: 0 }
+    exit.afterTarget = { x: 1300, y: 154, width: 0, height: 0 }
     scene.aiAgents.value.push(exit)
 
     run(scene, 0.5)
-    // въезжающая ещё в проходе/за воротами — выезжающая ждёт
+    // въезжающая ещё в проходе/за воротами — выезжающая держится в стороне
     expect(['crossing', 'waiting_after']).toContain(enter.state)
-    expect(exit.state).toBe('waiting_before')
+    expect(['to_gate', 'waiting_before']).toContain(exit.state)
 
-    // [П6] закрытие — только на ЧИСТОМ створе без очереди: пока выезжающая
-    // занимает створ/очередь, ворота не закрываются; въехавшая уезжает со
-    // двора после вежливой паузы
+    // [№13] въехавшая уезжает: ворота закрывает свип (delay=0, корпус
+    // выезжающей в 100px от остановки линию не перекрывает), уезд — по
+    // [№12] налево (коридор вниз занят выезжающей)
     run(scene, 6)
     expect(['moving_away', 'done']).toContain(enter.state)
-    // [БАГ-РЕПОРТ-6-УСТУПАНИЕ-МАШИН] выезжающая могла отъехать, пропуская
-    // въезжающую, и теперь возвращается на остановку (to_gate) — либо уже
-    // вернулась (waiting_before)
+    // выезжающая идёт к остановке / вернулась на неё / ждёт открытия
     expect(['waiting_before', 'to_gate']).toContain(exit.state)
 
-    // позиция выезжающей в этой сцене не каноническая: retarget выводит её
-    // на штатную остановку выезда, створ пустеет, и при gateCloseDelay=0
-    // свип [G2] закрывает ворота. Охранник держит ворота открытыми, пока
-    // выезжающая идёт к остановке и проходит ([G1]).
-    for (let i = 0; i < 200; i++) { // 10с
-      if (!scene.gate.settings.isOpen && !scene.gate.settings.isAnimating) {
+    // Охранник держит ворота открытыми, пока выезжающая идёт к остановке
+    // ([G1]); как только она начала проход — больше не открывает: свип
+    // [№13] закроет ворота за её спиной, и она уедет после ПОЛНОГО
+    // закрытия.
+    for (let i = 0; i < 300; i++) { // 15с
+      if (!scene.gate.settings.isOpen && !scene.gate.settings.isAnimating &&
+          ['to_gate', 'waiting_before'].includes(exit.state)) {
         scene.gate.settings.isOpen = true
         scene.gate.settings.isAnimating = false
       }

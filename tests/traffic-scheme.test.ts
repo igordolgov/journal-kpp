@@ -255,10 +255,10 @@ const mkCar = (id: string, direction: 'enter' | 'exit', state: string, pos: { x:
 })
 
 describe('поведение: машина после ворот', () => {
-  it('машина в waiting_after уезжает после вежливой паузы 0.8с при открытых воротах ([П6])', () => {
+  it('машина в waiting_after ждёт ПОЛНОГО закрытия ворот и уезжает после него ([№13])', () => {
     const h = buildCarHarness()
     // входящая машина уже проехала ворота: стоит в waiting_after под ними,
-    // ворота ОТКРЫТЫ (шлагбаум поднят — закроется сам по расчистке створа)
+    // ворота ОТКРЫТЫ ([№13]: машина ждёт полного закрытия перед уездом)
     const car = mkCar('car-1', 'enter', 'waiting_after', { x: 540, y: 250 }, { x: 540, y: 250 })
     h.aiAgents.value = [car as any]
 
@@ -268,7 +268,15 @@ describe('поведение: машина после ворот', () => {
     }
     expect(car.state).toBe('waiting_after')
 
-    // после 0.8с — уезжает, НЕ дожидаясь закрытия ([П6])
+    // [№13-БЕЗОПАСНОСТЬ] пауза истекла, ворота открыты — машина ждёт
+    // полного закрытия, не уезжает
+    for (let i = 0; i < 20; i++) {
+      h.physics.updateAiMovement(DT, { carGateId: 'car-gate-1', personGateId: 'wicket-1' })
+    }
+    expect(car.state).toBe('waiting_after')
+
+    // оператор опускает шлагбаум — машина уезжает
+    h.carGate.settings.isOpen = false
     for (let i = 0; i < 40; i++) {
       h.physics.updateAiMovement(DT, { carGateId: 'car-gate-1', personGateId: 'wicket-1' })
       if (car.state === 'moving_away') break
