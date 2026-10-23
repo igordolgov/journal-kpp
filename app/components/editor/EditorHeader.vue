@@ -43,6 +43,8 @@ header.flex.items-center.justify-between.flex-shrink-0.h-10.p-2.border-b.border-
             @change="handleFileChange"
           )
 
+    //- [№18] пункт «Инструменты» (Сценарии/Генератор) убран из хедера редактора по просьбе заказчика
+
     //- Меню "Сохранить"
     .dropdown.dropdown-bottom
       label.btn.btn-sm.btn-primary.h-8.min-h-0.border-none(

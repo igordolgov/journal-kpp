@@ -37,6 +37,12 @@
       )
         Activity.w-4.h-4
       button.btn.btn-xs.btn-ghost.btn-square(
+        @click="showFps = !showFps"
+        :class="showFps ? 'text-success bg-success/20' : 'text-base-content/40'"
+        title="Счётчик FPS (джанки)"
+      )
+        Gauge.w-4.h-4
+      button.btn.btn-xs.btn-ghost.btn-square(
         @click="showSettings = !showSettings"
         :class="showSettings ? 'text-warning bg-warning/20' : 'text-base-content/40'"
         title="Настройки"
@@ -95,6 +101,11 @@
         )
           span Макс. чужих в группе
           input.input.input-xs(type="number" v-model.number="userMaxNonFamily" min="0" max="4" placeholder="1")
+        label.flex.items-center.gap-2.text-xs.cursor-pointer(
+          class="text-base-content/60"
+        )
+          input(type="checkbox" v-model="userArrivalBrake")
+          span Торможение у точки останова
         label.flex.flex-col.text-xs(
           class="text-base-content/60"
         )
@@ -112,6 +123,12 @@
     //- а точки спавна/деспавна (fallback от sceneSize) ползли за контейнером.
     //- [БАГ-РЕПОРТ-8-ВЫРАВНИВАНИЕ] origin top-left: масштаб ведётся от
     //- левого-верхнего угла, сцена не уплывает от левого края
+    //- [№16-FPS] счётчик кадров: текст пишет gameLoop раз в секунду напрямую в DOM (без ререндеров)
+    .absolute.top-2.left-2.z-50.px-2.py-1.rounded.font-mono.text-xs.whitespace-nowrap(
+      v-if="showFps"
+      ref="fpsHudNode"
+      class="bg-black/70 text-green-400"
+    ) FPS
     .sim-canvas-wrapper.relative.overflow-hidden.shrink-0(
       :style="{ width: sceneSize.width + 'px', height: sceneSize.height + 'px', transform: `scale(${scale})`, transformOrigin: 'top left' }"
     )
@@ -322,7 +339,7 @@ import {
 } from '~/utils/simulatorPaint'
 // [Фаза 5] Lucide: хедер и empty state
 import {
-  CarFront, Activity, SlidersHorizontal, X,
+  CarFront, Activity, SlidersHorizontal, X, Gauge,
   MonitorX, PencilRuler, ShieldAlert, Volume2, VolumeX
 } from '@lucide/vue'
 
@@ -365,6 +382,9 @@ const userCarIntervalMin = ref<number | null>(null)
 const userCarIntervalMax = ref<number | null>(null)
 const userMaxGroupSize = ref<number | null>(null)
 const userMaxNonFamily = ref<number | null>(null)
+// [№21-ТОРМОЖЕНИЕ] тумблер эксперимента заказчика: плавное торможение
+// у точки останова (поповер «НАСТРОЙКИ», сохраняется в localStorage)
+const userArrivalBrake = ref(true)
 
 // [№15-ЗВУК] громкость/тишина симулятора: кнопка mute в хедере + слайдер
 // в поповере. setMasterVolume в движке существовал, но не вызывался никем.
@@ -386,6 +406,7 @@ const resetSettings = () => {
   userCarIntervalMax.value = null
   userMaxGroupSize.value = null
   userMaxNonFamily.value = null
+  userArrivalBrake.value = true
   showSettings.value = false
 }
 
@@ -407,6 +428,7 @@ const applySavedWidgetSettings = () => {
   userMaxNonFamily.value = saved.maxNonFamily
   userVolume.value = saved.volume ?? 0.6
   userMuted.value = saved.muted ?? false
+  userArrivalBrake.value = saved.arrivalBrake !== false
 }
 applySavedWidgetSettings()
 
@@ -414,7 +436,7 @@ let widgetSaveTimer: ReturnType<typeof setTimeout> | null = null
 watch(
   [userMaxAgents, userPersonIntervalMin, userPersonIntervalMax,
    userCarIntervalMin, userCarIntervalMax, userMaxGroupSize, userMaxNonFamily,
-   userVolume, userMuted],
+   userArrivalBrake, userVolume, userMuted],
   () => {
     if (widgetSaveTimer) clearTimeout(widgetSaveTimer)
     widgetSaveTimer = setTimeout(() => {
@@ -428,10 +450,18 @@ watch(
         maxNonFamily: userMaxNonFamily.value,
         volume: userVolume.value,
         muted: userMuted.value,
+        arrivalBrake: userArrivalBrake.value,
       })
     }, 400)
   }
 )
+
+// [№17-ЗВУК] кнопка mute и слайдер громкости не меняли фактическую громкость:
+// applyMasterVolume вызывался только при монтировании/возврате видимости/
+// первом клике (unlock), а вотчера на userVolume/userMuted не было — клик
+// лишь переворачивал флаг и сохранял его в localStorage. Теперь любое
+// изменение громкости/тишины немедленно применяется к masterGain.
+watch([userVolume, userMuted], () => applyMasterVolume())
 
 const integration = useSimulatorIntegration()
 const { allPeople, usedPeopleIds } = integration
@@ -443,7 +473,7 @@ const { getElementStyle: _getElementStyle, getGateStyle: _getGateStyle, ...core 
 // в рендере подписывало бы виджет на x/y/zIndex/settings — пересборка каждый кадр.
 // Реактивными остаются только структурные поля (id, name, occupants, asset).
 const getElementStyle = (el: any, enableRotation: boolean): CSSProperties =>
-  _getElementStyle(toRaw(el), enableRotation) as CSSProperties
+  _getElementStyle(toRaw(el), enableRotation, lastPaintAlpha) as CSSProperties
 const getGateStyle = (el: any): CSSProperties => _getGateStyle(toRaw(el)) as CSSProperties
 
 // [П1][№12] темп шага: --walk-hold задаёт ФАЗУ CSS-анимации ходьбы
@@ -596,10 +626,17 @@ const audioCtrl = useSimulatorAudio(
 )
 const { visibleAgentLabels, initAudioPools, updateAllAudio, resetAllAudioTimers, stopAllCarEngines, cleanupAgentSounds } = audioCtrl
 
+// [№21-ТОРМОЖЕНИЕ] тумблер торможения у точки останова: живой геттер поверх
+// настроек сцены (физика читает simOpts.* на каждом тике; прототип
+// сохраняет чтение остальных полей напрямую из props.simSettings)
+const physicsSimOpts: any = Object.create((props.simSettings ?? {}) as object, {
+  arrivalBrake: { get: () => userArrivalBrake.value, enumerable: true },
+})
+
 const physics = useSimulatorPhysics(
   simElements, aiAgents, sceneSize,
   core.openGateWithSound, core.closeGateWithSound, core.stopGate,
-  props.simSettings || {},
+  physicsSimOpts,
   (agent) => {
     spawn.handleAgentDone(agent)
     cleanupAgentSounds(agent.id)
@@ -620,7 +657,8 @@ const scriptsHandler = useSimulatorScripts(simElements, activeCommands, ref(prop
 const ui = useSimulatorUI(
   simElements, core.openGateWithSound, core.closeGateWithSound, core.stopGate,
   activeIntercoms,
-  activeCallButtonId
+  activeCallButtonId,
+  core.unlockWicket
 )
 const {
   onControlClick,
@@ -661,7 +699,7 @@ const getLabelStyle = (el: any): CSSProperties => {
   return {
     left: '0px',
     top: '0px',
-    transform: labelTransform(r),
+    transform: labelTransform(r, lastPaintAlpha),
     position: 'absolute',
     whiteSpace: 'normal',
     backgroundColor: 'rgba(0, 0, 0, 0.85)',
@@ -817,7 +855,14 @@ const paintScene = (alpha = 1) => {
   }
 }
 
+// [№19-УТЕЧКА] флаг живого цикла: animationFrameId перезаписывается в трёх
+// точках старта (mount/watch/gameLoop), cancel гасит только ПОСЛЕДНИЙ
+// queued rAF - при повторных открытиях симулятора прошлые циклы
+// оставались живыми (рывки со второго запуска: каждый rAF-тик
+// дублировал физику/аудио/paint). Единый страж: новые кадры
+// перевыставляются, только пока loopActive; stop гасит всё.
 let animationFrameId: number | null = null
+let loopActive = false
 let lastTime = 0
 
 // [№15-ФИКС-ШАГ] Физика — фиксированными подшагами 1/60с (аккумулятор),
@@ -828,11 +873,42 @@ let lastTime = 0
 const PHYSICS_FIXED_DT = 1 / 60
 const PHYSICS_MAX_SUBSTEPS = 4 // анти-спираль: при лаге >66мс симуляция замедляется, а не телепортируется
 let physicsAccumulator = 0
+// [№17-ПРЫЖОК] последний alpha интерполяции: шаблонные стили
+// (getElementStyle/getLabelStyle) обязаны писать ТУ ЖЕ интерполированную
+// позицию, что и paint-мост — иначе структурный ререндер (спавн/деспавн/
+// zIndex-событие) перезаписывает трансформы ВСЕХ агентов текущей физпозицией
+// на один кадр: прыжок вперёд и назад (у заказчика читался как «телепорт
+// за 2-3мм до точки остановки»; до №15 не проявлялся — интерполяции не было).
+let lastPaintAlpha = 1
+// [№16] переиспользуемый буфер RAW-элементов: без аллокации массива каждый
+// кадр (раньше map() создавал новый массив 60 раз/сек — паузы GC в кадре).
+const rawElsBuf: any[] = []
+// [№16-FPS] прибор диагностики: средний FPS, % кадров >25мс (джанки) и худший кадр — окно 1с.
+const showFps = ref(false)
+const fpsHudNode = ref<HTMLElement | null>(null)
+let fpsFrames = 0
+let fpsJank = 0
+let fpsWorst = 0
+let fpsAccum = 0
 
 const gameLoop = (timestamp: number) => {
-  if (!props.isRunning) return
-  const dt = Math.min((timestamp - lastTime) / 1000, 0.1)
+  if (!props.isRunning || !loopActive) { loopActive = false; return }
+  const rawDelta = timestamp - lastTime
   lastTime = timestamp
+  const dt = Math.min(rawDelta / 1000, 0.1)
+  // [№16-FPS] статистика кадра: окно 1с, запись текста напрямую в DOM (без ререндера)
+  fpsFrames++
+  fpsAccum += rawDelta
+  if (rawDelta > fpsWorst) fpsWorst = rawDelta
+  if (rawDelta > 25) fpsJank++
+  if (fpsAccum >= 1000 && fpsFrames > 0) {
+    const hud = fpsHudNode.value
+    if (hud) hud.textContent = `FPS ${Math.round((fpsFrames * 1000) / fpsAccum)} · джанки ${Math.round((fpsJank / fpsFrames) * 100)}% · макс ${Math.round(fpsWorst)}мс`
+    fpsFrames = 0
+    fpsJank = 0
+    fpsWorst = 0
+    fpsAccum = 0
+  }
   // [ФИКС-ЗАСТРЯНИЕ] броня игрового цикла: ЛЮБОЕ исключение в подсистеме
   // (спавн/физика/скрипты/аудио) раньше убивало rAF-цикл навсегда — вся
   // сцена замирала («зависают вошедшие люди»), а сторожа внутри физики
@@ -850,7 +926,10 @@ const gameLoop = (timestamp: number) => {
       } catch (e) { console.error('[gameLoop] спавн:', e) }
       try {
         // [№15-ФИКС-ШАГ] prev-снимок + подшаги фиксированной длины
-        snapshotPrevPositions(simElements.value.map(e => toRaw(e) as any))
+        const elsNow = simElements.value
+        if (rawElsBuf.length !== elsNow.length) rawElsBuf.length = elsNow.length
+        for (let i = 0; i < elsNow.length; i++) rawElsBuf[i] = toRaw(elsNow[i]) as any
+        snapshotPrevPositions(rawElsBuf)
         physicsAccumulator = Math.min(physicsAccumulator + dt, PHYSICS_FIXED_DT * (PHYSICS_MAX_SUBSTEPS + 1))
         let substeps = 0
         while (physicsAccumulator >= PHYSICS_FIXED_DT && substeps < PHYSICS_MAX_SUBSTEPS) {
@@ -860,6 +939,7 @@ const gameLoop = (timestamp: number) => {
         }
         if (substeps === PHYSICS_MAX_SUBSTEPS) physicsAccumulator = 0 // сброс хвоста при лаге
         paintAlpha = Math.min(1, physicsAccumulator / PHYSICS_FIXED_DT)
+        lastPaintAlpha = paintAlpha
       } catch (e) { console.error('[gameLoop] физика:', e) }
       try { scriptsHandler.processScriptLogic(dt) } catch (e) { console.error('[gameLoop] скрипты:', e) }
       try { scriptsHandler.updateActiveCommands(dt) } catch (e) { console.error('[gameLoop] команды:', e) }
@@ -871,6 +951,19 @@ const gameLoop = (timestamp: number) => {
   } catch (e) {
     console.error('[gameLoop] кадр:', e)
   }
+  if (!loopActive) return // [№19-УТЕЧКА] цикл остановлен - не перевыставляться
+  animationFrameId = requestAnimationFrame(gameLoop)
+}
+
+// [№19-УТЕЧКА] единая точка останова: cancel + сброс стража
+const stopGameLoop = () => {
+  loopActive = false
+  if (animationFrameId) { cancelAnimationFrame(animationFrameId); animationFrameId = null }
+}
+const startGameLoop = () => {
+  if (loopActive) return // уже жив - повторный rAF создал бы второй цикл
+  loopActive = true
+  lastTime = performance.now()
   animationFrameId = requestAnimationFrame(gameLoop)
 }
 
@@ -896,13 +989,9 @@ watch(() => props.config, async (nc) => {
 
 watch(() => props.isRunning, (ir) => {
   if (ir) {
-    lastTime = performance.now()
-    animationFrameId = requestAnimationFrame(gameLoop)
-  } else {
-    if (animationFrameId) {
-      cancelAnimationFrame(animationFrameId)
-      animationFrameId = null
-    }
+    startGameLoop()
+    } else {
+    stopGameLoop()
     // [ФИКС-звук] Пауза/выключение симуляции: игровой цикл остановлен,
     // updateAllAudio не работает — глушим моторы машин и мотор ворот,
     // иначе гул продолжается с последней громкостью.
@@ -994,17 +1083,14 @@ onMounted(async () => {
   }
   shiftWarningOpen.value = true
 
-  if (props.isRunning) {
-    lastTime = performance.now()
-    animationFrameId = requestAnimationFrame(gameLoop)
-  }
+  if (props.isRunning) startGameLoop()
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeyDown)
   document.removeEventListener('visibilitychange', onVisibilityChange)
   if (resizeObserver) resizeObserver.disconnect()
-  if (animationFrameId) cancelAnimationFrame(animationFrameId)
+  stopGameLoop()
   cleanupScaling()
   physics.clearAllTimers()
   resetAllAudioTimers()

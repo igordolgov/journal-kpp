@@ -110,15 +110,9 @@
         nuxt-link.flex.items-center.gap-2(to="/editor" active-class="bg-primary text-white rounded-md")
           PencilRuler.h-4.w-4.shrink-0
           span Редактор
-      //- [№15] маршруты были недостижимы из меню (README их декларирует)
-      li
-        nuxt-link.flex.items-center.gap-2(to="/scenario-editor" active-class="bg-primary text-white rounded-md")
-          ListChecks.h-4.w-4.shrink-0
-          span Сценарии
-      li
-        nuxt-link.flex.items-center.gap-2(to="/generator" active-class="bg-primary text-white rounded-md")
-          UserPlus.h-4.w-4.shrink-0
-          span Генератор
+      //- [№17] пункты «Сценарии» и «Генератор» убраны из главного меню по
+      //- просьбе заказчика; доступ перенесён в редактор — меню «Инструменты»
+      //- в шапке (components/editor/EditorHeader.vue).
       li
         nuxt-link.flex.items-center.gap-2(to="/reports" active-class="bg-primary text-white rounded-md")
           ChartColumn.h-4.w-4.shrink-0
@@ -134,7 +128,7 @@
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import {
   Menu, BookOpen, Database, Settings, PencilRuler,
-  ChartColumn, LogOut, LogIn, Video, ListChecks, UserPlus
+  ChartColumn, LogOut, LogIn, Video
 } from '@lucide/vue'
 import { useTheme } from '~/composables/useTheme'
 import { useConfig } from '~/composables/useConfig'

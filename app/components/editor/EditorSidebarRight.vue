@@ -309,6 +309,25 @@ aside.flex.flex-col.h-full.overflow-hidden.border-l.border-gray-700.bg-gray-900(
             :value="selectedPanel.borderColor || '#4a5568'"
             @input="updatePanel('borderColor', evValue($event))"
           )
+        //- [№17] подложка панели: полупрозрачная и матовая (frosted glass);
+        //- 100% / 0px = прежнее непрозрачное поведение
+        .grid.grid-cols-6.mt-2(
+          class="gap-4"
+        )
+          .field
+            label.field-label Прозрачность фона, %
+            input.field-input(
+              type="number" min="0" max="100" step="5"
+              :value="Math.round((selectedPanel.bgOpacity ?? 0.6) * 100)"
+              @input="updatePanel('bgOpacity', evNumber($event) / 100)"
+            )
+          .field
+            label.field-label Матирование, px
+            input.field-input(
+              type="number" min="0" max="30"
+              :value="selectedPanel.blur ?? 6"
+              @input="updatePanel('blur', evNumber($event))"
+            )
 
       .hint Перетаскивайте углы панели на холсте.
 

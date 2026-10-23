@@ -9,6 +9,8 @@ import { ref, computed } from 'vue'
 import { useDatabase } from './useDatabase'
 import { useFamily } from './useFamily'
 import type { Direction, TravelMode, PersonInfo } from '~/types/simulator'
+// [№21-РАНДОМ] выбор с «охлаждением»: недавно появлявшиеся — в конец очереди
+import { pickRecentAware } from '~/utils/simTuning'
 
 // Временные статусы, при которых человек не может участвовать в симуляции
 const EXCLUDED_STATUSES = ['Командировка', 'Отпуск', 'Болен']
@@ -63,6 +65,10 @@ const personStatusMap = ref<Map<number, PersonStatus>>(new Map())
 const vehicleStatusMap = ref<Map<string, boolean>>(new Map())
 const usedPeopleIds = ref<Set<number>>(new Set())
 const pendingStatusUpdateIds = ref<Set<number>>(new Set())
+// [№21-РАНДОМ] последние выбранные люди (FIFO): предпочитаем тех, кто
+// давно не появлялся — «появляются каждый раз по одному и тому же
+// сценарию» (репорт №21)
+const recentPersonIds: number[] = []
 const isLoaded = ref(false)
 let lastJournalLength = 0
 // ======================================================
@@ -214,12 +220,19 @@ export function useSimulatorIntegration() {
     const available = eligible.filter((p: any) => !usedPeopleIds.value.has(p.id))
     let person: any
     if (available.length > 0) {
-      person = available[Math.floor(Math.random() * available.length)]
+      // [№21-РАНДОМ] не показывать одних и тех же подряд: предпочитаем
+      // тех, кто давно не появлялся (последние 8 — в конце очереди)
+      person = pickRecentAware(available, recentPersonIds)!.item
     } else {
       usedPeopleIds.value.clear()
+      recentPersonIds.length = 0
       person = eligible[Math.floor(Math.random() * eligible.length)]
     }
     usedPeopleIds.value.add(person.id)
+    if (recentPersonIds[recentPersonIds.length - 1] !== person.id) {
+      recentPersonIds.push(person.id)
+      if (recentPersonIds.length > 8) recentPersonIds.shift()
+    }
     return person
   }
 

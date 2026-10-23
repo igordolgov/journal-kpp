@@ -190,15 +190,18 @@ describe('уступание машин у ворот ([БАГ-РЕПОРТ-6])'
     const motion = trackMotion([enter, exit])
     const startX = centerOf(enter).x
 
-    for (let i = 0; i < 100; i++) { // 5с
+    for (let i = 0; i < 120; i++) { // 6с: проход + вежливая пауза + уезд №21
       h.physics.updateAiMovement(DT, { carGateId: 'car-gate-1', personGateId: '' })
       motion.step()
     }
 
     // въезжающая отъехала назад по дороге (от ворот, вправо)
     expect(centerOf(enter).x - startX).toBeGreaterThanOrEqual(25)
-    // выезжающая прошла ворота и ждёт закрытия на своей полосе
-    expect(exit.state).toBe('waiting_after')
+    // [№21-ВЫЕЗД-СРАЗУ] выезжающая прошла ворота и уезжает: въезжающая
+    // держит правую полосу дороги — уезд в свободную (левую) сторону,
+    // без ожидания закрытия ворот
+    expect(['waiting_after', 'moving_away']).toContain(exit.state)
+    expect(exit.state === 'waiting_after' || exit.afterTarget.x < 0).toBe(true)
     expect(centerOf(exit).y).toBeLessThan(ENTER_STOP_Y)
     expect(motion.maxJump()).toBeLessThanOrEqual(100 * DT + 3)
     expect(motion.everOverlapped()).toBe(false)

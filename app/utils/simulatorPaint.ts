@@ -73,28 +73,71 @@ export interface AgentPaintTargets {
   avatar: HTMLElement | null
 }
 
+// [№16-МЕНЬШЕ-ЗАПИСЕЙ] Кэш последних записанных значений на DOM-узел.
+// Профилирование (№16): CPU-профиль показывает, что узкое место — НЕ физика
+// и НЕ Vue (longtask = 0), а размазанная по кадру стоимость style-recalc /
+// инвалидации paint от ПОКАДРОВЫХ записей стилей. Большинство агентов
+// большую часть времени стоит (очередь у шлагбаума, ожидание закрытия) —
+// их transform/zIndex не меняются, но раньше строка писалась каждый кадр.
+// Пишем в DOM только при реальном изменении значения: стоящие агенты
+// выпадают из покадровой стоимости полностью, шагающие — почти полностью.
+const lastWritten = new WeakMap<object, Record<string, string>>()
+const writeCache = (node: object): Record<string, string> => {
+  let c: Record<string, string> | undefined = lastWritten.get(node)
+  if (!c) {
+    c = Object.create(null) as Record<string, string>
+    lastWritten.set(node, c)
+  }
+  return c
+}
+const writeOnce = (node: object, el: HTMLElement, key: string, value: string): void => {
+  const c = writeCache(node)
+  if (c[key] === value) return
+  c[key] = value
+  // custom-свойства (--walk-hold) — только через setProperty (надёжно во всех браузерах)
+  if (key.startsWith('--')) el.style.setProperty(key, value)
+  else (el.style as any)[key] = value
+}
+
+// [№16-ФАЗА-ШАГА] Квантование --walk-hold до 1/20с: значение меняется каждый
+// кадр (копится пауза), но запись custom-свойства инвалидирует стиль всего
+// поддерева аватара (сложный SVG). Шаг кванта 50мс при цикле шага ~1с
+// визуально неотличим, а записей становится ~в 10 раз меньше.
+export const quantizeWalkHold = (v: number | undefined | null): number =>
+  Math.round((v ?? 0) * 20) / 20
+
 // Покадровая запись агента: позиция+слой на корневом узле, пауза конечностей
 // и фаза шага (--walk-hold) на обёртке аватара (только у людей).
+// [№16] каждая запись проходит через кэш: unchanged-значения не пишутся.
 export const paintAgent = (t: AgentPaintTargets, el: RawEl, enableRotation: boolean, alpha = 1): void => {
   if (t.node) {
-    t.node.style.transform = agentTransform(el, enableRotation, alpha)
-    t.node.style.zIndex = String(el.zIndex || 1)
+    writeOnce(t.node, t.node, 'transform', agentTransform(el, enableRotation, alpha))
+    writeOnce(t.node, t.node, 'zIndex', String(el.zIndex || 1))
+    // [№16-КОМПОЗИТИНГ] ОТКЛОНЕНО экспериментом (Xvfb CPU×6: j25 408 vs 242 у
+    // бейзлайна): собственные слои на ПОЛНОМ экране агентов дороже, чем
+    // перерисовка (в софт-растеризаторе и при дробном масштабе). Возвращено
+    // к прямому рендеру в слой сцены.
   }
   if (t.avatar) {
-    t.avatar.classList.toggle('is-paused', isAgentPaused(el))
-    t.avatar.style.setProperty('--walk-hold', String(el.settings?._walkHold ?? 0))
+    const paused = isAgentPaused(el)
+    const c = writeCache(t.avatar)
+    if (c['paused'] !== String(paused)) {
+      c['paused'] = String(paused)
+      t.avatar.classList.toggle('is-paused', paused)
+    }
+    writeOnce(t.avatar, t.avatar, '--walk-hold', String(quantizeWalkHold(el.settings?._walkHold)))
   }
 }
 
 // Покадровая запись позиции лейбла.
 export const paintLabel = (node: HTMLElement | null, el: RawEl, alpha = 1): void => {
-  if (node) node.style.transform = labelTransform(el, alpha)
+  if (node) writeOnce(node, node, 'transform', labelTransform(el, alpha))
 }
 
 // Покадровая запись стрелы ворот (в т.ч. после kill() твина и синхронизаций
 // сторожа — paint каждый кадр переносит фактическое состояние settings в DOM).
 export const paintGate = (node: HTMLElement | null, s: RawEl | undefined | null): void => {
-  if (node) node.style.transform = gateTransform(s)
+  if (node) writeOnce(node, node, 'transform', gateTransform(s))
 }
 
 // Покадровая запись линии «команда» (актор -> цель) в SVG.
@@ -105,10 +148,18 @@ export const paintCommandLine = (
   alpha = 1,
 ): void => {
   if (!line || !actor || !target) return
-  line.setAttribute('x1', String(paintCoord(actor, 'x', alpha) + actor.width / 2))
-  line.setAttribute('y1', String(paintCoord(actor, 'y', alpha) + actor.height / 2))
-  line.setAttribute('x2', String(paintCoord(target, 'x', alpha) + target.width / 2))
-  line.setAttribute('y2', String(paintCoord(target, 'y', alpha) + target.height / 2))
+  const x1 = paintCoord(actor, 'x', alpha) + actor.width / 2
+  const y1 = paintCoord(actor, 'y', alpha) + actor.height / 2
+  const x2 = paintCoord(target, 'x', alpha) + target.width / 2
+  const y2 = paintCoord(target, 'y', alpha) + target.height / 2
+  const c = writeCache(line)
+  const key = `${x1},${y1},${x2},${y2}`
+  if (c['pts'] === key) return
+  c['pts'] = key
+  line.setAttribute('x1', String(x1))
+  line.setAttribute('y1', String(y1))
+  line.setAttribute('x2', String(x2))
+  line.setAttribute('y2', String(y2))
 }
 
 // [№15-ФИКС-ШАГ] Снимок prev-позиций всех агентов перед серией подшагов физики.

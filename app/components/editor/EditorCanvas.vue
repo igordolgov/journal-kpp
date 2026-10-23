@@ -323,6 +323,8 @@
 // до string и не проходят CSSProperties в биндингах :style).
 import { ref, computed, onMounted } from 'vue'
 import type { CSSProperties } from 'vue'
+// [№17] та же полупрозрачная матовая подложка панелей, что и в симуляторе
+import { panelBackingStyle } from '~/utils/panelBacking'
 import type { SceneSettings, Panel, Control } from '../../types/scene'
 import TrafficRoad from './TrafficRoad.vue'
 import SimulatorPersonAvatar from '../simulator/PersonAvatar.vue'
@@ -439,11 +441,9 @@ const getPointStyle = (el: any, pointPrefix: string, agentType: 'person' | 'car'
   }
 }
 
-const getPanelStyle = (panel: Panel) => ({
-  left: `${panel.x || 0}px`, top: `${panel.y || 0}px`,
-  width: `${panel.width || 200}px`, height: `${panel.height || 150}px`,
-  backgroundColor: '#2d3748', border: '1px solid #4a5568', borderRadius: '6px', zIndex: 9999
-})
+// [№17] подложка панели — полупрозрачная и матовая (utils/panelBacking);
+// настройка «Оформление» панели в инспекторе, превью на канвасе = симулятор
+const getPanelStyle = (panel: Panel) => panelBackingStyle(panel) as CSSProperties
 
 // [ИСПРАВЛЕНО] CSSProperties-аннотации — литералы получают контекстный тип
 const getControlStyle = (ctrl: Control): CSSProperties => {

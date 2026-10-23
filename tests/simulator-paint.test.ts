@@ -5,7 +5,7 @@ import { describe, it, expect } from 'vitest'
 import {
   agentTransform, labelTransform, gateTransform, isAgentPaused,
   paintAgent, paintLabel, paintGate, paintCommandLine,
-  paintCoord, snapshotPrevPositions,
+  paintCoord, snapshotPrevPositions, quantizeWalkHold,
 } from '~/utils/simulatorPaint'
 
 const fakeNode = () => {
@@ -183,5 +183,61 @@ describe('№15: интерполяция рендера (fixed timestep)', () =
   it('labelTransform с alpha следует за агентом', () => {
     const el: any = { x: 10, y: 50, _px: 0, _py: 0, width: 40, height: 20 }
     expect(labelTransform(el, 0.5)).toBe('translate3d(25px, -25px, 0) translateX(-50%)')
+  })
+})
+
+// ------------------------------------------------------------------
+// [№16-МЕНЬШЕ-ЗАПИСЕЙ] кэш записей: неизменные значения не пишутся в DOM.
+// Профиль (№16): узкое место — размазанная по кадру стоимость style-recalc
+// и CSS-парсинга от покадровых записей; большинство агентов стоит.
+// ------------------------------------------------------------------
+describe('№16: кэш записей (write-once)', () => {
+  it('повтор с тем же состоянием не меняет transform; изменение — пишет', () => {
+    const node: any = fakeNode()
+    const el: any = { x: 5, y: 6, category: 'human', zIndex: 10, velocity: 0 }
+    paintAgent({ node, avatar: null }, el, false)
+    const t1 = node.style.transform
+    paintAgent({ node, avatar: null }, el, false)
+    expect(node.style.transform).toBe(t1)
+    el.x = 7
+    paintAgent({ node, avatar: null }, el, false)
+    expect(node.style.transform).toBe('translate3d(7px, 6px, 0)')
+  })
+
+  it('is-paused: повтор без изменения состояния не трогает классы', () => {
+    const node: any = fakeNode()
+    const avatar = mkAvatar()
+    const el: any = { x: 0, y: 0, velocity: 0 } // стоит -> пауза
+    paintAgent({ node, avatar }, el, false)
+    expect(avatar.classes.has('is-paused')).toBe(true)
+    paintAgent({ node, avatar }, el, false)
+    expect(avatar.classes.has('is-paused')).toBe(true)
+    el.velocity = 2
+    paintAgent({ node, avatar }, el, false)
+    expect(avatar.classes.has('is-paused')).toBe(false)
+  })
+
+  it('quantizeWalkHold: шаг кванта 1/20с, отсутствие — 0', () => {
+    expect(quantizeWalkHold(0.123)).toBe(0.1)
+    expect(quantizeWalkHold(0.127)).toBe(0.15)
+    expect(quantizeWalkHold(undefined)).toBe(0)
+    expect(quantizeWalkHold(null)).toBe(0)
+  })
+
+  it('--walk-hold пишется квантованным через setProperty', () => {
+    const node: any = fakeNode()
+    const avatar = mkAvatar()
+    const el: any = { x: 0, y: 0, velocity: 1, settings: { _walkHold: 1.234 } }
+    paintAgent({ node, avatar }, el, false)
+    expect(avatar.style._props['--walk-hold']).toBe('1.25') // 1.234*20=24.68 -> 25 -> 1.25
+  })
+
+  it('кэши разных узлов независимы', () => {
+    const a: any = fakeNode()
+    const b: any = fakeNode()
+    const el: any = { x: 1, y: 1, category: 'human', velocity: 0 }
+    paintAgent({ node: a, avatar: null }, el, false)
+    paintAgent({ node: b, avatar: null }, el, false)
+    expect(a.style.transform).toBe(b.style.transform)
   })
 })

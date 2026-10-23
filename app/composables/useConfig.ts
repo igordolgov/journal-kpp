@@ -64,6 +64,12 @@ export interface ISimulatorConfig {
   wicketCloseDelay: number
   autoOpenGates: boolean
   autoOpenWicket: boolean
+  // [№21-КАЛИТКА] таймаут захлопывания приоткрытой калитки (сек)
+  wicketAjarTimeout: number
+  // [№21-РЫВКИ] финальное торможение у точки ожидания (эксперимент. выключатель)
+  finalBrake: boolean
+  // [№21-РАНДОМ] случайный старт потоков после запуска/паузы
+  randomizeSpawnStart: boolean
   // [PAYROLL] Автозапись журнала симулятором. Выкл = ручной режим:
   // журнал заполняет охранник, движок оплаты оценивает записи и проходы
   autoJournal: boolean
@@ -193,6 +199,9 @@ const defaultConfig: IConfig = {
     wicketCloseDelay: 0,
     autoOpenGates: false,
     autoOpenWicket: false,
+    wicketAjarTimeout: 15,
+    finalBrake: true,
+    randomizeSpawnStart: true,
     autoJournal: false,
     ACCEL: 100,
     DECEL: 100,

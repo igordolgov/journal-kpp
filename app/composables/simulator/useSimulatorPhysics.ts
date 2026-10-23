@@ -11,6 +11,9 @@ import { dot, cross, normalizeAngle } from '~/utils/simulatorMath'
 import { trafficPointsFor } from '~/utils/simulatorTraffic'
 // [П1] темп шага: накопление «паузы анимации» для CSS-фазы ног
 import { walkHoldStep } from '~/utils/simTuning'
+// [№20-ВОРОТА-ИДЕАЛ] общая логика зоны ворот: точка ожидания выезда,
+// ранний уезд въезжающей налево, выбор стороны уезда, забор калитки
+import { clampPersonToFence, exitLaneBusy, exitPendingFor, exitWaitCenterY, limitPersonPushY, roadSideBusyForDeparture } from '~/utils/gateFlow'
 
 export function useSimulatorPhysics(
   simElements: Ref<SceneElement[]>,
@@ -50,6 +53,10 @@ export function useSimulatorPhysics(
   // никогда» (остановлены оператором, зависла анимация): по истечении
   // лимита машина уезжает без ожидания (с предупреждением в консоль).
   const gateCloseWaitByAgentId = new Map<string, number>()
+  // [№21-ТВОР] фаза выравнивания прохода: человек, смещённый вбок
+  // уступанием, сначала ШАГАЕТ К ОСИ проёма (горизонтальная фаза), и только
+  // затем идёт сквозь калитку строго по створу — плечо не цепляет косяк.
+  const crossAlignByAgentId = new Set<string>()
   // [ФИКС-висяки-3] жёсткий предохранитель фазы ПОСЛЕ прохода: суммарное
   // время агента в crossing + moving_away. Штатно это секунды (плюс ~1 мин
   // хода за край у медленного пешехода); превышение лимита означает
@@ -100,6 +107,12 @@ export function useSimulatorPhysics(
   // проезжающая тормозила перед ней, а сторож через 10с телепортировал её на
   // цель — «машина мгновенно оказывается в месте ожидания закрытия ворот».
   const CAR_YIELD_SPEED = 55     // px/с: темп отъезда (задний ход)
+  // [№20-ПЛАВНОСТЬ] разгон ЛЮДЕЙ: раньше скорость человека применялась
+  // МГНОВЕННО (№13 «люди не ускоряются»), а целевую скорость пересчитывает
+  // каждый из ~10 правил уступания — переключение правила было видимым
+  // скачком скорости. Рамп 110 px/с² (шаг с места ~0.4с) сглаживает пульс;
+  // фаза ног ∝ пройденному пути (№12), поэтому темп шага не искажается.
+  const PERSON_ACCEL = 110      // px/с²
   // [БАГ-РЕПОРТ-8-СТОП] кап отъезда 150 -> 175: остановка выезда поднята к
   // линии ворот (240), и отъезд на 150 оставлял выезжающую В зоне прохода
   // (240+150=390 < граница зоны 160+240=400) — уезжающая вниз машина вежливо
@@ -367,9 +380,18 @@ export function useSimulatorPhysics(
     const ARRIVE_THRESHOLD = simOpts.ARRIVE_THRESHOLD ?? 1
     const SPRITE_ORIENTATION_OFFSET = simOpts.SPRITE_ORIENTATION_OFFSET ?? 0
     const gateCloseDelay = simOpts.gateCloseDelay ?? 10
-    // [ФИКС-калитка] пол 2с: мгновенное закрытие било по ещё идущим к
-    // проходу — люди приходили к уже закрытой калитке
-    const wicketCloseDelay = Math.max(2, Number(simOpts.wicketCloseDelay ?? 0) || 0)
+    // [ФИКС-калитка] пол 1с: мгновенное закрытие било по ещё идущим к
+    // проходу — люди приходили к уже закрытой калитке. [№21] заказчик
+    // попросил сократить: было 2с, стало 1с после прохода человека.
+    const wicketCloseDelay = Math.max(1, Number(simOpts.wicketCloseDelay ?? 0) || 0)
+    // [№21-ТОРМОЖЕНИЕ] тумблер эксперимента заказчика («может попробуем
+    // отключить торможение… в конце движения к точке ожидания»): false —
+    // подход к точке останова без прогрессивного торможения (скорость
+    // постоянная, посадка по reachedByStep). По умолчанию включено.
+    const arrivalBrake = simOpts.arrivalBrake !== false
+    // [№20-КАЛИТКА-ЗАБОР] калитка ЛЮДЕЙ для ограничителя толчков и клэмпа:
+    // ищется один раз на тик (см. также блок клэмпа в конце тика)
+    const personGate = simElements.value.find(g => String(g.id) === cfg.personGateId)
 
     // Удаление завершённых агентов + вызов логирования
     aiAgents.value = aiAgents.value.filter(agent => {
@@ -389,6 +411,7 @@ export function useSimulatorPhysics(
         gateCloseWaitByAgentId.delete(agent.id) // [№13] без утечек ожидания закрытия
         postGateTrack.delete(agent.id) // [ФИКС-висяки-3] без утечек
         crossTrack.delete(agent.id) // [ФИКС-застыл-калитка] без утечек
+        crossAlignByAgentId.delete(agent.id) // [№21-ТВОР] без утечек
         if (agent.type === 'car') audio.disposePool(`car-${agent.id}`)
         simElements.value = simElements.value.filter(el => el.id !== agent.id)
         return false
@@ -410,9 +433,36 @@ export function useSimulatorPhysics(
       agent.state = 'crossing'
       // [ФИКС-висяки] fallback (0,0) уводил агента в угол сцены; конечная
       // цель + штатный блок прибытия доводят состояние сами
-      const crossTarget = (agent.exitPoint && Number.isFinite(agent.exitPoint.x) && Number.isFinite(agent.exitPoint.y))
+      let crossTarget = (agent.exitPoint && Number.isFinite(agent.exitPoint.x) && Number.isFinite(agent.exitPoint.y))
         ? agent.exitPoint
         : (agent.afterTarget ?? { x: agent.element.x, y: agent.element.y })
+      // [№20-БЕЗ-ВОЗВРАТА] выезжающая машина при СВОБОДНОЙ полосе заканчивает
+      // проход сразу на линии ожидания въезжающих (exitWaitCenterY): прежняя
+      // цель «глубокая посадка» (CAR_EXIT_PULL_PAST) заставляла машину
+      // проехать вверх и вернуться назад к точке ожидания закрытия —
+      // «сначала проезжает вверх, затем возвращается» (репорт №20). Полоса
+      // занята (встречная стоит/подъезжает к воротам) — цель прежняя:
+      // посадка вверху, чтобы освободить линию въезжающим.
+      if (agent.type === 'car' && agent.direction === 'exit') {
+        const exitGate = simElements.value.find(g => String(g.id) === cfg.carGateId)
+        if (exitGate && !exitLaneBusy(aiAgents.value, agent, exitGate)) {
+          crossTarget = { x: crossTarget.x, y: exitWaitCenterY(exitGate, agent.element.height) }
+        }
+      }
+      // [№21-ТВОР] человек после уступания смещён вбок от оси проёма: проход
+      // начинается с ВЫРАВНИВАНИЯ по оси калитки (горизонтальный шаг до
+      // створки), затем строго вертикальный проход — в створ, не косяк.
+      // Сквозная цель сохранена в exitPoint; фаза снимается при прибытии
+      // (перехват в блоке прибытия crossing ниже).
+      if (agent.type === 'person' &&
+          Number.isFinite(agent.exitPoint?.x) && Number.isFinite(agent.exitPoint?.y)) {
+        const pg = simElements.value.find(g => String(g.id) === cfg.personGateId)
+        const axisX = pg ? pg.x + pg.width / 2 : agent.exitPoint!.x
+        if (Math.abs((agent.element.x + agent.element.width / 2) - axisX) > 2) {
+          crossAlignByAgentId.add(agent.id)
+          crossTarget = { x: axisX, y: agent.element.y + agent.element.height / 2 }
+        }
+      }
       agent.target = { ...crossTarget, width: 0, height: 0 }
       const gateId = agent.type === 'car' ? cfg.carGateId : cfg.personGateId
       const gate = simElements.value.find(g => String(g.id) === gateId)
@@ -831,7 +881,9 @@ export function useSimulatorPhysics(
             if (gm > 0.01) {
               const push = wMax * PERSON_SEP_SPEED * dt
               el.x += (gx / gm) * push
-              el.y += (gy / gm) * push
+              // [№20-3б] шаг уступания не выносит корпус на линию забора
+              const nextY = el.y + (gy / gm) * push
+              el.y = personGate ? limitPersonPushY(el, personGate, nextY) : nextY
               // [БАГ-РЕПОРТ-5-АНИМАЦИЯ] уступающий ШАГАЕТ в сторону, а не
               // скользит: боковой шаг фиксируется как скорость, чтобы
               // гистерезис is-paused не замораживал анимацию рук/ног.
@@ -852,6 +904,15 @@ export function useSimulatorPhysics(
             startCrossing(agent)
           }
           continue
+        }
+        // [№21-КАЛИТКА-В-ЖИЗНИ] приоткрытая (разблокированная охранником)
+        // калитка: подошедший человек ТОЛКАЕТ её до полного открытия —
+        // полностью открывают люди, а не кнопка (репорт №21). Звук скрипа
+        // играет внутри openGateFn; дальше штатный gateOpenIdle запускает
+        // проход, когда анимация открытия завершится.
+        if (agent.type === 'person' && gate.settings.isAjar &&
+            !gate.settings.isOpen && !gate.settings.isAnimating) {
+          openGateFn(gate)
         }
         // [ФИКС-ЗАСТРЯНИЕ] копим время стояния у открытой, неанимирующейся калитки
         const gateOpenIdle = gate.settings.isOpen && !gate.settings.isAnimating
@@ -917,7 +978,93 @@ export function useSimulatorPhysics(
           const gateGone = !gate || !gate.settings
           const fullyClosed = !!gate && !gate.settings.isOpen && !gate.settings.isAnimating
           const queueHoldsGate = gateHasQueue(gate)
+          // [№20-ПРОБКА] въехавшая машина освобождает ось ворот СРАЗУ, как
+          // только выезжающая хочет выезд (стоит/подъезжает к створу или
+          // уже проходит): уезд НАЛЕВО по базе без ожидания закрытия ворот.
+          // Раньше пара «посадка въезда над подъезжающим выездом» ждала
+          // закрытия (до closeWaitCap) — пробка, которую описал заказчик
+          // («может сразу уехать налево... чтобы не создавать пробку»).
+          // Инвариант [№13] не страдает: с оси уходит корпус, свип закрытия
+          // досчитывает и закрывает ворота сам.
+          if (agent.type === 'car' && agent.direction === 'enter' && gate &&
+              exitPendingFor(aiAgents.value, agent, gate)) {
+            console.warn('[car-left-departure] выезжающая хочет выезд — ранний уезд налево:', agent.id)
+            agent.afterTarget = { x: -60 - el.width / 2, y: el.y + el.height / 2, width: 0, height: 0 }
+            agent.state = 'moving_away'
+            agent.target = { x: agent.afterTarget.x, y: agent.afterTarget.y, width: 0, height: 0 }
+            waitAfterByAgentId.delete(agent.id)
+            continue
+          }
+          // [№21-ВЫЕЗД] выезжающая машина уезжает СРАЗУ после вежливой паузы,
+          // если хотя бы одна сторона дороги свободна: встречная, заезжающая
+          // на базу, боковому уезду не мешает («сама машина уезжает в другую
+          // сторону», репорт №21). Ожидание закрытия ворот остаётся только
+          // когда ОБЕ стороны дороги заняты встречными — реальная машина не
+          // выезжает под поток. Инвариант [№13] держит свип закрытия [G2]:
+          // корпус выезжающей НЕ на линии шлагбаума, ворота закроются сами
+          // (очередь [G3] держит их легально).
+          if (agent.type === 'car' && agent.direction === 'exit' && gate) {
+            const curCy0 = el.y + el.height / 2
+            const origSide0: 'left' | 'right' = agent.afterTarget.x < el.x ? 'left' : 'right'
+            const otherSide0: 'left' | 'right' = origSide0 === 'left' ? 'right' : 'left'
+            const busyOrig0 = roadSideBusyForDeparture(aiAgents.value, agent, gate, sceneSize.value.width, origSide0)
+            const busyOther0 = roadSideBusyForDeparture(aiAgents.value, agent, gate, sceneSize.value.width, otherSide0)
+            if (!busyOrig0 || !busyOther0) {
+              const side0 = busyOrig0 ? otherSide0 : origSide0
+              const depX0 = side0 === 'left' ? -60 - el.width / 2 : sceneSize.value.width + 60 + el.width / 2
+              agent.afterTarget = { x: depX0, y: curCy0, width: 0, height: 0 }
+              agent.state = 'moving_away'
+              agent.target = { x: agent.afterTarget.x, y: agent.afterTarget.y, width: 0, height: 0 }
+              waitAfterByAgentId.delete(agent.id)
+              gateCloseWaitByAgentId.delete(agent.id)
+              continue
+            }
+            // обе стороны заняты — прежний сценарий: корректор + ожидание
+            // закрытия (блок ниже), уезд после закрытия
+          }
           if (!gateGone && !fullyClosed && !queueHoldsGate) {
+            // [№20-КОРРЕКТОР-ТОЧКИ] выезжающая машина ждёт закрытия там, где
+            // ей позволила ситуация на момент завершения прохода: свободная
+            // полоса — сразу на линии ожидания въезжающих (цель прохода,
+            // см. startCrossing [№20-БЕЗ-ВОЗВРАТА]), занятая — вверху на
+            // глубокой посадке. Пока ворота не закрылись, точка ожидания
+            // ПЕРЕСЧИТЫВАЕТСЯ (репорт №20: «ждать вверху можно только если
+            // в это время стоит или подъезжает другая машина»):
+            //   • полоса освободилась — плавно спускаемся на линию;
+            //   • встречная встала/подъехала — поднимаемся на посадку,
+            //     освобождая линию въезжающим.
+            // Ход вертикальный по оси ворот в обе стороны; путь проверяется
+            // (чужой корпус между мной и точкой — стоим). Встав на точку,
+            // переписываем afterTarget.y — уезд после закрытия строго вбок
+            // по фактической полосе ([№19-СТОП-ЛИНИЯ], тесты сохранены).
+            if (agent.type === 'car' && agent.direction === 'exit' && gate) {
+              const lineY = exitWaitCenterY(gate, el.height)
+              const spotY = exitLaneBusy(aiAgents.value, agent, gate)
+                ? (Number.isFinite(agent.exitPoint?.y) ? agent.exitPoint!.y : lineY)
+                : lineY
+              const curCy = el.y + el.height / 2
+              const remain = spotY - curCy
+              if (Math.abs(remain) > 2) {
+                const dirY = Math.sign(remain)
+                const pathBusy = aiAgents.value.some(o => {
+                  if (o.id === agent.id || o.type !== 'car' || o.state === 'done') return false
+                  const rxc = (o.element.x + o.element.width / 2) - (el.x + el.width / 2)
+                  const ryc = (o.element.y + o.element.height / 2) - curCy
+                  const fwd = ryc * dirY
+                  return fwd > 10 && fwd < Math.abs(remain) + 30 && Math.abs(rxc) < 50
+                })
+                if (!pathBusy) {
+                  const step = Math.min(CAR_YIELD_SPEED * dt, Math.abs(remain))
+                  el.y += dirY * step
+                  el.velocity = CAR_YIELD_SPEED
+                  continue
+                }
+                // путь к точке занят — ждём закрытия, где стоим (velocity уже 0)
+              } else if (Number.isFinite(agent.afterTarget?.y) &&
+                         Math.abs(agent.afterTarget.y - curCy) > 1) {
+                agent.afterTarget = { ...agent.afterTarget, y: curCy, width: 0, height: 0 }
+              }
+            }
             // [№13] предохранитель настраивается (gateCloseWaitMax) — в
             // тестах с «вечно открытыми» воротами укорачивается; по умолчанию
             // покрывает максимальный gateCloseDelay + анимацию закрытия
@@ -935,6 +1082,25 @@ export function useSimulatorPhysics(
           if (agent.direction === 'enter' && exitCarBlocksCorridor(agent)) {
             console.warn('[car-left-departure] коридор уезда занят выезжающей — уезд налево:', agent.id)
             agent.afterTarget = { x: -60 - el.width / 2, y: el.y + el.height / 2, width: 0, height: 0 }
+          }
+          // [№20-УЕЗД] выезжающая уезжает вбок по ФАКТИЧЕСКОЙ полосе и в
+          // сторону, где на дороге нет встречных въезжающих (реальная
+          // машина не выезжает под поток; после [№20-БЕЗ-ВОЗВРАТА] точка
+          // ожидания может совпадать с полосой дороги). Въезжающим уезд не
+          // трогаем: у них канонический ход вниз/налево по [№12].
+          if (agent.type === 'car' && agent.direction === 'exit') {
+            const curCy = el.y + el.height / 2
+            const origSide: 'left' | 'right' = agent.afterTarget.x < el.x ? 'left' : 'right'
+            let depX = agent.afterTarget.x
+            if (gate) {
+              const other: 'left' | 'right' = origSide === 'left' ? 'right' : 'left'
+              const busyOrig = roadSideBusyForDeparture(aiAgents.value, agent, gate, sceneSize.value.width, origSide)
+              const side = busyOrig && !roadSideBusyForDeparture(aiAgents.value, agent, gate, sceneSize.value.width, other)
+                ? other
+                : origSide
+              depX = side === 'left' ? -60 - el.width / 2 : sceneSize.value.width + 60 + el.width / 2
+            }
+            agent.afterTarget = { x: depX, y: curCy, width: 0, height: 0 }
           }
           agent.state = 'moving_away'
           agent.target = { x: agent.afterTarget.x, y: agent.afterTarget.y, width: 0, height: 0 }
@@ -1094,6 +1260,17 @@ export function useSimulatorPhysics(
           }
         } 
         else if (agent.state === 'crossing') {
+          // [№21-ТВОР] прибытие в КОНЕЦ фазы выравнивания: разворачиваем цель
+          // на сквозную точку (exitPoint — ось проёма за калиткой) и продолжаем
+          // проход без смены состояния/слоя — переходы ниже не для этой фазы.
+          if (crossAlignByAgentId.has(agent.id)) {
+            crossAlignByAgentId.delete(agent.id)
+            const ex = agent.exitPoint
+            if (ex && Number.isFinite(ex.x) && Number.isFinite(ex.y)) {
+              agent.target = { x: ex.x, y: ex.y, width: 0, height: 0 }
+              continue
+            }
+          }
           // [ФИКС-РЫВОК-ПОСЛЕ-КАЛИТКИ] скорость на стыке crossing ->
           // moving_away НЕ обнуляется: обнуление на 1-2 кадра ставило анимацию
           // ходьбы на паузу (гистерезис is-paused) посреди шага — видимый
@@ -1132,10 +1309,18 @@ export function useSimulatorPhysics(
                 // [ФИКС-очередь] мгновенное закрытие после КАЖДОГО прошедшего
                 // глушило калитку, даже если у неё ещё ждут люди (в таймерной
                 // ветке проверка hasOtherWaiting есть, здесь — не было)
+                // [№22-ТОЛПА] очередь калитки — это и ВСТРЕЧНЫЕ ждущие
+                // (dirBlock): они стоят у прохода легально (очерёдность
+                // направлений) и пройдут следом по той же открытой калитке.
+                // Раньше калитка закрывалась перед их носом (dirBlock-люди
+                // не считались ждущими), и толпа по обе стороны стопорилась
+                // до повторной разблокировки охранником. У машин прежняя
+                // семантика: dirBlock/carBackoff — манёвр уступания [G2].
                 const hasOtherWaiting = aiAgents.value.some(a =>
-                  a.state === 'waiting_before' && !dirBlockByAgentId.has(a.id) && !carBackoffByAgentId.has(a.id) &&
+                  a.state === 'waiting_before' &&
                   ((a.type === 'person' && String(gate.id) === cfg.personGateId) ||
-                   (a.type === 'car' && String(gate.id) === cfg.carGateId))
+                   (a.type === 'car' && String(gate.id) === cfg.carGateId &&
+                    !dirBlockByAgentId.has(a.id) && !carBackoffByAgentId.has(a.id)))
                 )
                 if (!hasOtherWaiting) closeGateFn(gate)
               }
@@ -1144,10 +1329,14 @@ export function useSimulatorPhysics(
                 const timer = setTimeout(() => {
                   const currentGate = simElements.value.find(g => String(g.id) === gateId)
                   if (currentGate && currentGate.settings?.isOpen && !currentGate.settings?.isAnimating && !currentGate.settings?.isStopping) {
+                    // [№22-ТОЛПА] как в мгновенной ветке: очередь калитки
+                    // включает встречных ждущих (dirBlock) — см. [G3]
+                    // gateHasQueue, с которой эта проверка теперь согласована.
                     const hasOtherWaiting = aiAgents.value.some(a =>
-                      a.state === 'waiting_before' && !dirBlockByAgentId.has(a.id) && !carBackoffByAgentId.has(a.id) &&
+                      a.state === 'waiting_before' &&
                       ((a.type === 'person' && String(currentGate.id) === cfg.personGateId) ||
-                      (a.type === 'car' && String(currentGate.id) === cfg.carGateId))
+                       (a.type === 'car' && String(currentGate.id) === cfg.carGateId &&
+                        !dirBlockByAgentId.has(a.id) && !carBackoffByAgentId.has(a.id)))
                     )
                     if (!hasOtherWaiting) closeGateFn(currentGate)
                   }
@@ -1352,6 +1541,10 @@ export function useSimulatorPhysics(
       let personNearAhead = Infinity
       let standingAhead = false
       let oncomingAhead = false
+      // [№21-ВСТРЕЧНЫЕ] ближайший встречный САМ ИДЁТ (не ждёт): тормозить
+      // перед ним не обязательно — расходятся боковым шагом «каждый правее»
+      // на полном ходу (репорт №21)
+      let oncomingMovingAhead = false
       if (agent.type === 'person') {
         let near2 = Infinity
         for (const other of aiAgents.value) {
@@ -1372,7 +1565,13 @@ export function useSimulatorPhysics(
             // для него работает дрейф «держись правее» — иначе пара
             // встречных тормозит и расходится только за счёт толчка
             const oRot = other.element.rotation || 0
-            if (Math.cos(oRot) * dirX + Math.sin(oRot) * dirY < -0.3) oncomingAhead = true
+            if (Math.cos(oRot) * dirX + Math.sin(oRot) * dirY < -0.3) {
+              oncomingAhead = true
+              // [№21-ВСТРЕЧНЫЕ] встречный движется сам — торможение не нужно
+              if ((other.element.velocity || 0) > 0.5 && other.state !== 'waiting_before') {
+                oncomingMovingAhead = true
+              }
+            }
           }
           // [БАГ-РЕПОРТ-4-ТОЛЧОК] стоящий человек прямо на курсе — ПОЛНАЯ
           // остановка на безопасной дистанции: раньше пол 14 px/с
@@ -1394,7 +1593,10 @@ export function useSimulatorPhysics(
         if (standingAhead && !bypassActive) {
           targetSpeed = 0
           holdByAgentId.set(agent.id, 'standing') // [БАГ-РЕПОРТ-7] человек на курсе
-        } else if (personNearAhead < PERSON_SEP_RADIUS * 1.6) {
+        } else if (!oncomingMovingAhead && personNearAhead < PERSON_SEP_RADIUS * 1.6) {
+          // [№21-ВСТРЕЧНЫЕ] кап скорости НЕ применяется к паре движущихся
+          // встречных: они расходятся боковым шагом «каждый правее» без
+          // притормаживания. Кап остаётся для попутного/стоящего впереди.
           targetSpeed = Math.min(targetSpeed, Math.max(14, personNearAhead * 0.5))
           holdByAgentId.set(agent.id, 'person-near') // [БАГ-РЕПОРТ-7] ползём за пешеходом
         }
@@ -1413,7 +1615,7 @@ export function useSimulatorPhysics(
       // шарканье), машина 20 -> 24 px/с и 0.55 -> 0.7 (выезжающая проползала
       // последние 56px почти 3с). Подход живее, рывков нет: скорость к
       // прибытию монотонно сходится, шаг кадра <= остатка дистанции.
-      if (dist < 80) {
+      if (arrivalBrake && dist < 80) {
         const brakeFloor = agent.type === 'person' ? 11 : 24
         const brakeGain = agent.type === 'person' ? 0.6 : 0.7
         let brakeCap = Math.max(brakeFloor, dist * brakeGain)
@@ -1474,11 +1676,16 @@ export function useSimulatorPhysics(
       // Фаза ног ∝ пути (№12), поэтому любой разгон-рампа был виден как
       // «ноги набирают темп» — теперь шаг с места начинается сразу в
       // естественном ритме CSS-анимации. Торможение осталось плавным (DECEL).
-      const accel = Math.min(ACCEL, 60)
+      // [№20-ПЛАВНОСТЬ] скорость теперь у ВСЕХ агентов меняется рампом:
+      // люди — 110 px/с² (шаг с места ~0.4с; торможение прежнее, DECEL*2 —
+      // резкая остановка перед препятствием это безопасность), машины —
+      // прежние min(ACCEL, 60). Прежде у людей targetSpeed применялся
+      // мгновенно, а пересчитывается он каждым из ~10 правил уступания —
+      // переключение правила было видимым скачком скорости. Фаза ног
+      // ∝ пройденному пути (№12), поэтому рамп темп шага не искажает.
+      const accel = agent.type === 'person' ? PERSON_ACCEL : Math.min(ACCEL, 60)
       if ((el.velocity || 0) < targetSpeed) {
-        el.velocity = agent.type === 'person'
-          ? targetSpeed
-          : Math.min(targetSpeed, (el.velocity || 0) + accel * dt)
+        el.velocity = Math.min(targetSpeed, (el.velocity || 0) + accel * dt)
       } else {
         el.velocity = Math.max(targetSpeed, (el.velocity || 0) - DECEL * dt * 2)
       }
@@ -1603,9 +1810,20 @@ export function useSimulatorPhysics(
           // дрейфа встречные проходят друг сквозь друга
           // [№13-НЕ-СКВОЗЬ] дрейф включают только встречный/стоящий впереди:
           // от попутчика не смещаемся (см. комментарий выше)
-          if (personNearAhead < PERSON_SEP_RADIUS && (standingAhead || oncomingAhead)) {
-            el.x += -dirY * PERSON_YIELD_SPEED * dt
-            el.y += dirX * PERSON_YIELD_SPEED * dt
+          // [№21-ВСТРЕЧНЫЕ] пара движущихся встречных расходится БЕЗ
+          // торможения: дрейф стартует раньше (радиус ×1.5) и идёт в темп
+          // бокового шага PERSON_SEP_SPEED (вместо вежливых 22 px/с), чтобы
+          // на полном ходу корпуса успели разойтись. Каждый смещается к СВОЕЙ
+          // правой руке: (-dirY, dirX) — встречные уходят в противоположные
+          // стороны автоматически.
+          const yieldOncoming = oncomingMovingAhead && !standingAhead
+          const driftRadius = yieldOncoming ? PERSON_SEP_RADIUS * 1.5 : PERSON_SEP_RADIUS
+          const driftSpeed = yieldOncoming ? PERSON_SEP_SPEED : PERSON_YIELD_SPEED
+          if (personNearAhead < driftRadius && (standingAhead || oncomingAhead)) {
+            el.x += -dirY * driftSpeed * dt
+            // [№20-3б] дрейф «держись правее» не заносит корпус на забор
+            const nextY = el.y + dirX * driftSpeed * dt
+            el.y = personGate ? limitPersonPushY(el, personGate, nextY) : nextY
           }
           if (mRaw > 0.01 && maxW > 0) {
             // [ФИКС-ЕСТЕСТВЕННОСТЬ] оставляем только перпендикулярную к курсу
@@ -1617,7 +1835,9 @@ export function useSimulatorPhysics(
             if (m > 0.01) {
               const push = maxW * PERSON_SEP_SPEED * dt
               el.x += (perpX / m) * push
-              el.y += (perpY / m) * push
+              // [№20-3б] сепарация не выносит корпус на линию забора
+              const nextY = el.y + (perpY / m) * push
+              el.y = personGate ? limitPersonPushY(el, personGate, nextY) : nextY
             }
           }
         }
@@ -1629,6 +1849,20 @@ export function useSimulatorPhysics(
       if (el.x + el.width < -DESPAWN_MARGIN || el.x > sceneSize.value.width + DESPAWN_MARGIN ||
           el.y + el.height < -DESPAWN_MARGIN || el.y > sceneSize.value.height + DESPAWN_MARGIN) {
         agent.state = 'done'
+      }
+    }
+
+    // [№20-КАЛИТКА-ЗАБОР] люди заходят/выходят только в проём калитки:
+    // после всех смещений кадра корпус человека не пересекает линию забора
+    // вне проёма (толкания/уступания/дрейф у калитки скользят вдоль линии,
+    // а не сквозь забор — «как будто по краям калитки есть забор»). Во
+    // время crossing клэмп не применяется: путь прохода вертикален в проёме.
+    if (personGate) {
+      for (const agent of aiAgents.value) {
+        if (agent.type !== 'person' || agent.state === 'crossing' || agent.state === 'done') continue
+        // сторона возврата — сторона цели (куда человек направляется),
+        // темп ограничен: толчок, а не телепорт (см. gateFlow.clampPersonToFence)
+        clampPersonToFence(agent.element, personGate, agent.target?.y, dt)
       }
     }
 

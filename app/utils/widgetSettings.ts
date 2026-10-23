@@ -17,6 +17,8 @@ export interface SimulatorWidgetSettings {
   // [№15-ЗВУК] громкость/тишина симулятора (кнопка mute в хедере + слайдер в поповере)
   volume: number | null // 0..1, null = дефолт 0.6
   muted: boolean
+  // [№21-ТОРМОЖЕНИЕ] плавное торможение у точки останова (эксперимент заказчика)
+  arrivalBrake: boolean
 }
 
 export const WIDGET_SETTINGS_KEY = 'jkpp-sim-widget-settings-v1'
@@ -31,6 +33,7 @@ export const defaultWidgetSettings = (): SimulatorWidgetSettings => ({
   maxNonFamily: null,
   volume: null,
   muted: false,
+  arrivalBrake: true,
 })
 
 // [№15] только числовые ключи: keyof-универсал после добавления volume/muted
@@ -72,6 +75,7 @@ export const loadWidgetSettings = (storage: Storage | null): SimulatorWidgetSett
       }
       out.volume = toVolumeOrNull(rec.volume)
       out.muted = rec.muted === true
+      out.arrivalBrake = rec.arrivalBrake !== false
     }
   } catch (e) {
     console.warn('[widget-settings] не удалось прочитать, использую дефолты', e)
@@ -86,6 +90,7 @@ export const saveWidgetSettings = (storage: Storage | null, s: SimulatorWidgetSe
     for (const key of WIDGET_KEYS) clean[key] = toNumOrNull(s[key])
     clean.volume = toVolumeOrNull(s.volume)
     clean.muted = s.muted === true
+    clean.arrivalBrake = s.arrivalBrake !== false
     storage.setItem(WIDGET_SETTINGS_KEY, JSON.stringify(clean))
   } catch (e) {
     console.warn('[widget-settings] не удалось сохранить', e)

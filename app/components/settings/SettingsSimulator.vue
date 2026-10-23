@@ -160,6 +160,10 @@
               label.label
                 span.label-text Закрытие калитки (сек)
               input.input.input-sm.input-bordered(type="number" v-model.number="simSettings.wicketCloseDelay" step="1" min="0")
+            .form-control
+              label.label(title="Сколько секунд приоткрытая калитка ждёт людей, прежде чем захлопнуться самой")
+                span.label-text Захлоп приоткрытой (сек)
+              input.input.input-sm.input-bordered(type="number" v-model.number="simSettings.wicketAjarTimeout" step="1" min="5")
           .grid.grid-cols-2.gap-4.mt-2
             .form-control
               label.label.cursor-pointer
@@ -173,6 +177,10 @@
               label.label.cursor-pointer(title="Выключите, чтобы журнал заполнялся вручную — заработают бонусы и штрафы за записи")
                 span.label-text Автозапись журнала
                 input.toggle.toggle-sm.toggle-primary(type="checkbox" v-model="simSettings.autoJournal")
+            .form-control
+              label.label.cursor-pointer(title="Эксперимент с рывками: отключите финальное торможение у точки ожидания и сравните плавность")
+                span.label-text Финальное торможение
+                input.toggle.toggle-sm.toggle-primary(type="checkbox" v-model="simSettings.finalBrake")
 </template>
 
 <script setup lang="ts">

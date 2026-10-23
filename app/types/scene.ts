@@ -69,6 +69,10 @@ export interface Panel {
   borderColor?: string
   /** Режим docks панели ('none' | 'top' | ... — управляет PanelUI) */
   dock?: string
+  /** [№17] Прозрачность подложки 0..1; по умолчанию 0.6 (полупрозрачно) */
+  bgOpacity?: number
+  /** [№17] Матирование подложки: радиус backdrop-blur в px; по умолчанию 6 */
+  blur?: number
 }
 
 export interface LogicBlock {

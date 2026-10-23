@@ -83,19 +83,20 @@ describe('потолок разгона машин 60 px/с² ([П2])', () => {
     expect(car.element.velocity).toBeLessThanOrEqual(31)
   })
 
-  it('люди НЕ ускоряются вообще: скорость сразу равна целевой ([№13])', () => {
+  it('люди разгоняются мягким рампом 110 px/с² ([№20-ПЛАВНОСТЬ])', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     const h = buildPhysics()
     const person = mkPerson('p-1', 1000, 400, 40) as any
     h.aiAgents.value = [person]
     h.physics.updateAiMovement(DT, { carGateId: '', personGateId: '' })
-    // [№13-НОГИ] фаза ног ∝ пути (№12): любой разгон-рампа был бы виден
-    // как «ноги набирают темп». Скорость = целевая с первого кадра.
-    expect(person.element.velocity).toBe(40)
+    // [№20-ПЛАВНОСТЬ] скорость человека больше не мгновенная: рамп сглаживает
+    // переключения правил уступания (главный источник «дёргания» после
+    // смены поведения агентов). Первый кадр = 110 * 0.1 = 11 px/с.
+    expect(person.element.velocity).toBeCloseTo(11, 5)
     for (let i = 0; i < 3; i++) {
       h.physics.updateAiMovement(DT, { carGateId: '', personGateId: '' })
     }
-    // рампы нет: скорость не растёт постепенно, а сразу равна крейсерской
+    // 0.4с * 110 = 44 -> упёрлись в крейсерскую 40
     expect(person.element.velocity).toBe(40)
   })
 })

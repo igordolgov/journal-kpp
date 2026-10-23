@@ -55,6 +55,8 @@
         :selected-element="selectedElement"
         :selected-control="selectedControl"
         :selected-control-panel-id="selectedControlPanelId"
+        :panels="sceneConfig.panels"
+        :selected-panel-id="panelSelectedId"
         :settings="sceneConfig.settings"
         :scene-elements="sceneConfig.elements"
         @update:panel="handleUpdatePanel"
@@ -244,6 +246,7 @@ const controlSelectedId = ref<string | null>(null)
 
 const onSelectPanel = (id: string | null) => {
   panelSelectedId.value = id
+  controlSelectedId.value = null // [№18] панель выбрана - кнопка снята, инспектор показывает панель
   if (selectPanel) selectPanel(id)
 }
 

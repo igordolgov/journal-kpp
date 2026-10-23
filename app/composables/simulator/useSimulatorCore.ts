@@ -23,6 +23,15 @@ import {
   GATES_LIST
 } from '~/utils/simulatorConstants'
 import { LAYER_CONFIG } from '~/constants/library'
+// [№17-ПРЫЖОК] интерполяция рендера теперь и в ШАБЛОННЫХ стилях: при любом
+// структурном ререндере (спавн/деспавн/метки/команды) Vue переписывал
+// transform агентов ТЕКУЩЕЙ физпозицией, а paint-мост пишет интерполированную
+// (№15) — патч выставлял агента вперёд на (1-альфа)*шаг (до 2-3мм на неровных
+// кадрах) и paint возвращал обратно. paintCoord делает обе записи одинаковыми:
+// патч пишет ту же строку, что уже стоит в DOM, и позиция не меняется вовсе.
+import { paintCoord } from '~/utils/simulatorPaint'
+// [№21-КАЛИТКА-В-ЖИЗНИ] параметры приоткрытия и таймаута захлопывания
+import { WICKET_AJAR_SCALE, WICKET_AJAR_TIMEOUT_S } from '~/utils/gateFlow'
 import { generateSlidingGateSVG, generateWicketSVG } from '~/constants/library'
 import type { SceneElement } from '~/types/simulator'
 
@@ -40,19 +49,40 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
   // полная зачистка при смене сцены и unmount.
   const gateTweens = new Map<string, gsap.core.Tween>()
 
+  // [№22-КНОПКИ] цель активного твина ворот: open=true — открывается
+  // (полно или приоткрывается), open=false — закрывается. Нужен, чтобы
+  // кнопки калитки работали В ЛЮБОЙ фазе анимации: закрывающуюся можно
+  // перехватить (приоткрыть), открывающуюся — захлопнуть.
+  const gateTweenTarget = new Map<string, { open: boolean; ajar: boolean }>()
+
   // Убить все твины ворот (без вызова onComplete у каждого — так работает GSAP).
   // Вызывается при смене сцены, unmount и ручном сбросе.
   const killAllGateTweens = () => {
     gateTweens.forEach(tween => tween.kill())
     gateTweens.clear()
+    gateTweenTarget.clear()
   }
 
   // Автоматическая зачистка при размонтировании.
   // [ИСПРАВЛЕНО] добавлен resetPool('gate-active'): kill твина не триггерит
   // onComplete, а мотор ворот — Зацикленный звук; без сброса он играл вечно
   // после unmount симулятора.
+  // [№21-КАЛИТКА-В-ЖИЗНИ] таймеры приоткрытия: калитка, разблокированная
+  // охранником и никем не открытая, захлопывается сама через 15 с
+  const wicketAjarTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  const clearAjarTimer = (gateId: string) => {
+    const t = wicketAjarTimers.get(gateId)
+    if (t) clearTimeout(t)
+    wicketAjarTimers.delete(gateId)
+  }
+  const clearAllAjarTimers = () => {
+    for (const t of wicketAjarTimers.values()) clearTimeout(t)
+    wicketAjarTimers.clear()
+  }
+
   onScopeDispose(() => {
     killAllGateTweens()
+    clearAllAjarTimers()
     audio.resetPool('gate-active')
   })
 
@@ -161,6 +191,7 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
     // 2) resetPool('gate-active') — kill не вызывает onComplete, а мотор
     //    зациклен: без сброса звук играл бы до конца таймлайна и дольше.
     killAllGateTweens()
+    clearAllAjarTimers()
     audio.resetPool('gate-active')
 
     if (config && config.elements) {
@@ -188,7 +219,10 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
   // «дёргание перед точкой останова». translate3d выносит элемент на
   // композитный слой: смещение применяется на GPU с субпиксельной точностью,
   // layout не пересчитывается вовсе. Для машин и людей добавлен will-change.
-  const getElementStyle = (el: SceneElement, enableRotation: boolean) => {
+  // [№17-ПРЫЖОК] alpha — доля подшага для интерполяции (см. paintCoord):
+  // по умолчанию 1 = прежнее поведение (текущая позиция); виджет передаёт
+  // lastPaintAlpha, чтобы шаблонный патч совпадал с покадровой записью paint.
+  const getElementStyle = (el: SceneElement, enableRotation: boolean, alpha = 1) => {
     const moving = el.category === 'car' || el.category === 'human'
     const base: Record<string, string | number> = {
       position: 'absolute' as const,
@@ -197,7 +231,7 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
       width: `${el.width}px`,
       height: `${el.height}px`,
       zIndex: el.zIndex || 1,
-      transform: `translate3d(${el.x}px, ${el.y}px, 0)`,
+      transform: `translate3d(${paintCoord(el as any, 'x', alpha)}px, ${paintCoord(el as any, 'y', alpha)}px, 0)`,
     }
     if (moving) base.willChange = 'transform'
     if (el.category === 'car') {
@@ -233,18 +267,22 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
     }
   }
 
-  const startGateAnimation = (el: SceneElement, targetOpen: boolean) => {
+  const startGateAnimation = (el: SceneElement, targetOpen: boolean, ajarScale?: number) => {
     const gateId = String(el.id)
     if (!el.settings) el.settings = {}
     gateTweens.get(gateId)?.kill()
     el.settings.isAnimating = true
     el.settings.isStopped = false
+    gateTweenTarget.set(gateId, { open: targetOpen, ajar: ajarScale != null })
 
     const isWicket = el.settings?.gateType === 'wicket' || (el.width && el.width <= 60)
 
     if (isWicket) {
-      if (targetOpen) {
-        audio.playFromPool('wicket-sound', 'wicket-lock', 0.6)
+      // [№21-КАЛИТКА-В-ЖИЗНИ] звук ПОЛНОГО открытия — скрип (дверь
+      // толкнули люди). Щелчок замка играет unlockWicket при
+      // разблокировке; само приоткрытие сверх щелчка беззвучно.
+      if (targetOpen && !ajarScale) {
+        audio.playFromPool('wicket-sound', 'wicket-creak', 0.6)
       }
     } else {
       audio.resetPool('gate-active')
@@ -256,9 +294,14 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
     const vars: gsap.TweenVars = {
       ease: "none",
       onComplete: () => {
-        el.settings.isOpen = targetOpen
+        // [№21-КАЛИТКА-В-ЖИЗНИ] приоткрытие (ajarScale) НЕ делает калитку
+        // открытой: пройти можно только после полного открытия людьми.
+        // Полное закрытие сбрасывает разблокировку.
+        el.settings.isOpen = targetOpen && !ajarScale
+        if (isWicket && !targetOpen) el.settings.isAjar = false
         el.settings.isAnimating = false
         gateTweens.delete(gateId)
+        gateTweenTarget.delete(gateId)
 
         if (isWicket) {
           // [ИСПРАВЛЕНО] звук удара — только если калитка ещё на сцене
@@ -276,7 +319,7 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
 
     if (isWicket) {
       const currScale = el.settings._animScaleX ?? 1
-      const targetScale = targetOpen ? 0.1 : 1
+      const targetScale = targetOpen ? (ajarScale ?? 0.1) : 1
       const totalDistance = 0.9
       const remainingDistance = Math.abs(targetScale - currScale)
       if (remainingDistance < totalDistance && remainingDistance > 0) {
@@ -312,6 +355,7 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
       for (const [gateId, tween] of Array.from(gateTweens.entries())) {
         if (tween && tween.isActive()) continue
         gateTweens.delete(gateId)
+        gateTweenTarget.delete(gateId)
         const gate = simElements.value.find(g => String(g.id) === gateId)
         if (gate?.settings?.isAnimating) {
           gate.settings.isAnimating = false
@@ -337,6 +381,44 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
     }
   }
 
+  // [№21-КАЛИТКА-В-ЖИЗНИ] разблокировка калитки охранником (кнопка «КАЛИТКА
+  // ОТКРЫТЬ» или клик по калитке): звук щелчка замка + приоткрытие — видно,
+  // что она не заблокирована. Полностью открывают подошедшие люди (физика
+  // вызывает openGateFn). Если за WICKET_AJAR_TIMEOUT_S её никто не открыл —
+  // захлопывается сама (сламп в onComplete закрытия).
+  const unlockWicket = (el: SceneElement): boolean => {
+    if (!GATES_LIST.includes(el.category || '')) return false
+    if (!el.settings) el.settings = {}
+    const isWicket = el.settings.gateType === 'wicket' || (el.width && el.width <= 60)
+    if (!isWicket) return false
+    // [№22-КНОПКИ] кнопка обязана отвечать в любой фазе:
+    //  • открывается (приоткрытие или люди толкают) — просьба уже исполняется;
+    //  • ЗАКРЫВАЕТСЯ — перехват: закрывающуюся дверь можно остановить и
+    //    приоткрыть в любой момент; твин пересчитывается по остатку пути;
+    //  • открыта — делать нечего;
+    //  • закрыта — щелчок замка + приоткрытие (№21).
+    const tgt = gateTweenTarget.get(String(el.id))
+    if (el.settings.isAnimating && tgt?.open) return true
+    // isOpen остается true до конца закрывающего
+    // твина (GSAP ставит его в onComplete), поэтому
+    // «уже открыта» = открыта и НЕ анимируется.
+    if (el.settings.isOpen && !el.settings.isAnimating) return true
+    el.settings.isAjar = true
+    audio.playFromPool('wicket-sound', 'wicket-lock', 0.7)
+    startGateAnimation(el, true, WICKET_AJAR_SCALE)
+    const gid = String(el.id)
+    clearAjarTimer(gid)
+    wicketAjarTimers.set(gid, setTimeout(() => {
+      wicketAjarTimers.delete(gid)
+      const g = simElements.value.find(x => String(x.id) === gid)
+      if (g && g.settings?.isAjar && !g.settings?.isOpen && !g.settings?.isAnimating) {
+        console.warn('[wicket-ajar] калитку никто не открыл — захлопывается:', gid)
+        closeGate(g)
+      }
+    }, WICKET_AJAR_TIMEOUT_S * 1000))
+    return true
+  }
+
   const handleGateClick = (el: SceneElement) => {
     if (!GATES_LIST.includes(el.category || '')) return false
     if (!el.settings) el.settings = {}
@@ -347,6 +429,23 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
       else el.settings.gateType = (el.width && el.width > 60) ? 'sliding' : 'wicket'
     }
 
+    // [№21-КАЛИТКА-В-ЖИЗНИ] клик по калитке = разблокировка: щелчок замка +
+    // приоткрытие; полностью открывают подошедшие люди. Открытую — закрыть.
+    const isWicketClick = el.settings.gateType === 'wicket' || (el.width && el.width <= 60)
+    if (isWicketClick) {
+      // [№22-КНОПКИ] мёртвых фаз больше нет. isOpen=true действует
+      // до конца закрывающего твина, поэтому фазу берём из
+      // gateTweenTarget: закрывающуюся — перехватить (unlock),
+      // открывающуюся — не мешать; стоящую открытую — закрыть;
+      // закрытую — разблокировать.
+      if (el.settings.isAnimating) {
+        const tgt = gateTweenTarget.get(String(el.id))
+        if (tgt && !tgt.open) return unlockWicket(el)
+        return true
+      }
+      if (el.settings.isOpen) return closeGate(el)
+      return unlockWicket(el)
+    }
     if (el.settings.isStopped) {
       startGateAnimation(el, !el.settings.isOpen)
       return true
@@ -360,6 +459,12 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
     if (!GATES_LIST.includes(el.category || '')) return false
     if (!el.settings) el.settings = {}
     if (el.settings.isAnimating) return false
+    // [№21-КАЛИТКА-В-ЖИЗНИ] полное открытие = дверь толкнули: снимаем
+    // разблокировку и её таймер захлопывания
+    if (el.settings.gateType === 'wicket' || (el.width && el.width <= 60)) {
+      el.settings.isAjar = false
+      clearAjarTimer(String(el.id))
+    }
     startGateAnimation(el, true)
     return true
   }
@@ -367,7 +472,21 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
   const closeGate = (el: SceneElement): boolean => {
     if (!GATES_LIST.includes(el.category || '')) return false
     if (!el.settings) el.settings = {}
-    if (el.settings.isAnimating) return false
+    // [№22-КНОПКИ] «КАЛИТКА ЗАКРЫЛЬ» обязана работать в любой фазе:
+    //  • уже закрыта — холостой твин и сламп не нужны;
+    //  • уже закрывается — просьба исполняется;
+    //  • открывается людьми — охранник вправе захлопнуть: твин
+    //    перехватывается и закрывает с текущего положения.
+    // Откатные ворота — прежняя семантика (инварианты [G2]/свип закрытия).
+    const isWicket = el.settings.gateType === 'wicket' || (el.width && el.width <= 60)
+    if (isWicket) {
+      const tgt = gateTweenTarget.get(String(el.id))
+      if (el.settings.isAnimating && tgt && !tgt.open) return true
+      if (!el.settings.isOpen && !el.settings.isAnimating && !el.settings.isAjar) return true
+    } else {
+      if (el.settings.isAnimating) return false
+    }
+    clearAjarTimer(String(el.id))
     startGateAnimation(el, false)
     return true
   }
@@ -388,23 +507,12 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
     return true
   }
 
-  const openGateWithSound = (gate: SceneElement): boolean => {
-    if (!gate.settings) gate.settings = {}
-    const isWicket = gate.settings.gateType === 'wicket' || (gate.width && gate.width <= 60)
-    if (isWicket) {
-      audio.playFromPool('wicket-sound', 'wicket-creak', 0.6)
-    }
-    return openGate(gate)
-  }
+  // [№21-КАЛИТКА-В-ЖИЗНИ] звуки переехали: скрип — в startGateAnimation
+  // (полное открытие), щелчок замка — в unlockWicket, сламп — в onComplete
+  // закрытия. Обёртки больше не дублируют звук калитки.
+  const openGateWithSound = (gate: SceneElement): boolean => openGate(gate)
 
-  const closeGateWithSound = (gate: SceneElement): boolean => {
-    if (!gate.settings) gate.settings = {}
-    const isWicket = gate.settings.gateType === 'wicket' || (gate.width && gate.width <= 60)
-    if (isWicket) {
-      audio.playFromPool('wicket-sound', 'wicket-creak', 0.6)
-    }
-    return closeGate(gate)
-  }
+  const closeGateWithSound = (gate: SceneElement): boolean => closeGate(gate)
 
   return {
     fixedXPerson,
@@ -417,6 +525,7 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
     getLabelStyle,
     getGateStyle,
     handleGateClick,
+    unlockWicket,
     openGate,
     closeGate,
     stopGate,
@@ -426,5 +535,6 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
     killAllGateTweens,
     updateGateWatchdog,
     gateTweens,
+    gateTweenTarget,
   }
 }

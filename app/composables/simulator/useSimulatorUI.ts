@@ -2,6 +2,8 @@
 import { type Ref } from 'vue'
 import type { SceneElement } from '~/types/simulator'
 import { useAudioEngine } from '~/composables/useAudioEngine'
+// [№17] единая полупрозрачная матовая подложка панелей (симулятор = редактор)
+import { panelBackingStyle } from '~/utils/panelBacking'
 
 /**
  * Интерфейс активного переговорника.
@@ -23,7 +25,9 @@ export function useSimulatorUI(
   closeGateWithSound: (gate: SceneElement) => boolean,
   stopGate: (gate: SceneElement) => void,
   activeIntercoms: Ref<Set<ActiveIntercom>>,
-  activeCallButtonId: Ref<string | null>
+  activeCallButtonId: Ref<string | null>,
+  // [№21-КАЛИТКА-В-ЖИЗНИ] разблокировка калитки (щелчок замка + приоткрытие)
+  unlockWicketFn: (gate: SceneElement) => boolean = () => false
 ) {
   // Инициализируем аудио движок внутри функции (безопасно для SSR)
   const audio = useAudioEngine()
@@ -140,8 +144,12 @@ export function useSimulatorUI(
     // Выполнение действия
     switch (actionType) {
       case 'gate-open': 
-      case 'wicket-open': 
         openGateWithSound(targetGate); 
+        break
+      // [№21-КАЛИТКА-В-ЖИЗНИ] кнопка калитки больше НЕ открывает её
+      // полностью: щелчок замка + приоткрытие; полностью открывают люди
+      case 'wicket-open': 
+        unlockWicketFn(targetGate); 
         break
       case 'gate-close': 
       case 'wicket-close': 
@@ -155,12 +163,9 @@ export function useSimulatorUI(
 
   // --- Функции стилизации (преобразование настроек контрола в CSS-стили) ---
 
-  const getPanelStyle = (panel: any) => ({
-    left: `${panel.x ?? 0}px`, top: `${panel.y ?? 0}px`,
-    width: `${panel.width ?? 200}px`, height: `${panel.height ?? 150}px`,
-    backgroundColor: '#2d3748', border: '1px solid #4a5568', borderRadius: '6px',
-    zIndex: 9999, display: 'flex', flexDirection: 'column',
-  })
+  // [№17] подложка панели: полупрозрачная и матовая (frosted glass);
+  // цвет/прозрачность/размытие — настройки панели, задаются в редакторе
+  const getPanelStyle = (panel: any) => panelBackingStyle(panel || {})
 
   const getControlStyle = (ctrl: any) => {
     const s = ctrl.settings || {}

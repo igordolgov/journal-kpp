@@ -15,7 +15,7 @@ import {
 import { trafficPointsFor, FOOT_PAD_PERSON, type TrafficPoints } from '~/utils/simulatorTraffic'
 import { getCarSvg, generateRealPersonSvg } from '~/utils/simulatorSvg'
 // [П7] индивидуальный темп людей 0.85..1.15 (у группы — общий)
-import { randomPersonPace } from '~/utils/simTuning'
+import { randomPersonPace, randomFirstDelay } from '~/utils/simTuning'
 import type { SceneElement, Direction, TravelMode, TrafficConfig, AiAgent, PersonInfo } from '~/types/simulator'
 // [PAYROLL] реестр проходов (ground truth) и шина событий оплаты
 import { takePayrollPass } from '~/utils/payrollPass'
@@ -61,6 +61,13 @@ export function useSimulatorSpawn(
 
   let isFirstUpdate = true
 
+  // [№21-РАНДОМ] последние известные интервалы потоков: стартовые задержки
+  // рандомизируются ОТ НАСТРОЕК (см. resetSpawnTimers), а не фиксированными
+  // 10/14/20/25 с — иначе каждый запуск начинался с одного и того же
+  // сценария «пеший въезд, пеший выезд, авто въезд, авто выезд»
+  let lastPersonIntervalMin = 60
+  let lastCarIntervalMin = 90
+
   // [ФИКС-ЛИМИТ] бюджет «Макс. агентов»: сколько агентов фактически добавляет
   // текущий спавн. Раньше группа из 2-4 человек считалась ОДНИМ агентом
   // (attemptSpawn делал spawnedThisTickCount++ один раз), из-за чего на сцене
@@ -70,13 +77,16 @@ export function useSimulatorSpawn(
 
   const resetSpawnTimers = () => {
     spawnTimerPersonEnter = 0
-    nextSpawnTimePersonEnter = 10
+    // [№21-РАНДОМ] стартовые задержки — случайные окна от НАСТРОЕННОГО
+    // интервала (не фиксированные 10/14/20/25 с): первый сценарий каждого
+    // запуска разный, порядок первых событий непредсказуем
+    nextSpawnTimePersonEnter = randomFirstDelay(lastPersonIntervalMin, 0.15, 0.5, 6, 45)
     spawnTimerPersonExit = 0
-    nextSpawnPersonExit = 14
+    nextSpawnPersonExit = randomFirstDelay(lastPersonIntervalMin, 0.15, 0.5, 8, 50)
     spawnTimerCarEnter = 0
-    nextSpawnTimeCarEnter = 20
+    nextSpawnTimeCarEnter = randomFirstDelay(lastCarIntervalMin, 0.2, 0.7, 10, 60)
     spawnTimerCarExit = 0
-    nextSpawnCarExit = 25
+    nextSpawnCarExit = randomFirstDelay(lastCarIntervalMin, 0.2, 0.7, 12, 70)
     isFirstUpdate = true
   }
 
@@ -445,7 +455,12 @@ export function useSimulatorSpawn(
       // [СХЕМА-ТРАЕКТОРИЙ] выходящая машина стартует у базы — ПЕРЕД забором
       // (400), после прохода физика переведёт её за забор (150). Раньше было
       // zIndex 1 — машина пряталась за декорациями базы.
-      personId: driverPerson.id, direction, zIndex: direction === 'exit' ? 400 : 180,
+      // [№20-Z] машины «как люди» по z-индексу (репорт №20): въезжающая
+      // раньше имела 180 — была ПОВЕРХ и входящих людей (130-idx), и
+      // выходящих после прохода (150). Теперь въезжающая машина в полосе
+      // въезжающих (130) — под людьми и под выходящим потоком; выходящая
+      // по-прежнему 400 (полоса базы, над забором).
+      personId: driverPerson.id, direction, zIndex: direction === 'exit' ? 400 : 130,
       travelMode: 'car',
       // [БАГ-РЕПОРТ-4] начальная ориентация по стороне появления/уезда, до
       // первого тика физики: вход справа едет влево (зеркало), слева — вправо;
@@ -587,6 +602,11 @@ export function useSimulatorSpawn(
     maxAgents: number = 5   // по умолчанию 5
   ) => {
     if (!hasPeople) return
+
+    // [№21-РАНДОМ] запоминаем интервалы: стартовые задержки (resetSpawnTimers)
+    // рандомизируются от НАСТРОЕННЫХ значений, а не от констант
+    lastPersonIntervalMin = Math.max(5, Number(cfg.intervalMin) || 60)
+    lastCarIntervalMin = Math.max(10, Number(simOpts.value.carSpawnIntervalMin) || 90)
 
     // Удаляем завершённых агентов (синхронизация)
     aiAgents.value = aiAgents.value.filter(agent => agent.state !== 'done')
