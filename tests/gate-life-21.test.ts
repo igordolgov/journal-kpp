@@ -99,9 +99,10 @@ afterEach(() => {
 // 2) [№21-СТВОР] проход строго через проём после уступания
 // ---------------------------------------------------------------------------
 describe('[№21-СТВОР] входящий проходит строго через проём калитки', () => {
-  it('человек сбоку от оси: сначала выравнивание (цель = ось проёма на своей высоте), затем прямой проход', () => {
+  it('человек сбоку от оси: короткий отход от забора, затем плавная дуга в створ [№23-ДУГА]', () => {
     const h = buildHarness([makeWicket(true)])
-    // ждущий у калитки после уступания: стоит СБОКУ от оси (cx 520, ось 580)
+    // ждущий у калитки после уступания: стоит СБОКУ от оси (cx 520, ось 580),
+    // визуальный низ — на линии забора
     const p = mkPerson('p-1', 'waiting_before', 520, ROAD_Y, { x: 520, y: ROAD_Y })
     p.exitPoint = { x: CX, y: ROAD_Y + PERSON_STOP_OFFSET }
     p.afterTarget = { x: CX, y: 900, width: 0, height: 0 }
@@ -109,19 +110,14 @@ describe('[№21-СТВОР] входящий проходит строго че
 
     tick(h, 1)
     expect(p.state).toBe('crossing')
-    // этап 1: выравнивание по горизонтали на СВОЕЙ стороне забора
-    expect((p.element.settings as any)._alignStage).toBe('align')
-    expect(p.target.x).toBe(CX)
-    expect(Math.abs(p.target.y - ROAD_Y)).toBeLessThanOrEqual(0.5)
+    // [№23-ДУГА] двухфазное выравнивание заменено дугой: первая цель — НЕ
+    // скачок на ось, а короткий отход от линии забора (кромка была на линии)
+    expect((p.element.settings as any)._alignStage).toBeUndefined()
+    expect(p.target.x).toBeLessThan(CX)
+    expect(p.target.y).toBeLessThan(ROAD_Y - 3)
 
-    // дожимаем этап 1: цель переключается на проход сквозь проём
-    tick(h, 60)
-    expect((p.element.settings as any)._alignStage).toBe('cross')
-    expect(p.target.x).toBe(CX)
-    expect(p.target.y).toBe(ROAD_Y + PERSON_STOP_OFFSET)
-
-    // проход завершён: посадка строго по оси проёма, косяк не задет
-    tick(h, 120)
+    // дожимаем: проход сходится к оси проёма и уходит строго по ней
+    tick(h, 140)
     expect(p.state).toBe('moving_away')
     expect(Math.abs(centerOf(p).x - CX)).toBeLessThan(0.02)
     expect((p.element.settings as any)._alignStage).toBeUndefined()
@@ -143,8 +139,8 @@ describe('[№21-СТВОР] входящий проходит строго че
 // 3) [№21-РЫВКИ] финальное торможение отключается настройкой finalBrake
 // ---------------------------------------------------------------------------
 describe('[№21-РЫВКИ] экспериментальный выключатель финального торможения', () => {
-  const speedAtDist40 = (finalBrake: boolean | undefined): number => {
-    const h = buildHarness([makeWicket(true)], { finalBrake })
+  const speedAtDist40 = (arrivalBrake: boolean | undefined): number => {
+    const h = buildHarness([makeWicket(true)], { arrivalBrake })
     const p = mkPerson('p-fb', 'to_gate', CX + 220, ROAD_Y, { x: CX, y: ROAD_Y })
     h.aiAgents.value = [p as any]
     // минимум скорости в полосе dist (15..40]: с finalBrake профиль монотонно
@@ -159,7 +155,7 @@ describe('[№21-РЫВКИ] экспериментальный выключат
     return vMin
   }
 
-  it('finalBrake: false — торможение dist<80 не применяется, скорость у точки остаётся ходовой', () => {
+  it('arrivalBrake: false — торможение dist<80 не применяется, скорость у точки остаётся ходовой', () => {
     const vOff = speedAtDist40(false)
     const vOn = speedAtDist40(true)
     expect(vOff).toBeGreaterThan(vOn + 8)
@@ -172,26 +168,26 @@ describe('[№21-РЫВКИ] экспериментальный выключат
 // 4) [№21-КАЛИТКА] калитка как в жизни
 // ---------------------------------------------------------------------------
 describe('[№21-КАЛИТКА] охранник отпирает — люди открывают — таймаут захлопывания', () => {
-  it('приоткрытая калитка: человек дёргает pushWicketFn и проходит после полного открытия', () => {
-    const pushWicketFn = vi.fn((gate: any) => {
-      // имитация мгновенного полного открытия ядром
-      gate.settings.isOpen = true
-      gate.settings.wicketAjar = false
-      return true
-    })
-    const h = buildHarness([makeWicket(false)], { pushWicketFn })
+  it('разблокированная калитка полотно сама не открывает: человек ждёт полного открытия [№24-РУЧКА]', () => {
+    const h = buildHarness([makeWicket(false)])
     const w = h.simElements.value[0]
-    w.settings.wicketAjar = true // охранник уже щёлкнул замком
+    // охранник щёлкнул замком: ключ ajar стоит, ПОЛОТНО закрыто —
+    // приоткрытия-твина больше нет (замок показывает только ручка)
+    w.settings.wicketAjar = true
     const p = mkPerson('p-w', 'waiting_before', CX, ROAD_Y, { x: CX, y: ROAD_Y })
     p.exitPoint = { x: CX, y: ROAD_Y + PERSON_STOP_OFFSET }
     h.aiAgents.value = [p as any]
 
-    tick(h, 1)
-    expect(pushWicketFn).toHaveBeenCalledTimes(1)
-    expect(p.state).toBe('waiting_before') // ждёт полного открытия
+    tick(h, 3)
+    // полотно не открылось само, человек не стартовал проход
+    expect(w.settings.isOpen).toBe(false)
+    expect(w.settings.wicketAjar).toBe(true)
+    expect(p.state).toBe('waiting_before')
 
+    // калитку открыли (кнопка/клик/подошедшие люди) — человек пошёл сразу
+    w.settings.isOpen = true
     tick(h, 2)
-    expect(p.state).toBe('crossing') // открыто — человек пошёл
+    expect(p.state).toBe('crossing')
   })
 
   it('запертая калитка: человек ждёт охранника (никаких авто-проходов)', () => {
@@ -203,31 +199,10 @@ describe('[№21-КАЛИТКА] охранник отпирает — люди 
     expect(h.simElements.value[0].settings.isOpen).toBe(false)
   })
 
-  it('приоткрытая и никем не занятая калитка захлопывается сама по таймауту', () => {
-    vi.useFakeTimers()
-    const h = buildHarness([makeWicket(false)], { wicketAjarTimeout: 15 })
-    const w = h.simElements.value[0]
-    w.settings.wicketAjar = true
-    // человек появился и ушёл из зоны — таймаут не отменяется
-    tick(h, 2)
-    expect(w.settings.isOpen).toBe(false)
-    vi.advanceTimersByTime(16000)
-    expect(w.settings.isOpen).toBe(false)   // закрыта
-    expect(w.settings.wicketAjar).toBe(false) // и заперта снова
-  })
-
-  it('человек в зоне калитки отменяет таймаут захлопывания', () => {
-    vi.useFakeTimers()
-    const h = buildHarness([makeWicket(false)], { wicketAjarTimeout: 15 })
-    const w = h.simElements.value[0]
-    w.settings.wicketAjar = true
-    const p = mkPerson('p-near', 'to_gate', CX, ROAD_Y - 30, { x: CX, y: ROAD_Y })
-    h.aiAgents.value = [p as any]
-    tick(h, 3)
-    vi.advanceTimersByTime(16000)
-    // человек подошёл и ждёт (в зоне 70px) — калитку не захлопнуло
-    expect(w.settings.wicketAjar).toBe(true)
-  })
+  // [№24-РУЧКА] таймаут захлопывания приоткрытой калитки и его отмена
+  // человеком в зоне — семантика ЯДРА (useSimulatorCore.wicketAjarTimers),
+  // покрыта tests/wicket-life.test.ts («никто не открыл — запирается сама
+  // по таймауту», «человек в зоне отменяет таймер») — здесь не дублируется.
 })
 
 // ---------------------------------------------------------------------------

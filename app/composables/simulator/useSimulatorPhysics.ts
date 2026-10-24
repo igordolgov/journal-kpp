@@ -14,7 +14,9 @@ import { walkHoldStep } from '~/utils/simTuning'
 // [№20-ВОРОТА-ИДЕАЛ] общая логика зоны ворот: точка ожидания выезда,
 // ранний уезд въезжающей налево, выбор стороны уезда, забор калитки
 // [№23-ДУГА] построение дуги прохода в створ калитки
-import { buildWicketArcPoints, clampPersonToFence, exitLaneBusy, exitPendingFor, exitWaitCenterY, limitPersonPushY, roadSideBusyForDeparture } from '../../utils/gateFlow'
+// [№24-БЕЗ-ОСТАНОВКИ] GATE_AXIS_WINDOW — коридор оси ворот для проверки
+// «у ворот есть другая машина»
+import { buildWicketArcPoints, clampPersonToFence, exitLaneBusy, exitPendingFor, exitWaitCenterY, GATE_AXIS_WINDOW, limitPersonPushY, roadSideBusyForDeparture } from '../../utils/gateFlow'
 
 export function useSimulatorPhysics(
   simElements: Ref<SceneElement[]>,
@@ -73,8 +75,17 @@ export function useSimulatorPhysics(
   const collapseStuckByAgentId = new Map<string, number>()   // накопленные секунды затора
   const collapseBreakByAgentId = new Map<string, number>()   // остаток прорыва, сек
   const collapseAnchorByAgentId = new Map<string, { x: number; y: number; t: number }>()
+  // [№24-ПЛАВНЫЙ-ВЫХОД] сглаженный курс пешехода (единица на агента):
+  // направление шага подтягивается к свежему «на цель» экспоненциально,
+  // ТАU ~0.15с — свободный шаг не меняется, а скачок курса в первый кадр
+  // после паузы уступания (стоял -> уступивший отошёл -> курс развернулся
+  // на 30-60° за кадр) исчезает: выход из паузы — плавный поворот.
+  const headingByAgentId = new Map<string, { x: number; y: number }>()
+  const PERSON_TURN_TAU = 0.15   // с: постоянная времени поворота курса
   const COLLAPSE_WINDOW_S = 1.2   // окно оценки прогресса
-  const COLLAPSE_STUCK_S = 2.0    // затор дольше — выдаём прорыв
+  // [№24] порог затора 2.0 -> 1.0 с (репорт №24: «право прорыва» через 1с):
+  // фактически прорыв выдаётся после первого окна без прогресса (1.2с)
+  const COLLAPSE_STUCK_S = 1.0    // затор дольше — выдаём прорыв
   const COLLAPSE_BREAK_S = 2.5    // длительность прорыва
   const COLLAPSE_MIN_MOVE = 5     // px за окно, меньше — «без прогресса»
   const COLLAPSE_RADIUS = 70      // рядом не должно быть другого прорывателя
@@ -159,7 +170,13 @@ export function useSimulatorPhysics(
   // (встречные — каждый в свою сторону), вместо прохода «сквозь» друг друга
   const PERSON_SEP_RADIUS = 40   // px: дистанция начала расхождения
   const PERSON_SEP_SPEED = 34    // px/с: темп бокового смещения
-  const PERSON_YIELD_SPEED = 22  // px/с: постоянный дрейф «держись правее» при соседе по курсу
+  // [№25-ПРАВЫЙ-ОБХОД] единое правило «каждый правее» вместо дуги + сепарации:
+  // вес обхода — непрерывная функция дистанции (ни одного булева переключателя),
+  // знак сдвига — только от собственного курса, поэтому траектория без рывков
+  const PERSON_BYPASS_RADIUS = 80 // px: радиус раннего правого обхода
+  const PERSON_BYPASS_SPEED = 40  // px/с: темп бокового ухода к правой руке
+  const PERSON_HARD_SEP = 30      // px: радиус аварийного расталкивания (контакт)
+  const PERSON_HARD_SPEED = 60    // px/с: темп аварийного расталкивания
   // [БАГ-РЕПОРТ-4-ТОЛЧОК] ждущий у прохода уступает ЗАРАНЕЕ: реагирует на
   // любого встречного проходного состояния в этом радиусе (а не только на
   // движущегося быстрее 0.5) и отходит в сторону от линии его курса
@@ -342,6 +359,67 @@ export function useSimulatorPhysics(
     return false
   }
 
+  // [№24-БЕЗ-ОСТАНОВКИ] окно сторон ворот по вертикали: чужой корпус/цель
+  // в ±140 px от центра ворот считается «у ворот» (та же конвенция, что в
+  // oppositeOccupies) — накрывает и сторону въезжающей очереди, и сторону
+  // выезжающей линии ожидания.
+  const GATE_SIDE_WINDOW = 140
+
+  // [№24-БЕЗ-ОСТАНОВКИ] есть ли у ворот ДРУГАЯ машина, занимающая или
+  // ждущая створ (подходит to_gate, стоит в очереди waiting_before,
+  // проходит crossing) — корпус ИЛИ цель в коридоре оси, с ЛЮБОЙ из двух
+  // сторон ворот (репорт №24: прошедшая створ машина при машинах по
+  // сторонам ворот не должна останавливаться вовсе). Сверстки на посадке
+  // (waiting_after) не считаются: двое прошедших не «разрешают» друг
+  // другу уезд — иначе створ остаётся открытым над пустотой ([№13]).
+  const gateHasOtherCarWaiting = (agents: AiAgent[], me: AiAgent, gate: SceneElement): boolean => {
+    const gcx = gate.x + gate.width / 2
+    const gcy = gate.y + gate.height / 2
+    for (const o of agents) {
+      if (o.id === me.id || o.type !== 'car' || o.state === 'done') continue
+      if (o.state !== 'to_gate' && o.state !== 'waiting_before' && o.state !== 'crossing') continue
+      const ocx = o.element.x + o.element.width / 2
+      const ocy = o.element.y + o.element.height / 2
+      if (Math.abs(ocx - gcx) <= GATE_AXIS_WINDOW && Math.abs(ocy - gcy) <= GATE_SIDE_WINDOW) return true
+      const t = o.target
+      if (t && Number.isFinite(t.x) && Number.isFinite(t.y) &&
+          Math.abs((t.x ?? 0) - gcx) <= GATE_AXIS_WINDOW &&
+          Math.abs((t.y ?? 0) - gcy) <= GATE_SIDE_WINDOW) return true
+    }
+    return false
+  }
+
+  // [№24-БЕЗ-ОСТАНОВКИ] немедленный уезд с посадки по канонической схеме
+  // ([№12]/[№20-УЕЗД]): въезжающая — вниз, при занятом коридоре уезда —
+  // налево; выезжающая — вбок по фактической полосе в сторону без
+  // встречных. Возвращает false, если уезда сейчас быть не может:
+  // выезжающей перекрыты ОБЕ стороны дороги — корректор + ожидание
+  // закрытия ([№23], «уезд под встречный поток» запрещён). Скорость не
+  // обнуляется — остановки нет вовсе; таймеры посадки чистятся.
+  const tryNoStopDeparture = (agent: AiAgent, el: SceneElement, gate: SceneElement): boolean => {
+    if (agent.type !== 'car') return false
+    if (agent.direction === 'exit') {
+      const curCy = el.y + el.height / 2
+      const origSide: 'left' | 'right' = agent.afterTarget.x < el.x ? 'left' : 'right'
+      const otherSide: 'left' | 'right' = origSide === 'left' ? 'right' : 'left'
+      const busyOrig = roadSideBusyForDeparture(aiAgents.value, agent, gate, sceneSize.value.width, origSide)
+      const busyOther = roadSideBusyForDeparture(aiAgents.value, agent, gate, sceneSize.value.width, otherSide)
+      if (busyOrig && busyOther) return false
+      const side = busyOrig ? otherSide : origSide
+      const depX = side === 'left' ? -60 - el.width / 2 : sceneSize.value.width + 60 + el.width / 2
+      agent.afterTarget = { x: depX, y: curCy, width: 0, height: 0 }
+    } else if (agent.direction === 'enter' && exitCarBlocksCorridor(agent)) {
+      console.warn('[car-no-stop] коридор уезда вниз занят выезжающей — уезд налево:', agent.id)
+      agent.afterTarget = { x: -60 - el.width / 2, y: el.y + el.height / 2, width: 0, height: 0 }
+    }
+    agent.state = 'moving_away'
+    agent.target = { x: agent.afterTarget.x, y: agent.afterTarget.y, width: 0, height: 0 }
+    waitAfterByAgentId.delete(agent.id)
+    gateCloseWaitByAgentId.delete(agent.id)
+    console.warn('[car-no-stop] другие машины у ворот — уезд без остановки:', agent.id)
+    return true
+  }
+
   // [БАГ-РЕПОРТ-6-УСТУПАНИЕ-МАШИН] отъезжает ли машина-лидер ВДОЛЬ нашего
   // курса: её ось отъезда (выезжающая — вниз +y, въезжающая — назад по
   // дороге от ворот) сонаправлена нашему направлению движения.
@@ -433,6 +511,7 @@ export function useSimulatorPhysics(
         postGateTrack.delete(agent.id) // [ФИКС-висяки-3] без утечек
         crossTrack.delete(agent.id) // [ФИКС-застыл-калитка] без утечек
         crossArcByAgentId.delete(agent.id) // [№23-ДУГА] без утечек
+        headingByAgentId.delete(agent.id) // [№24-ПЛАВНЫЙ-ВЫХОД] без утечек
         collapseStuckByAgentId.delete(agent.id) // [№23-КОЛЛАПС] без утечек
         collapseBreakByAgentId.delete(agent.id)
         collapseAnchorByAgentId.delete(agent.id)
@@ -989,6 +1068,16 @@ export function useSimulatorPhysics(
       }
 
       if (agent.state === 'waiting_after') {
+        // [№24-БЕЗ-ОСТАНОВКИ] перепроверка КАЖДОГО тика: чужие машины у
+        // любой из сторон ворот (подошла очередь, встал встречный) —
+        // посадка не нужна вовсе, уезд немедленно без остатка вежливой
+        // паузы и без ожидания закрытия (репорт №24). Одиночная машина при
+        // пустых воротах ждёт по [№23] — ветка ниже не менялась.
+        if (agent.type === 'car' && gate && gate.settings &&
+            gateHasOtherCarWaiting(aiAgents.value, agent, gate) &&
+            tryNoStopDeparture(agent, el, gate)) {
+          continue
+        }
         el.velocity = 0
         const waitedAfter = (waitAfterByAgentId.get(agent.id) ?? 0) + dt
         waitAfterByAgentId.set(agent.id, waitedAfter)
@@ -1391,6 +1480,15 @@ export function useSimulatorPhysics(
               }
             }
           } else {
+            // [№24-БЕЗ-ОСТАНОВКИ] прошедшая створ машина при чужих машинах
+            // у ЛЮБОЙ из сторон ворот уезжает СРАЗУ, с текущей скоростью:
+            // ни вежливой паузы, ни ожидания полного закрытия. Очередь у
+            // створа сама оправдывает открытые ворота ([№13]), свип [G2]
+            // закроет створ, когда корпус уйдёт из зоны (репорт №24).
+            if (gate && gate.settings && gateHasOtherCarWaiting(aiAgents.value, agent, gate) &&
+                tryNoStopDeparture(agent, el, gate)) {
+              continue
+            }
             // [П6] машина встала на посадку после ворот. Таймер закрытия
             // здесь больше не ставится: отсчёт [G2] запускает свип закрытия
             // в конце тика, когда корпус ПОЛНОСТЬЮ покинул зону створа.
@@ -1598,11 +1696,13 @@ export function useSimulatorPhysics(
       // встречные на дороге/в базе не должны проходить друг сквозь друга.
       let personNearAhead = Infinity
       let standingAhead = false
+      // [№25-ПРАВЫЙ-ОБХОД] встречный определяется по КУРСУ соседа (углу
+      // корпуса), а не по его текущей скорости: флаг не мигает на разгоне и
+      // на боковом шаге уступания, поэтому кап скорости для встречной пары
+      // отключён стабильно — обход идёт без торможений. Флаг ставится по
+      // ЛЮБОМУ соседу в окне курса (раньше — только при смене ближайшего:
+      // «липкий» устаревший флаг тормозил/отпускал не тех).
       let oncomingAhead = false
-      // [№21-ВСТРЕЧНЫЕ] ближайший встречный САМ ИДЁТ (не ждёт): тормозить
-      // перед ним не обязательно — расходятся боковым шагом «каждый правее»
-      // на полном ходу (репорт №21)
-      let oncomingMovingAhead = false
       if (agent.type === 'person') {
         let near2 = Infinity
         for (const other of aiAgents.value) {
@@ -1615,49 +1715,45 @@ export function useSimulatorPhysics(
           const ahead = ox * dirX + oy * dirY
           if (ahead < 0 || ahead > 90) continue
           const lateral = Math.abs(ox * dirY - oy * dirX)
-          if (lateral > 30) continue
+          // 40: коридор скана шире порога отхода ждущего (34) — иначе на
+          // кромке 30-34px стоп снимался бы раньше, чем ждущий отошёл
+          if (lateral > 40) continue
+          const oRot = other.element.rotation || 0
+          const oVel = other.element.velocity || 0
+          if (Math.cos(oRot) * dirX + Math.sin(oRot) * dirY < -0.3) oncomingAhead = true
           const d2 = ahead * ahead + lateral * lateral
-          if (d2 < near2) {
-            near2 = d2
-            // [№13-НЕ-СКВОЗЬ] встречный по курсу (его ход против моего):
-            // для него работает дрейф «держись правее» — иначе пара
-            // встречных тормозит и расходится только за счёт толчка
-            const oRot = other.element.rotation || 0
-            if (Math.cos(oRot) * dirX + Math.sin(oRot) * dirY < -0.3) {
-              oncomingAhead = true
-              // [№21-ВСТРЕЧНЫЕ] встречный движется сам — торможение не нужно
-              if ((other.element.velocity || 0) > 0.5 && other.state !== 'waiting_before') {
-                oncomingMovingAhead = true
-              }
-            }
-          }
-          // [БАГ-РЕПОРТ-4-ТОЛЧОК] стоящий человек прямо на курсе — ПОЛНАЯ
-          // остановка на безопасной дистанции: раньше пол 14 px/с
-          // проталкивал входящего прямо в стоящего выходящего (контакт
-          // раньше, чем успевало сработать расхождение). Стоящий уступит
-          // (проактивное отхождение ждущих) — и путь освободится.
-          // ahead > 8: совпавшие/почти совпавшие центры (двойной спавн в
-          // одну точку) НЕ замораживаем — их разводит ветка сепарации,
-          // иначе взаимный стоп всей очереди позади.
-          // [БАГ-РЕПОРТ-5-АНИМАЦИЯ] уступающий ждущий теперь «идёт» боком
-          // (velocity > 0), поэтому признак стоящего дополнен состоянием:
-          // waiting_before с боковым шагом — всё ещё препятствие на курсе.
-          if (ahead > 8 && ahead < 54 && lateral < 26 &&
-              ((other.element.velocity || 0) <= 0.5 || other.state === 'waiting_before')) {
+          if (d2 < near2) near2 = d2
+          // Стоящий НА КУРСЕ — полная остановка на безопасной дистанции
+          // (очереди у прохода не втаптывают стоящего). [№25] шагающий в
+          // сторону ждущий (проактивное уступание) — не «стенка», но и не
+          // разрешение хода: пока он В МОЁМ коридоре (lateral < 34 — его же
+          // порог отхода), я жду; отошёл — один раз трогаюсь. Стоп-гонки
+          // «встал-пошёл-встал» больше нет и прохода по корпусу тоже.
+          if (ahead > 8 && ahead < 54 &&
+              ((lateral < 26 && oVel <= 0.5) ||
+               (lateral < 34 && other.state === 'waiting_before'))) {
             standingAhead = true
           }
         }
         personNearAhead = Math.sqrt(near2)
         // [№23-КОЛЛАПС] прорыватель не останавливается перед стоящим и не
-        // ползёт: в коллапсе именно эти капы замораживают пару, а дрейф
+        // ползёт: в коллапсе именно эти капы замораживают пару, а обход
         // отключён условием velocity > 0.5 — без прорыва затор вечен
-        if (standingAhead && !bypassActive && !collapseActive) {
+        // [№25] ТРАНЗИТ (crossing/moving_away) не останавливается перед
+        // ждущим вовсе: ждущие уступают ему штатно (ветка waiting_before),
+        // а жёсткий стоп превращался в «танец» — транзитный замирал, ждущий
+        // отходил от ЕГО линии курса, которая сама дрейфовала вслед за
+        // отходом (оба скользили вбок паровозиком, никто не расходился).
+        // Транзит идёт: кап дистанции и правый обход разводят их без стопа.
+        if (standingAhead && !bypassActive && !collapseActive &&
+            agent.state !== 'crossing' && agent.state !== 'moving_away') {
           targetSpeed = 0
           holdByAgentId.set(agent.id, 'standing') // [БАГ-РЕПОРТ-7] человек на курсе
-        } else if (!oncomingMovingAhead && personNearAhead < PERSON_SEP_RADIUS * 1.6 && !collapseActive) {
-          // [№21-ВСТРЕЧНЫЕ] кап скорости НЕ применяется к паре движущихся
-          // встречных: они расходятся боковым шагом «каждый правее» без
-          // притормаживания. Кап остаётся для попутного/стоящего впереди.
+        } else if (!oncomingAhead && personNearAhead < PERSON_SEP_RADIUS * 1.6 && !collapseActive) {
+          // [№25] кап скорости НЕ действует на встречных (флаг по курсу
+          // корпуса): встречная пара расходится правым обходом на полном
+          // ходу, без торможений. Кап остаётся для попутного/стоящего
+          // впереди (следование за темпом лидера).
           targetSpeed = Math.min(targetSpeed, Math.max(14, personNearAhead * 0.5))
           holdByAgentId.set(agent.id, 'person-near') // [БАГ-РЕПОРТ-7] ползём за пешеходом
         }
@@ -1833,118 +1929,137 @@ export function useSimulatorPhysics(
         // [ФИКС-РЫВОК] шаг не длиннее остатка дистанции: при разгоне
         // фактический шаг (velocity УЖЕ после разгона) * dt бывал больше
         // остатка, агент перескакивал точку останова и «возвратом» давал рывок
+        // [№24-ПЛАВНЫЙ-ВЫХОД] курс шага сглаживается (только пешеход, только
+        // вне прохода и тихой зоны): после паузы уступания направление «на
+        // цель» развернуто за кадр — прежний прямой шаг давал видимый рывок
+        // вбок. Храним курс ТОЛЬКО на ходу: за время паузы он не течёт, и
+        // первый кадр возобновления блендится от дос_pauseового курса.
+        let stepX = dirX
+        let stepY = dirY
+        if (agent.type === 'person' && agent.state !== 'crossing' &&
+            !(agent.state === 'to_gate' && dist < ARRIVE_QUIET_ZONE)) {
+          const h0 = headingByAgentId.get(agent.id)
+          // разворот через «назад» не блендим — там путь всё равно перепланируется
+          if (h0 && (h0.x * dirX + h0.y * dirY) > 0) {
+            const kb = 1 - Math.exp(-dt / PERSON_TURN_TAU)
+            let bx = h0.x + (dirX - h0.x) * kb
+            let by = h0.y + (dirY - h0.y) * kb
+            const bm = Math.hypot(bx, by)
+            if (bm > 0.001) {
+              stepX = bx / bm
+              stepY = by / bm
+            }
+          }
+          headingByAgentId.set(agent.id, { x: stepX, y: stepY })
+        } else if (agent.type === 'person') {
+          headingByAgentId.delete(agent.id)
+        }
         const moveStep = Math.min((el.velocity || 0) * dt, dist)
-        el.x += dirX * moveStep
-        el.y += dirY * moveStep
+        el.x += stepX * moveStep
+        el.y += stepY * moveStep
       }
 
-      // [ФИКС-УСТУПИ-ДОРОГУ] мягкое расхождение пешеходов: в зоне радиуса
-      // PERSON_SEP_RADIUS каждый ДВИЖУЩИЙСЯ пешеход смещается от соседа.
-      // [ФИКС-ЕСТЕСТВЕННОСТЬ] вектор отталкивания проецируется НА
-      // ПЕРПЕНДИКУЛЯР к своему курсу — человек ОТСТУПАЕТ ВБОК, уступая
-      // дорогу, а не пятится назад (радиальная «назад»-составляющая раньше
-      // гасила ход и разворачивала обход широкой дугой — «обошёл вокруг»).
-      // Стоящих не толкаем: строй группы и очереди у прохода не расползаются.
-      // [ФИКС-ДЁРГАНИЕ] в тихой зоне прибытия (dist < ARRIVE_QUIET_ZONE)
-      // расталкивание и дрейф отключены — подход к точке остановки плавный.
-      // [БАГ-РЕПОРТ-4-ТОЛЧОК] клапан: если чужой человек ВПЛОТНУЮ (< 42px,
-      // например стоит прямо на моей цели), расталкивание работает и в
-      // тихой зоне — иначе проходим сквозь стоящего.
-      // [БАГ-РЕПОРТ-5-ЗОНЫ] расхождение — только у ворот (вход/выход) и НЕ
-      // в тихой зоне финального подхода (to_gate, dist < QUIET): боковые
-      // подталкивания на последних метрах были главным источником
-      // «дёргания перед остановкой». Уступает СТОЯЩИЙ (проактивный шаг
-      // ждущего), идущий к цели двигается по прямой. Клапан «nearestD < 42»
-      // снят — именно он возвращал подталкивания в тихую зону.
-      // [БАГ-РЕПОРТ-8-ДЁРГАНИЕ] В ПРОХОДЕ (crossing) бокового танца НЕТ:
-      // человек идёт сквозь калитку ПО ПРЯМОЙ, как в жизни. Раньше на него
-      // действовали дрейф «держись правее» (константный, 22 px/с) и
-      // дистанционное радиальное отталкивание от встречного —
-      // равнодействующая меняла знак каждые ~0.5с, и человек zigzagsил
-      // ±2-4px прямо в дверном проёме (замер: 5 реверсов за 1.5с прохода).
-      // Расходятся ДО прохода: ждущий отходит проактивно (ветка
-      // waiting_before), подходящий тормозит (personNearAhead) и сам
-      // смещается в зоне ворот — но не внутри дверного проёма.
-      // [№13-НЕ-СКВОЗЬ] расхождение действует ПО ВСЕЙ СЦЕНЕ (зона прохода
-      // снята): люди в базе и на дороге не проходят друг сквозь друга.
-      // Дрейф «держись правее» — только на ВСТРЕЧНОГО или СТОЯЩЕГО впереди
-      // (их полосу надо освободить). От собственного попутчика впереди
-      // дрейф запрещён: он гнал догоняющего зигзагом (сместился вбок —
-      // потерял соседа из «курсовых» — вернулся на курс — снова сдвиг),
-      // теперь догоняющий просто тормозит (personNearAhead) и идёт следом.
+      // [№25-ПРАВЫЙ-ОБХОД] единое расхождение пешеходов — БЕЗ дуги и БЕЗ
+      // торможений. (Старая схема: дуга-дрейф [№24] и радиальная сепарация,
+      // спроецированная на перпендикуляр, толкали в ПРОТИВОПОЛОЖНЫЕ стороны —
+      // радиальное «от соседа» гасило дрейф «держись правее», пара
+      // накладывалась; вес дуги и булевы флаги уступания мигали от кадра к
+      // кадру — отсюда дёргание в вертикальных проходах.)
+      // Новое правило «каждый правее» — одно и непрерывное:
+      //   1) вес обхода — плавная функция дистанции до соседа и его бокового
+      //      отклонения от моего курса; знак бокового сдвига — ТОЛЬКО от
+      //      моего курса (правая рука, (-dirY, dirX)): сдвиг не может
+      //      реверсировать из-за позиции соседа — осциллировать нечему;
+      //   2) встречная пара не тормозит: кап скорости для встречных отключён
+      //      по курсу соседа (см. скан выше) — расхождение на полном ходу;
+      //   3) аварийный клапан от наложения: при дистанции < PERSON_HARD_SEP
+      //      радиальное «от соседа», плавное по весу, перекрывает всё.
+      // [ФИКС-ДЁРГАНИЕ] в тихой зоне прибытия (dist < ARRIVE_QUIET_ZONE) и в
+      // проходе (crossing) бокового танца нет — подход к точке остановки и
+      // проход через дверной проём идут по прямой (БАГ-РЕПОРТ-8: 5 реверсов
+      // за 1.5с в проёме). Стоящих не толкаем (клапан — исключение):
+      // строй группы и очереди у прохода не расползаются.
+      // [№13-НЕ-СКВОЗЬ] правило действует ПО ВСЕЙ СЦЕНЕ: люди в базе и на
+      // дороге не проходят друг сквозь друга.
       if (agent.type === 'person' && (el.velocity || 0) > 0.5 &&
           agent.state !== 'crossing' &&
           !(agent.state === 'to_gate' && dist < ARRIVE_QUIET_ZONE)) {
         const ccx = el.x + el.width / 2
         const ccy = el.y + el.height / 2
-        {
-          let sepX = 0, sepY = 0, maxW = 0
-          for (const other of aiAgents.value) {
-            if (other.id === agent.id || other.type !== 'person' || other.state === 'done') continue
-            // своих по группе не раскидываем — колонна/строй сохраняется
-            if (agent.groupId && other.groupId === agent.groupId) continue
-            const ocx = other.element.x + other.element.width / 2
-            const ocy = other.element.y + other.element.height / 2
-            const ax = ccx - ocx
-            const ay = ccy - ocy
-            const d = Math.hypot(ax, ay)
-            if (d < 0.01) {
-              // центры совпали (спавн в одной точке): детерминированно разводим
-              // по разные стороны от курса по порядку id — иначе взаимный стоп
-              const s = String(agent.id) < String(other.id) ? 1 : -1
-              sepX += -dirY * s
-              sepY += dirX * s
-              maxW = Math.max(maxW, 0.6)
-              continue
-            }
-            if (d >= PERSON_SEP_RADIUS) continue
-            const w = (PERSON_SEP_RADIUS - d) / PERSON_SEP_RADIUS // 0..1
-            const nx = ax / d, ny = ay / d
-            // [ФИКС-ЕСТЕСТВЕННОСТЬ] только РАДИАЛЬНАЯ составляющая «от соседа»:
-            // боковая добавка (0.8) для лобовых встреч была противонаправлена
-            // дрейфу «держись правее» и гасила расхождение
-            sepX += nx * w
-            sepY += ny * w
-            maxW = Math.max(maxW, w)
+        let bypassW = 0                  // вес правого обхода 0..1
+        let hardAX = 0, hardAY = 0, hardW = 0
+        for (const other of aiAgents.value) {
+          if (other.id === agent.id || other.type !== 'person' || other.state === 'done') continue
+          // своих по группе не раскидываем — колонна/строй сохраняется
+          if (agent.groupId && other.groupId === agent.groupId) continue
+          const ocx = other.element.x + other.element.width / 2
+          const ocy = other.element.y + other.element.height / 2
+          const ox = ocx - ccx
+          const oy = ocy - ccy
+          const d = Math.hypot(ox, oy)
+          if (d < 0.01) {
+            // центры совпали (спавн в одной точке): детерминированно разводим
+            // по разные стороны от курса по порядку id — иначе взаимный стоп
+            const s = String(agent.id) < String(other.id) ? 1 : -1
+            hardAX += -dirY * s
+            hardAY += dirX * s
+            hardW = Math.max(hardW, 0.6)
+            continue
           }
-          const mRaw = Math.hypot(sepX, sepY)
-          // [ФИКС-ЛОБОВЫЕ] правило «держись правее» работает НЕЗАВИСИМО от
-          // наличия перпендикулярной составляющей: при точном лобовом контакте
-          // радиальный «от соседа» проецируется на перпендикуляр в ноль, и без
-          // дрейфа встречные проходят друг сквозь друга
-          // [№13-НЕ-СКВОЗЬ] дрейф включают только встречный/стоящий впереди:
-          // от попутчика не смещаемся (см. комментарий выше)
-          // [№21-ВСТРЕЧНЫЕ] пара движущихся встречных расходится БЕЗ
-          // торможения: дрейф стартует раньше (радиус ×1.5) и идёт в темп
-          // бокового шага PERSON_SEP_SPEED (вместо вежливых 22 px/с), чтобы
-          // на полном ходу корпуса успели разойтись. Каждый смещается к СВОЕЙ
-          // правой руке: (-dirY, dirX) — встречные уходят в противоположные
-          // стороны автоматически.
-          const yieldOncoming = oncomingMovingAhead && !standingAhead
-          const driftRadius = yieldOncoming ? PERSON_SEP_RADIUS * 1.5 : PERSON_SEP_RADIUS
-          const driftSpeed = yieldOncoming ? PERSON_SEP_SPEED : PERSON_YIELD_SPEED
-          // [№23-КОЛЛАПС] прорыватель дрейф «держись правее» не включает —
-          // идёт своим курсом, встречные уступают ему
-          if (personNearAhead < driftRadius && (standingAhead || oncomingAhead) && !collapseActive) {
-            el.x += -dirY * driftSpeed * dt
-            // [№20-3б] дрейф «держись правее» не заносит корпус на забор
-            const nextY = el.y + dirX * driftSpeed * dt
+          // 3) аварийный клапан: физический контакт — радиальное «от соседа»,
+          // вес непрерывен по дистанции (работает и на «нерелевантном» соседе)
+          if (d < PERSON_HARD_SEP) {
+            const hw = (PERSON_HARD_SEP - d) / PERSON_HARD_SEP
+            hardAX += -(ox / d) * hw
+            hardAY += -(oy / d) * hw
+            hardW = Math.max(hardW, hw)
+          }
+          if (d >= PERSON_BYPASS_RADIUS) continue
+          const ahead = ox * dirX + oy * dirY
+          const oRot = other.element.rotation || 0
+          const oDot = Math.cos(oRot) * dirX + Math.sin(oRot) * dirY
+          const oncoming = oDot < -0.3
+          // [№25] обходить ЛЮБОГО соседа впереди в радиусе — встречного,
+          // медленного, стоящего. Классификация «медленнее ли он меня»
+          // запрещена: скорость соседа, ползущего за капом, колеблется
+          // (~13-16 px/с), порог стоит ровно на границе — релевантность
+          // стробит от кадра к кадру, дрейф мигает = зигзаг (диагностика S5). Вес непрерывен и
+          // сам гасит манёвр: сосед ушёл вперёд — distW спадает; я обошёл —
+          // courseW гаснет за границей коридора. Попутчик СБОКУ в темп
+          // (ahead ≈ 0) и находящийся позади — не помеха, не смещаемся.
+          if (ahead < (oncoming ? -6 : 6)) continue
+          // вес обхода: полная сила уже с d ≤ 44px (ранний заход, как у
+          // прежней дуги с радиусом 88), дальше плавный спад к 80. По КУРСУ
+          // вес полон в коридоре (≤ 34 = порог отхода ждущего) и плавно
+          // гаснет к 48: равновесие «дрейф ↔ возврат к цели» оказывается
+          // ВНУТРИ плавного спада — без предельного цикла на жёсткой границе
+          // (резкое выключение на 34 давало раскачку «дрейф-возврат» и
+          // микрореверсы боковой составляющей)
+          const distW = Math.min(1, (PERSON_BYPASS_RADIUS - d) / (PERSON_BYPASS_RADIUS * 0.45))
+          const lateral = Math.abs(ox * dirY - oy * dirX)
+          const courseW = Math.max(0, Math.min(1, (48 - lateral) / 14))
+          bypassW = Math.max(bypassW, distW * courseW)
+        }
+        // 1) правый обход: непрерывный боковой уход к правой руке. Вес
+        // непрерывен по дистанции, знак фиксирован курсом — реверсов нет.
+        // [№23-КОЛЛАПС] прорыватель идёт своим курсом — встречные уступают
+        // ему (обход для него выключен, аварийный клапан работает всегда)
+        if (bypassW > 0 && !collapseActive) {
+          const lat = PERSON_BYPASS_SPEED * bypassW * dt
+          el.x += -dirY * lat
+          // [№20-3б] обход не заносит корпус на линию забора
+          const nextY = el.y + dirX * lat
+          el.y = personGate ? limitPersonPushY(el, personGate, nextY) : nextY
+        }
+        // 2) аварийный клапан от наложения (контакт ближе PERSON_HARD_SEP)
+        if (hardW > 0) {
+          const m = Math.hypot(hardAX, hardAY)
+          if (m > 0.01) {
+            const push = PERSON_HARD_SPEED * hardW * dt
+            el.x += (hardAX / m) * push
+            // [№20-3б] клапан не выносит корпус на линию забора
+            const nextY = el.y + (hardAY / m) * push
             el.y = personGate ? limitPersonPushY(el, personGate, nextY) : nextY
-          }
-          if (mRaw > 0.01 && maxW > 0) {
-            // [ФИКС-ЕСТЕСТВЕННОСТЬ] оставляем только перпендикулярную к курсу
-            // составляющую: шаг ВБОК, без хода назад/вперёд от толчка
-            const par = sepX * dirX + sepY * dirY
-            const perpX = sepX - par * dirX
-            const perpY = sepY - par * dirY
-            const m = Math.hypot(perpX, perpY)
-            if (m > 0.01) {
-              const push = maxW * PERSON_SEP_SPEED * dt
-              el.x += (perpX / m) * push
-              // [№20-3б] сепарация не выносит корпус на линию забора
-              const nextY = el.y + (perpY / m) * push
-              el.y = personGate ? limitPersonPushY(el, personGate, nextY) : nextY
-            }
           }
         }
       }

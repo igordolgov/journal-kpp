@@ -53,6 +53,16 @@ export const randomFirstDelay = (
   return Math.min(hi, Math.max(lo, base * frac))
 }
 
+// [№21-РАНДОМ] стартовая задержка ПЕРВОГО спавна потока: случайная доля
+// (0.2..0.6) минимального интервала с глобальными границами [4, 45] с.
+// При randomizeSpawnStart: false спавн использует прежние фиксированные
+// 10/14/20/25 с (детерминизм старых сборок), см. useSimulatorSpawn.
+export const initialSpawnDelay = (intervalMin: number): number => {
+  const base = Number.isFinite(intervalMin) && intervalMin > 0 ? intervalMin : 0
+  const frac = 0.2 + Math.random() * 0.4
+  return Math.min(45, Math.max(4, base * frac))
+}
+
 // [№21-РАНДОМ] выбор человека с «охлаждением»: недавно появлявшиеся
 // (recentIds) уходят в конец предпочтений — одни и те же лица не идут
 // подряд, даже когда база маленькая. Чистая функция (rng подставляется

@@ -132,7 +132,10 @@ describe('приоритет выезда у ворот ([БАГ-РЕПОРТ-9]
     for (let i = 0; i < 220; i++) { // 11с
       h.physics.updateAiMovement(DT, { carGateId: 'car-gate-1', personGateId: '' })
       pair.check()
-      if (exit.state === 'waiting_after') exitLanded = true
+      // [№24-БЕЗ-ОСТАНОВКИ] выезд может миновать waiting_after вовсе
+      // (уезд без остановки при машинах у ворот): «прошёл створ» = корпус
+      // поднялся выше линии дороги
+      if (centerOf(exit).y < ROAD_Y) exitLanded = true
       const exitOccupies = exit.state === 'crossing' || exit.state === 'waiting_after'
       if (exitOccupies && (enter.state === 'crossing' || enter.state === 'waiting_after')) premature = true
     }
@@ -184,7 +187,9 @@ describe('приоритет выезда у ворот ([БАГ-РЕПОРТ-9]
       if (enter.state === 'waiting_after' && h.gate.settings.isOpen && !h.gate.settings.isAnimating) {
         h.gate.settings.isOpen = false
       }
-      if (exit.state === 'waiting_after') exitLanded = true
+      // [№24-БЕЗ-ОСТАНОВКИ] «прошёл створ» = корпус выше линии дороги
+      // (waiting_after при машинах у ворот более не обязателен)
+      if (centerOf(exit).y < ROAD_Y) exitLanded = true
       const exitOccupies = exit.state === 'crossing' || exit.state === 'waiting_after'
       if (exitOccupies && (enter.state === 'crossing' || enter.state === 'waiting_after')) premature = true
       if (enter.state === 'crossing' || enter.state === 'waiting_after') enterCrossed = true

@@ -162,6 +162,66 @@ export const limitPersonPushY = (
   return nextY
 }
 
+// [№23-ДУГА] Короткий отход человека от линии забора перед заходом в
+// проём: если ведущая кромка уже прижата к линии (уступание у самого
+// забора), сначала отходим на чистый корпус, потом скользим к оси —
+// кромка на линию не давит (репорт №23).
+export const WICKET_ARC_PULLBACK = 10
+
+// [№23-ДУГА] Плавная дуга прохода смещённого (уступанием) человека в створ
+// калитки. Квадратичная Безье из текущей точки в точку (axisX, clearY):
+// контрольная точка — на оси проёма на высоте старта, поэтому боковая
+// часть дуги не прижимается к забору, а вертикальный проход начинается
+// на чистом корпусе. clearY — за APERTURE_INSET (6px) до касания линии
+// забора ведущей кромкой (нижней при ходе вниз, верхней при ходе вверх).
+// Человек у самой линии забора сначала коротко отходит от неё
+// (WICKET_ARC_PULLBACK), затем скользит вдоль линии и заходит в проём —
+// створ не задевается ни при каком смещении (репорт №23, п.3/п.4).
+// Возвращает очередь точек-целей (кладётся в crossArcByAgentId): скорость
+// между точками не обнуляется, сквозная exitPoint замыкает очередь в
+// вызывающем коде. Человек на оси (смещение <= 2px) дуги не получает —
+// фильтруется вызывающим кодом.
+export const buildWicketArcPoints = (
+  startX: number,
+  startY: number,
+  axisX: number,
+  exitY: number,
+  fenceY: number,
+  radius: number,
+): { x: number; y: number }[] => {
+  if (![startX, startY, axisX, exitY, fenceY, radius].every(Number.isFinite)) return []
+  // Направление прохода: вниз (въезд, exitY ниже старта) или вверх (выезд)
+  const dir: 1 | -1 = exitY >= startY ? 1 : -1
+  // Граница чистого корпуса: ведущая кромка (низ при ходе вниз, верх при
+  // ходе вверх) останавливается за 6px до линии забора
+  const clearY = dir > 0
+    ? fenceY - radius - APERTURE_INSET
+    : fenceY + radius + APERTURE_INSET
+  // Кромка уже за границей (человек у самой линии забора): короткий отход
+  // прочь от линии, скольжение вдоль неё на чистом корпусе, заход в проём
+  const pastBoundary = dir > 0 ? startY > clearY : startY < clearY
+  const fromY = pastBoundary ? clearY - dir * WICKET_ARC_PULLBACK : startY
+  // Квадратичная Безье: P0 = (startX, fromY), P1 = (ось, fromY) —
+  // контрольная на оси на высоте старта, P2 = (ось, clearY)
+  const p0x = startX
+  const p0y = fromY
+  const p2x = axisX
+  const p2y = clearY
+  const len = Math.hypot(p2x - p0x, p2y - p0y)
+  const n = Math.min(16, Math.max(6, Math.round(len / 10)))
+  const pts: { x: number; y: number }[] = []
+  if (pastBoundary) pts.push({ x: startX, y: fromY })
+  for (let i = 1; i <= n; i++) {
+    const t = i / n
+    const mt = 1 - t
+    pts.push({
+      x: mt * mt * p0x + 2 * t * mt * axisX + t * t * p2x,
+      y: mt * mt * p0y + 2 * t * mt * fromY + t * t * p2y,
+    })
+  }
+  return pts
+}
+
 // [№20-3] Забор по краям калитки: корпус человека не пересекает линию
 // забора F вне проёма калитки. Толкания/уступания у калитки больше не
 // выносят человека за забор — он скользит вдоль линии, пока не придёт на

@@ -141,9 +141,14 @@ const trackMotion = (agents: any[], traceEvery = 0) => {
           const moving = v > 0.5 && d > 0.01
           if (moving) {
             if (prev.wasMoving) {
-              // реверс осевой составляющей при заметном шаге
-              if (Math.abs(dx) > 0.03 && prev.mvx !== 0 && Math.sign(dx) !== Math.sign(prev.mvx)) s.reversals++
-              if (Math.abs(dy) > 0.03 && prev.mvy !== 0 && Math.sign(dy) !== Math.sign(prev.mvy)) s.reversals++
+              // [№25] реверс осевой составляющей, СУЩЕСТВЕННОЙ для шага:
+              // переворот компоненты считается зигзагом, только если она
+              // несёт >= 12% длины шага. Субпиксельные переходы через ноль
+              // (0.03px при шаге 0.35px почти горизонтального хода) — это
+              // гладкая дуга/баланс дрейфа и курса, а не видимое дёргание;
+              // раньше они засчитывались и маскировали настоящие зигзаги.
+              if (Math.abs(dx) > Math.max(0.03, d * 0.12) && prev.mvx !== 0 && Math.sign(dx) !== Math.sign(prev.mvx)) s.reversals++
+              if (Math.abs(dy) > Math.max(0.03, d * 0.12) && prev.mvy !== 0 && Math.sign(dy) !== Math.sign(prev.mvy)) s.reversals++
             }
             prev.mvx = dx; prev.mvy = dy
           }

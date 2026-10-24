@@ -15,7 +15,7 @@ import {
 import { trafficPointsFor, FOOT_PAD_PERSON, type TrafficPoints } from '~/utils/simulatorTraffic'
 import { getCarSvg, generateRealPersonSvg } from '~/utils/simulatorSvg'
 // [П7] индивидуальный темп людей 0.85..1.15 (у группы — общий)
-import { randomPersonPace, randomFirstDelay } from '~/utils/simTuning'
+import { randomPersonPace, initialSpawnDelay } from '~/utils/simTuning'
 import type { SceneElement, Direction, TravelMode, TrafficConfig, AiAgent, PersonInfo } from '~/types/simulator'
 // [PAYROLL] реестр проходов (ground truth) и шина событий оплаты
 import { takePayrollPass } from '~/utils/payrollPass'
@@ -76,17 +76,21 @@ export function useSimulatorSpawn(
   let lastSpawnAdded = 0
 
   const resetSpawnTimers = () => {
+    // [№21-РАНДОМ] randomizeSpawnStart (репорт №21, настройка в конфиге):
+    //  • false — прежний ДЕТЕРМИНИЗМ: фиксированные 10/14/20/25 с;
+    //  • true/не задана (по умолчанию) — случайная доля (0.2..0.6)
+    //    минимального интервала с границами [4, 45] с (initialSpawnDelay):
+    //    первый сценарий каждого запуска разный, порядок первых событий
+    //    непредсказуем.
+    const randomize = (simOpts.value as any)?.randomizeSpawnStart !== false
     spawnTimerPersonEnter = 0
-    // [№21-РАНДОМ] стартовые задержки — случайные окна от НАСТРОЕННОГО
-    // интервала (не фиксированные 10/14/20/25 с): первый сценарий каждого
-    // запуска разный, порядок первых событий непредсказуем
-    nextSpawnTimePersonEnter = randomFirstDelay(lastPersonIntervalMin, 0.15, 0.5, 6, 45)
+    nextSpawnTimePersonEnter = randomize ? initialSpawnDelay(lastPersonIntervalMin) : 10
     spawnTimerPersonExit = 0
-    nextSpawnPersonExit = randomFirstDelay(lastPersonIntervalMin, 0.15, 0.5, 8, 50)
+    nextSpawnPersonExit = randomize ? initialSpawnDelay(lastPersonIntervalMin) : 14
     spawnTimerCarEnter = 0
-    nextSpawnTimeCarEnter = randomFirstDelay(lastCarIntervalMin, 0.2, 0.7, 10, 60)
+    nextSpawnTimeCarEnter = randomize ? initialSpawnDelay(lastCarIntervalMin) : 20
     spawnTimerCarExit = 0
-    nextSpawnCarExit = randomFirstDelay(lastCarIntervalMin, 0.2, 0.7, 12, 70)
+    nextSpawnCarExit = randomize ? initialSpawnDelay(lastCarIntervalMin) : 25
     isFirstUpdate = true
   }
 

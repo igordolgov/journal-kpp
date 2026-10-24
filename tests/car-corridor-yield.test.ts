@@ -265,7 +265,10 @@ describe('уступание машин у ворот ([БАГ-РЕПОРТ-6])'
     for (let i = 0; i < 60; i++) {
       h.physics.updateAiMovement(DT, { carGateId: 'car-gate-1', personGateId: '' })
     }
-    expect(enter.state).toBe('waiting_after')
+    // [№24-БЕЗ-ОСТАНОВКИ] у ворот стоит выезжающая — въезжающая после
+    // прохода вовсе не встаёт на посадку: уезд немедленный, с текущей
+    // скоростью (ворота остаются оправданы ожидающей выезжающей [№13]).
+    expect(['moving_away', 'done']).toContain(enter.state)
     const backedOffY = centerOf(exit).y
     expect(backedOffY).toBeGreaterThan(EXIT_STOP_Y + 20)
 
@@ -273,6 +276,8 @@ describe('уступание машин у ворот ([БАГ-РЕПОРТ-6])'
     // [№12-РАЗЪЕЗД] коридор уезда занят отъехавшей выезжающей (та стоит на
     // оси ниже) — прежний «уезд вниз мимо отъехавшей» давал тупик «лоб в лоб».
     // Новое решение заказчика: въезжающая уезжает НАЛЕВО, освобождая ось.
+    // [№24] с правки №24 уезд налево происходит СРАЗУ после прохода —
+    // фаза 2 лишь дожидается ухода за боковой край сцены.
     h.gate.settings.isOpen = false
     h.gate.settings.isAnimating = false
     let leftTargetSet = false

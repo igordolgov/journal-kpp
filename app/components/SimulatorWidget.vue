@@ -479,10 +479,10 @@ const getGateStyle = (el: any): CSSProperties => _getGateStyle(toRaw(el)) as CSS
 
 // [№24-РУЧКА] разблокированная калитка (ручка зелёная/повёрнута) — CSS-класс
 // на обёртке ворот; сам поворот и цвет делает main.css, покадровых записей нет.
-// isAjar и wicketAjar — один и тот же замок (второй ключ читает локальная физика).
+// isAjar и wicketAjar — один и тот же замок (второй ключ читает физика).
 const gateUnlocked = (el: any): boolean => {
   const s: any = el?.settings
-  return !!(s && (s.isAjar || s.wicketAjar))
+  return !!(s && (s.isOpen || s.isAjar || s.wicketAjar))
 }
 
 // [П1][№12] темп шага: --walk-hold задаёт ФАЗУ CSS-анимации ходьбы
