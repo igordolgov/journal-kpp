@@ -44,6 +44,25 @@ export const WICKET_AJAR_SCALE = 0.86
 // 15 секунд»).
 export const WICKET_AJAR_TIMEOUT_S = 15
 
+// [№26-РУЧКА] Длительность анимации поворота ручки (main.css .wicket-handle,
+// transition 0.45s). Последовательность разблокировки: СНАЧАЛА ручка
+// поворачивается из горизонтального положения в вертикальное (красная ->
+// зелёная), и только ПОСЛЕ этого подошедший человек толкает полотно.
+export const WICKET_HANDLE_S = 0.45
+
+// [№26-РУЧКА] true, пока ручка ещё доигрывает поворот после разблокировки
+// (_handleAt ставит unlockWicket в useSimulatorCore). Для разблокировки
+// НАПРЯМУЮ (сцены/тесты ставят isAjar без unlockWicket) задержки нет —
+// пуш полотна происходит в первый же кадр, как раньше.
+export const wicketHandlePending = (
+  settings: Record<string, unknown> | undefined | null,
+  now: number,
+): boolean => {
+  const at = (settings as any)?._handleAt
+  if (!Number.isFinite(at)) return false
+  return now - (at as number) < WICKET_HANDLE_S * 1000
+}
+
 // Y-центр машины, стоящей на ЛИНИИ ОЖИДАНИЯ ВЪЕЗЖАЮЩИХ (бампер в 6 px над
 // линией дороги F — та же формула, что stop въезда: roadY - STANDOFF).
 export const exitWaitCenterY = (

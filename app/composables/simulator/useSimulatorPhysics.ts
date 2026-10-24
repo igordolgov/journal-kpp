@@ -16,7 +16,8 @@ import { walkHoldStep } from '~/utils/simTuning'
 // [№23-ДУГА] построение дуги прохода в створ калитки
 // [№24-БЕЗ-ОСТАНОВКИ] GATE_AXIS_WINDOW — коридор оси ворот для проверки
 // «у ворот есть другая машина»
-import { buildWicketArcPoints, clampPersonToFence, exitLaneBusy, exitPendingFor, exitWaitCenterY, GATE_AXIS_WINDOW, limitPersonPushY, roadSideBusyForDeparture } from '../../utils/gateFlow'
+// [№26-РУЧКА] wicketHandlePending — пуш полотна ждёт конца анимации ручки
+import { buildWicketArcPoints, clampPersonToFence, exitLaneBusy, exitPendingFor, exitWaitCenterY, GATE_AXIS_WINDOW, limitPersonPushY, roadSideBusyForDeparture, wicketHandlePending } from '../../utils/gateFlow'
 
 export function useSimulatorPhysics(
   simElements: Ref<SceneElement[]>,
@@ -867,6 +868,8 @@ export function useSimulatorPhysics(
           const oppCrossing = aiAgents.value.some(o =>
             o.id !== agent.id && o.type === 'car' && o.state === 'crossing' &&
             o.direction !== agent.direction)
+          // [№26-ПЛАВНЫЙ-ОТЪЕЗД] задний ход трогается рампой (раньше — мгновенные
+          // 55 px/с с места: видимый рывок у точки останова)
           let step = (oppCrossing ? CAR_YIELD_SPEED * 1.4 : CAR_YIELD_SPEED) * dt
           step = Math.min(step, CAR_YIELD_MAX - backoff)
           if (isExit) step = Math.min(step, Math.max(0, sceneSize.value.height - 50 - (el.y + el.height)))
@@ -895,7 +898,9 @@ export function useSimulatorPhysics(
             }
             el.x += bx * step
             el.y += by * step
-            el.velocity = CAR_YIELD_SPEED
+            // [№26-ПЛАВНЫЙ-ОТЪЕЗД] скорость отъезда — рампой от текущей
+            el.velocity = Math.min(isExit ? CAR_YIELD_SPEED * (oppCrossing ? 1.4 : 1) : CAR_YIELD_SPEED,
+              (el.velocity || 0) + CAR_YIELD_SPEED * 2.2 * dt)
             carBackoffByAgentId.set(agent.id, backoff + step)
           } else {
             el.velocity = 0
@@ -1027,8 +1032,12 @@ export function useSimulatorPhysics(
         // полностью открывают люди, а не кнопка (репорт №21). Звук скрипа
         // играет внутри openGateFn; дальше штатный gateOpenIdle запускает
         // проход, когда анимация открытия завершится.
+        // [№26-РУЧКА] последовательность «сначала ручка, потом калитка»:
+        // пока ручка доигрывает поворот (WICKET_HANDLE_S после unlockWicket),
+        // пуш полотна отложен — человек ждёт у створa.
         if (agent.type === 'person' && gate.settings.isAjar &&
-            !gate.settings.isOpen && !gate.settings.isAnimating) {
+            !gate.settings.isOpen && !gate.settings.isAnimating &&
+            !wicketHandlePending(gate.settings, Date.now())) {
           openGateFn(gate)
         }
         // [ФИКС-ЗАСТРЯНИЕ] копим время стояния у открытой, неанимирующейся калитки
@@ -1187,7 +1196,8 @@ export function useSimulatorPhysics(
                 if (!pathBusy) {
                   const step = Math.min(CAR_YIELD_SPEED * dt, Math.abs(remain))
                   el.y += dirY * step
-                  el.velocity = CAR_YIELD_SPEED
+                  // [№26-ПЛАВНЫЙ-ОТЪЕЗД] скольжение к точке ожидания — рампой
+                  el.velocity = Math.min(CAR_YIELD_SPEED, (el.velocity || 0) + CAR_YIELD_SPEED * 2.2 * dt)
                   continue
                 }
                 // путь к точке занят — ждём закрытия, где стоим (velocity уже 0)
@@ -1413,7 +1423,13 @@ export function useSimulatorPhysics(
           // [СХЕМА-ТРАЕКТОРИЙ] после прохода агент оказывается на ПРОТИВОПОЛОЖНОЙ
           // стороне забора: входящий — у базы (перед забором, 400),
           // выходящий — в городе (за забором, 150)
-          const targetZ = agent.direction === 'enter' ? 400 : 150
+          // [№26-Z] машины ВСЕГДА рисуются НИЖЕ людей (репорт №26): люди
+          // сохраняют слои 400/150, машины сдвинуты на полосу ниже —
+          // 390 (внутри базы, всё ещё выше ворот 300) и 120 (на дороге,
+          // ниже входящих людей 130-idx).
+          const targetZ = agent.type === 'car'
+            ? (agent.direction === 'enter' ? 390 : 120)
+            : (agent.direction === 'enter' ? 400 : 150)
           if ((el.zIndex || 0) !== targetZ) {
             el.zIndex = targetZ
             simElements.value = [...simElements.value]
@@ -1890,19 +1906,18 @@ export function useSimulatorPhysics(
         el.velocity = Math.max(targetSpeed, (el.velocity || 0) - DECEL * dt * 2)
       }
 
-      // [П1][№12] темп шага = скорости ходьбы: фаза CSS-анимации ног
-      // (_walkHold, секунды) растёт пропорционально пройденному пути
-      // (walkHoldStep = dt * v / cruise). При торможении ноги перебирают
-      // РЕЖЕ и НИКОГДА не быстрее естественного темпа анимации (прежняя
-      // версия копила «паузу» dt*(1-v/cruise), из-за чего фаза убегала
-      // вперёд — до 2x при остановке: «ускорение ног при торможении»).
-      // На крейсерской и на месте в DOM не пишем: крейсерская = естественное
-      // воспроизведение, на месте анимацию ставит на паузу is-paused.
+      // [П1][№12][№26-ФИКС-ФАЗА] темп шага = скорости ходьбы: фаза-ЗАДЕРЖКА
+      // CSS-анимации ног (_walkHold, секунды) растёт на dt*(1 - v/cruise)
+      // (walkHoldStep), пока человек идёт медленнее крейсерской — рендеримая
+      // скорость ног = v/cruise (замедлился — ноги реже, НИКОГДА не быстрее
+      // естественного темпа; на крейсерской фаза заморожена). Кап 2.5с:
+      // положительный delay больше возраста аватара показывал бы позу 0%.
+      // На месте анимацию ставит на паузу is-paused.
       if (agent.type === 'person') {
         const v = el.velocity || 0
         if (v > 0.05 && v < agent.speed) {
           const ws = el.settings ?? (el.settings = {})
-          ws._walkHold = (((ws as any)._walkHold as number) || 0) + walkHoldStep(dt, v, agent.speed)
+          ws._walkHold = Math.min((((ws as any)._walkHold as number) || 0) + walkHoldStep(dt, v, agent.speed), 2.5)
         }
       }
 
@@ -1934,10 +1949,13 @@ export function useSimulatorPhysics(
         // цель» развернуто за кадр — прежний прямой шаг давал видимый рывок
         // вбок. Храним курс ТОЛЬКО на ходу: за время паузы он не течёт, и
         // первый кадр возобновления блендится от дос_pauseового курса.
+        // [№26-ПЛАВНАЯ-ТИХАЯ-ЗОНА] бленд курса теперь продолжается И в тихой
+        // зоне (исключение убрано): ранее на границе 70px направление шага
+        // СКАЧКОМ менялось с бленднутого на прямой — видимый излом хода
+        // перед точкой останова. Бленд сам сходится к прямому направлению.
         let stepX = dirX
         let stepY = dirY
-        if (agent.type === 'person' && agent.state !== 'crossing' &&
-            !(agent.state === 'to_gate' && dist < ARRIVE_QUIET_ZONE)) {
+        if (agent.type === 'person' && agent.state !== 'crossing') {
           const h0 = headingByAgentId.get(agent.id)
           // разворот через «назад» не блендим — там путь всё равно перепланируется
           if (h0 && (h0.x * dirX + h0.y * dirY) > 0) {
@@ -1974,16 +1992,18 @@ export function useSimulatorPhysics(
       //      по курсу соседа (см. скан выше) — расхождение на полном ходу;
       //   3) аварийный клапан от наложения: при дистанции < PERSON_HARD_SEP
       //      радиальное «от соседа», плавное по весу, перекрывает всё.
-      // [ФИКС-ДЁРГАНИЕ] в тихой зоне прибытия (dist < ARRIVE_QUIET_ZONE) и в
-      // проходе (crossing) бокового танца нет — подход к точке остановки и
-      // проход через дверной проём идут по прямой (БАГ-РЕПОРТ-8: 5 реверсов
-      // за 1.5с в проёме). Стоящих не толкаем (клапан — исключение):
-      // строй группы и очереди у прохода не расползаются.
+      // [№26-ПЛАВНАЯ-ТИХАЯ-ЗОНА] в тихой зоне прибытия боковой танец не
+      // выключается РЕЗКО на границе 70px (прежний скачок силы = излом хода
+      // перед точкой останова), а ПЛАВНО гаснет: вес умножается на
+      // arriveFade = dist / ARRIVE_QUIET_ZONE, жёсткое выключение — только
+      // у самой посадки (< 12px). Аварийный клапан фейдится вместе с ним —
+      // контакт ближе 30px возможен только вне зоны посадки.
+      // Стоящих не толкаем: строй группы и очереди у прохода не расползаются.
       // [№13-НЕ-СКВОЗЬ] правило действует ПО ВСЕЙ СЦЕНЕ: люди в базе и на
       // дороге не проходят друг сквозь друга.
       if (agent.type === 'person' && (el.velocity || 0) > 0.5 &&
           agent.state !== 'crossing' &&
-          !(agent.state === 'to_gate' && dist < ARRIVE_QUIET_ZONE)) {
+          !(agent.state === 'to_gate' && dist < 12)) {
         const ccx = el.x + el.width / 2
         const ccy = el.y + el.height / 2
         let bypassW = 0                  // вес правого обхода 0..1
@@ -2042,10 +2062,15 @@ export function useSimulatorPhysics(
         }
         // 1) правый обход: непрерывный боковой уход к правой руке. Вес
         // непрерывен по дистанции, знак фиксирован курсом — реверсов нет.
+        // [№26] в тихой зоне вес дополнительно гаснет по остатку пути
+        // (arriveFade) — без излома силы на границе зоны.
         // [№23-КОЛЛАПС] прорыватель идёт своим курсом — встречные уступают
         // ему (обход для него выключен, аварийный клапан работает всегда)
         if (bypassW > 0 && !collapseActive) {
-          const lat = PERSON_BYPASS_SPEED * bypassW * dt
+          const arriveFade = agent.state === 'to_gate'
+            ? Math.max(0, Math.min(1, dist / ARRIVE_QUIET_ZONE))
+            : 1
+          const lat = PERSON_BYPASS_SPEED * bypassW * arriveFade * dt
           el.x += -dirY * lat
           // [№20-3б] обход не заносит корпус на линию забора
           const nextY = el.y + dirX * lat
@@ -2055,7 +2080,10 @@ export function useSimulatorPhysics(
         if (hardW > 0) {
           const m = Math.hypot(hardAX, hardAY)
           if (m > 0.01) {
-            const push = PERSON_HARD_SPEED * hardW * dt
+            const arriveFade = agent.state === 'to_gate'
+              ? Math.max(0, Math.min(1, dist / ARRIVE_QUIET_ZONE))
+              : 1
+            const push = PERSON_HARD_SPEED * hardW * arriveFade * dt
             el.x += (hardAX / m) * push
             // [№20-3б] клапан не выносит корпус на линию забора
             const nextY = el.y + (hardAY / m) * push

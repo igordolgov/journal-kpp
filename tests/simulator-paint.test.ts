@@ -217,9 +217,9 @@ describe('№16: кэш записей (write-once)', () => {
     expect(avatar.classes.has('is-paused')).toBe(false)
   })
 
-  it('quantizeWalkHold: шаг кванта 1/20с, отсутствие — 0', () => {
-    expect(quantizeWalkHold(0.123)).toBe(0.1)
-    expect(quantizeWalkHold(0.127)).toBe(0.15)
+  it('quantizeWalkHold: шаг кванта 1/60с (16.7мс — ниже порога заметности), отсутствие — 0', () => {
+    expect(quantizeWalkHold(0.123)).toBeCloseTo(7 / 60, 9)
+    expect(quantizeWalkHold(0.127)).toBeCloseTo(8 / 60, 9)
     expect(quantizeWalkHold(undefined)).toBe(0)
     expect(quantizeWalkHold(null)).toBe(0)
   })
@@ -229,7 +229,8 @@ describe('№16: кэш записей (write-once)', () => {
     const avatar = mkAvatar()
     const el: any = { x: 0, y: 0, velocity: 1, settings: { _walkHold: 1.234 } }
     paintAgent({ node, avatar }, el, false)
-    expect(avatar.style._props['--walk-hold']).toBe('1.25') // 1.234*20=24.68 -> 25 -> 1.25
+    // 1.234*60 = 74.04 -> 74 -> 74/60
+    expect(avatar.style._props['--walk-hold']).toBe(String(74 / 60))
   })
 
   it('кэши разных узлов независимы', () => {

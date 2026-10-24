@@ -69,8 +69,14 @@ export const generateWicketSVG = (width: number, height: number, gateParams: Par
   }
 
   // ИСПРАВЛЕНИЕ: Ручка также отодвинута от края
-  const handleX = innerW - handleWidth - edgePadding - 4
-  const handleY = (innerH - handleHeight) / 2
+  // [№26-РУЧКА] ЗАКРЫТО = ГОРИЗОНТАЛЬНАЯ ручка (брусок поперёк полотна),
+  // ОТКРЫТО = вертикальная: поворот -90° вокруг НИЖНЕЙ ТОЧКИ делает CSS
+  // (.gate-unlocked в main.css). Длина бруска = большая сторона параметров
+  // handleWidth/handleHeight, толщина = меньшая.
+  const handleLen = Math.max(handleWidth, handleHeight)
+  const handleThick = Math.min(handleWidth, handleHeight)
+  const handleX = innerW - handleLen - edgePadding - 4
+  const handleY = (innerH - handleThick) / 2
 
   return `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
     <rect x="0" y="0" width="${width}" height="${height}" fill="${frameColor}" rx="2"/>
@@ -78,8 +84,8 @@ export const generateWicketSVG = (width: number, height: number, gateParams: Par
       ${bars.join('')}
       <!-- [№24-РУЧКА] индикатор замка: вращается ОТНОСИТЕЛЬНО НИЖНЕЙ ТОЧКИ
            ручки (transform-origin), класс wicket-handle ловит CSS main.css -->
-      <g class="wicket-handle" style="transform-origin: ${handleX + handleWidth / 2}px ${handleY + handleHeight}px;">
-        <rect x="${handleX}" y="${handleY}" width="${handleWidth}" height="${handleHeight}" fill="${handleColor}" rx="2"/>
+      <g class="wicket-handle" style="transform-origin: ${handleX + handleLen / 2}px ${handleY + handleThick}px;">
+        <rect x="${handleX}" y="${handleY}" width="${handleLen}" height="${handleThick}" fill="${handleColor}" rx="2"/>
       </g>
     </g>
   </svg>`

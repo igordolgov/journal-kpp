@@ -145,12 +145,15 @@ describe('[№24-РУЧКА] разблокировка: замок на руч�
     expect(warnSpy.mock.calls.some(c => String(c[0]).includes('wicket-ajar'))).toBe(true)
   })
 
-  it('SVG калитки: ручка — g.wicket-handle, вращается от нижней точки, красная [№24]', () => {
+  it('SVG калитки: ручка ГОРИЗОНТАЛЬНАЯ (закрыто), вращается от нижней точки, красная [№24][№26]', () => {
     const svg = generateWicketSVG(60, 120)
     expect(svg).toContain('class="wicket-handle"')
-    // handleX = 60 - 8 - 2 - 4 = 46; handleY = (120 - 16)/2 = 52;
-    // нижняя точка ручки: (46 + 8/2, 52 + 16) = (50, 68)
-    expect(svg).toContain('transform-origin: 50px 68px')
+    // [№26] закрыто = ГОРИЗОНТАЛЬНАЯ ручка: брусок 16x8 (длина = max(8,16),
+    // толщина = min(8,16)); handleX = 60 - 16 - 2 - 4 = 38;
+    // handleY = (120 - 8)/2 = 56; нижняя точка: (38 + 16/2, 56 + 8) = (46, 64).
+    // CSS .gate-unlocked поворачивает её на -90° -> открыто = ВЕРТИКАЛЬНАЯ.
+    expect(svg).toContain('transform-origin: 46px 64px')
+    expect(svg).toContain('width="16" height="8"')       // брусок поперёк полотна
     expect(svg).toContain('fill="#dc2626"')              // красная = заперто
   })
 })
@@ -210,6 +213,24 @@ describe('[№21-КАЛИТКА-В-ЖИЗНИ] люди открывают пр�
     for (let i = 0; i < 5; i++) h.physics.updateAiMovement(DT, { carGateId: '', personGateId: 'w-1' })
     expect(h.openCalls.length).toBe(0)
     expect(p.state).toBe('waiting_before')
+  })
+
+  it('[№26-РУЧКА] пуш полотна отложен, пока ручка доигрывает (_handleAt свежий)', () => {
+    const h = buildPhysics()
+    // разблокировка «как из core»: isAjar + СВЕЖАЯ метка старта анимации ручки
+    h.wicket.settings.isAjar = true
+    h.wicket.settings._handleAt = Date.now()
+    const p = mkPerson('p-1', 580, 148, { x: 580, y: 148 })
+    h.aiAgents.value = [p as any]
+    for (let i = 0; i < 4; i++) h.physics.updateAiMovement(DT, { carGateId: '', personGateId: 'w-1' })
+    // 0.4с < WICKET_HANDLE_S (0.45с) — ручка ещё поворачивается, полотно ждёт
+    expect(h.openCalls.length).toBe(0)
+    expect(p.state).toBe('waiting_before')
+    // прошло 0.6с с разблокировки — ручка доиграла, человек толкает полотно
+    h.wicket.settings._handleAt = Date.now() - 600
+    for (let i = 0; i < 2; i++) h.physics.updateAiMovement(DT, { carGateId: '', personGateId: 'w-1' })
+    expect(h.openCalls).toContain('w-1')
+    expect(h.wicket.settings.isOpen).toBe(true)
   })
 })
 

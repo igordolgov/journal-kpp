@@ -303,6 +303,7 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
         if (isWicket && !targetOpen) {
           el.settings.isAjar = false
           el.settings.wicketAjar = false // [№24-РУЧКА] дубль-ключ локальной физики
+          delete el.settings._handleAt // [№26-РУЧКА] заперто — анимации ручки нет
         }
         el.settings.isAnimating = false
         gateTweens.delete(gateId)
@@ -417,6 +418,9 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
     // (tests/gate-life-21: settings.wicketAjar).
     el.settings.isAjar = true
     el.settings.wicketAjar = true
+    // [№26-РУЧКА] отметка старта анимации поворота: физика держит пуш полотна,
+    // пока ручка доигрывает (WICKET_HANDLE_S) — «сначала ручка, потом калитка»
+    el.settings._handleAt = Date.now()
     audio.playFromPool('wicket-sound', 'wicket-lock', 0.7)
     // [№22→№24] перехват ЗАКРЫВАЮЩЕЙСЯ: дверь «схватили и распахнули» —
     // полотно возвращаем в открытое (полный твин с текущего положения).
@@ -485,6 +489,7 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
     if (el.settings.gateType === 'wicket' || (el.width && el.width <= 60)) {
       el.settings.isAjar = false
       el.settings.wicketAjar = false // [№24-РУЧКА] дубль-ключ локальной физики
+      delete el.settings._handleAt // [№26-РУЧКА] полотно пошло — метка не нужна
       clearAjarTimer(String(el.id))
     }
     startGateAnimation(el, true)
@@ -511,6 +516,7 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
           (el.settings.isAjar || el.settings.wicketAjar)) {
         el.settings.isAjar = false
         el.settings.wicketAjar = false
+        delete el.settings._handleAt // [№26-РУЧКА] заперто — анимации ручки нет
         clearAjarTimer(String(el.id))
         audio.playFromPool('wicket-sound', 'wicket-lock', 0.7)
         return true

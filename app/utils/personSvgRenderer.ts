@@ -98,21 +98,21 @@ export function renderPersonSvg(
   const decor = computeHeadDecor(look, view, geo.head)
 
   // --- CSS-анимация ---
-  // [П1][№12] var(--walk-hold) задаёт ФАЗУ цикла ходьбы (секунды):
-  // симулятор наращивает её пропорционально пройденному пути
-  // (settings._walkHold), поэтому при медленном ходе ноги перебирают
-  // реже, а при торможении не ускоряются. Вне симулятора
-  // переменная не задана — фаза 0.
+  // [П1][№12][№26-ФИКС-ФАЗА] var(--walk-hold) задаёт ФАЗУ-ЗАДЕРЖКУ цикла
+  // ходьбы (секунды, ПОЛОЖИТЕЛЬНЫЙ delay): физика наращивает её на
+  // dt*(1 - v/cruise), пока человек идёт медленнее крейсерской, —
+  // рендеримая скорость ног = v/cruise (замедлился — ноги реже, при
+  // остановке замирают). Вне симулятора переменная не задана — фаза 0.
   const animStyle = isMoving ? (() => {
     const kf = buildKeyframes(look)
     return `
     <defs>
       <style>
-        .anim-arm-l { animation: arm-l ${kf.duration}s linear infinite; animation-delay: calc(var(--walk-hold, 0) * -1s); transform-origin: ${geo.armBack.shoulderX}px ${geo.armBack.shoulderY}px; }
-        .anim-arm-r { animation: arm-r ${kf.duration}s linear infinite; animation-delay: calc(var(--walk-hold, 0) * -1s); transform-origin: ${geo.armFront.shoulderX}px ${geo.armFront.shoulderY}px; }
-        .anim-leg-l { animation: leg-l ${kf.duration}s linear infinite; animation-delay: calc(var(--walk-hold, 0) * -1s); transform-origin: ${geo.legBack.hipX}px ${geo.legBack.hipY}px; }
-        .anim-leg-r { animation: leg-r ${kf.duration}s linear infinite; animation-delay: calc(var(--walk-hold, 0) * -1s); transform-origin: ${geo.legFront.hipX}px ${geo.legFront.hipY}px; }
-        .body-bounce { animation: body-bounce ${kf.duration}s linear infinite; animation-delay: calc(var(--walk-hold, 0) * -1s); }
+        .anim-arm-l { animation: arm-l ${kf.duration}s linear infinite; animation-delay: calc(var(--walk-hold, 0) * 1s); transform-origin: ${geo.armBack.shoulderX}px ${geo.armBack.shoulderY}px; }
+        .anim-arm-r { animation: arm-r ${kf.duration}s linear infinite; animation-delay: calc(var(--walk-hold, 0) * 1s); transform-origin: ${geo.armFront.shoulderX}px ${geo.armFront.shoulderY}px; }
+        .anim-leg-l { animation: leg-l ${kf.duration}s linear infinite; animation-delay: calc(var(--walk-hold, 0) * 1s); transform-origin: ${geo.legBack.hipX}px ${geo.legBack.hipY}px; }
+        .anim-leg-r { animation: leg-r ${kf.duration}s linear infinite; animation-delay: calc(var(--walk-hold, 0) * 1s); transform-origin: ${geo.legFront.hipX}px ${geo.legFront.hipY}px; }
+        .body-bounce { animation: body-bounce ${kf.duration}s linear infinite; animation-delay: calc(var(--walk-hold, 0) * 1s); }
         @keyframes leg-l { ${kf.legL} }
         @keyframes leg-r { ${kf.legR} }
         @keyframes arm-l { ${kf.armL} }
