@@ -18,6 +18,9 @@ import { walkHoldStep } from '~/utils/simTuning'
 // «у ворот есть другая машина»
 // [№26-РУЧКА] wicketHandlePending — пуш полотна ждёт конца анимации ручки
 import { buildWicketArcPoints, clampPersonToFence, exitLaneBusy, exitPendingFor, exitWaitCenterY, GATE_AXIS_WINDOW, limitPersonPushY, roadSideBusyForDeparture, wicketHandlePending } from '../../utils/gateFlow'
+// [№27-НАСТРОЙКИ-ЛЮДЕЙ] реестр настроек движения/логики людей (тумблеры +
+// плавные ползунки в Настройки -> Симулятор); читается на каждом тике
+import { tuneBool, tuneNumber } from '../../utils/personTuning'
 
 export function useSimulatorPhysics(
   simElements: Ref<SceneElement[]>,
@@ -82,12 +85,20 @@ export function useSimulatorPhysics(
   // после паузы уступания (стоял -> уступивший отошёл -> курс развернулся
   // на 30-60° за кадр) исчезает: выход из паузы — плавный поворот.
   const headingByAgentId = new Map<string, { x: number; y: number }>()
-  const PERSON_TURN_TAU = 0.15   // с: постоянная времени поворота курса
+  // [№27-НАСТРОЙКИ-ЛЮДЕЙ] все параметры логики людей читаются из
+  // simOpts.personTuning (реестр utils/personTuning.ts) с клампом по
+  // диапазону ползунков; отсутствующее значение = дефолт реестра.
+  // Изменения применяются НА ХОДУ — физика читает simOpts на каждом тике.
+  const personTuning = ((simOpts as any)?.personTuning ?? {}) as Record<string, unknown>
+  const PERSON_TURN_TAU = tuneBool(personTuning, 'pTurnSmoothOn')
+    ? tuneNumber(personTuning, 'pTurnTau')
+    : 0            // 0 — сглаживание курса выключено (kb = 1)
   const COLLAPSE_WINDOW_S = 1.2   // окно оценки прогресса
   // [№24] порог затора 2.0 -> 1.0 с (репорт №24: «право прорыва» через 1с):
   // фактически прорыв выдаётся после первого окна без прогресса (1.2с)
-  const COLLAPSE_STUCK_S = 1.0    // затор дольше — выдаём прорыв
-  const COLLAPSE_BREAK_S = 2.5    // длительность прорыва
+  const COLLAPSE_STUCK_S = tuneNumber(personTuning, 'pCollapseStuck')
+  const COLLAPSE_BREAK_S = tuneNumber(personTuning, 'pCollapseBreak')
+  const personCollapseOn = tuneBool(personTuning, 'pCollapseOn')
   const COLLAPSE_MIN_MOVE = 5     // px за окно, меньше — «без прогресса»
   const COLLAPSE_RADIUS = 70      // рядом не должно быть другого прорывателя
   // [ФИКС-висяки-3] жёсткий предохранитель фазы ПОСЛЕ прохода: суммарное
@@ -145,7 +156,9 @@ export function useSimulatorPhysics(
   // каждый из ~10 правил уступания — переключение правила было видимым
   // скачком скорости. Рамп 110 px/с² (шаг с места ~0.4с) сглаживает пульс;
   // фаза ног ∝ пройденному пути (№12), поэтому темп шага не искажается.
-  const PERSON_ACCEL = 110      // px/с²
+  // [№27] тумблер pAccelOn: выключен — скорость применяется мгновенно.
+  const personAccelOn = tuneBool(personTuning, 'pAccelOn')
+  const PERSON_ACCEL = personAccelOn ? tuneNumber(personTuning, 'pAccel') : 100000
   // [БАГ-РЕПОРТ-8-СТОП] кап отъезда 150 -> 175: остановка выезда поднята к
   // линии ворот (240), и отъезд на 150 оставлял выезжающую В зоне прохода
   // (240+150=390 < граница зоны 160+240=400) — уезжающая вниз машина вежливо
@@ -168,32 +181,45 @@ export function useSimulatorPhysics(
 
   // [ФИКС-УСТУПИ-ДОРОГУ] параметры мягкого расхождения пешеходов: ближе
   // PERSON_SEP_RADIUS движущиеся пешеходы плавно смещаются друг от друга
-  // (встречные — каждый в свою сторону), вместо прохода «сквозь» друг друга
-  const PERSON_SEP_RADIUS = 40   // px: дистанция начала расхождения
-  const PERSON_SEP_SPEED = 34    // px/с: темп бокового смещения
+  // (встречные — каждый в свою сторону), вместо прохода «сквозь» друг друга.
+  // [№27-НАСТРОЙКИ-ЛЮДЕЙ] все константы вынесены в реестр (тумблер + ползунок):
+  const personYieldOn = tuneBool(personTuning, 'pYieldOn')          // шаг уступания ждущего
+  const PERSON_WAIT_YIELD_RADIUS = tuneNumber(personTuning, 'pWaitYieldRadius')
+  const PERSON_SEP_SPEED = tuneNumber(personTuning, 'pYieldSpeed')   // px/с: темп шага уступания
+  const PERSON_YIELD_AVOID = tuneNumber(personTuning, 'pYieldAvoid') // px: обход соседей при уступании
+  const personNearCapOn = tuneBool(personTuning, 'pNearCapOn')       // притормаживание перед пешеходом
+  const PERSON_SEP_RADIUS = tuneNumber(personTuning, 'pSepRadius')   // px: радиус притормаживания
+  const personStandStopOn = tuneBool(personTuning, 'pStandStopOn')   // стоп перед стоящим
+  const PERSON_STAND_STOP_DIST = tuneNumber(personTuning, 'pStandStopDist')
   // [№25-ПРАВЫЙ-ОБХОД] единое правило «каждый правее» вместо дуги + сепарации:
   // вес обхода — непрерывная функция дистанции (ни одного булева переключателя),
   // знак сдвига — только от собственного курса, поэтому траектория без рывков
-  const PERSON_BYPASS_RADIUS = 80 // px: радиус раннего правого обхода
-  const PERSON_BYPASS_SPEED = 40  // px/с: темп бокового ухода к правой руке
-  const PERSON_HARD_SEP = 30      // px: радиус аварийного расталкивания (контакт)
-  const PERSON_HARD_SPEED = 60    // px/с: темп аварийного расталкивания
-  // [БАГ-РЕПОРТ-4-ТОЛЧОК] ждущий у прохода уступает ЗАРАНЕЕ: реагирует на
-  // любого встречного проходного состояния в этом радиусе (а не только на
-  // движущегося быстрее 0.5) и отходит в сторону от линии его курса
-  const PERSON_WAIT_YIELD_RADIUS = 66 // px
+  const personBypassOn = tuneBool(personTuning, 'pBypassOn')
+  const PERSON_BYPASS_RADIUS = tuneNumber(personTuning, 'pBypassRadius') // px: радиус раннего правого обхода
+  const PERSON_BYPASS_SPEED = tuneNumber(personTuning, 'pBypassSpeed')   // px/с: темп бокового ухода к правой руке
+  const personHardSepOn = tuneBool(personTuning, 'pHardSepOn')
+  const PERSON_HARD_SEP = tuneNumber(personTuning, 'pHardSep')       // px: радиус аварийного расталкивания (контакт)
+  const PERSON_HARD_SPEED = tuneNumber(personTuning, 'pHardSpeed')   // px/с: темп аварийного расталкивания
   // [ФИКС-ЗАСТРЯЛ-ВНИЗУ] «тихая зона» прибытия: на последнем отрезке к точке
   // остановки расталкивание и дрейф отключены — именно они дёргали агента
   // перед остановкой (толчок вбок -> коррекция курса -> новый толчок).
   // [БАГ-РЕПОРТ-4-ДЁРГАНИЕ] зона расширена 34 -> 70: покрывает весь
-  // тормозной отрезок (dist < 80), поэтому подход к линии ворот плавный
-  const ARRIVE_QUIET_ZONE = 70   // px
+  // тормозной отрезок (dist < 80), поэтому подход к линии ворот плавный.
+  // [№27] 0 = без тихой зоны (arriveFade вырождается в 1 по всей дистанции).
+  const ARRIVE_QUIET_ZONE = tuneNumber(personTuning, 'pQuietZone')   // px
+  // [№27] фейд тихой зоны: зона 0 = без гашения (безопасный делитель,
+  // dist/0 дал бы NaN при dist=0)
+  const arriveFadeOf = (dist: number): number =>
+    ARRIVE_QUIET_ZONE >= 1
+      ? Math.max(0, Math.min(1, dist / ARRIVE_QUIET_ZONE))
+      : 1
   // [П6] машина на посадке (waiting_after) больше НЕ ждёт закрытия ворот:
   // уезд после вежливой паузы 0.8с, шлагбаум закрывается сам после
   // расчистки створа (свип закрытия в конце тика). Прежний предохранитель
   // WAIT_AFTER_MAX (30с ожидания закрытия) стал не нужен — уезд безусловный.
-  const FORCE_CROSS_AFTER = 5        // сек: одиночка / лидер группы
-  const FORCE_CROSS_GROUP_AFTER = 12 // сек: член группы, даже если предыдущий не прошёл
+  // [№27-НАСТРОЙКИ-ЛЮДЕЙ] предохранители очереди — настраиваемые (pForceCross*)
+  const FORCE_CROSS_AFTER = tuneNumber(personTuning, 'pForceCross')          // сек: одиночка / лидер группы
+  const FORCE_CROSS_GROUP_AFTER = tuneNumber(personTuning, 'pForceCrossGroup') // сек: член группы
   
   // [WATCHDOG] страховка от вечных зависаний на сценах с кривыми/старыми
   // оффсетами: агент в движущемся состоянии (to_gate/crossing/moving_away),
@@ -958,7 +984,8 @@ export function useSimulatorPhysics(
         //     толкнуть, прежде чем они расходились).
         // Стоящих (waiting_before/waiting_after) не сдвигаем — очередь и
         // строй групп не расползаются; своих по группе исключаем.
-        if (agent.type === 'person') {
+        // [№27-НАСТРОЙКИ] механизм выключается тумблером pYieldOn.
+        if (agent.type === 'person' && personYieldOn) {
           const mcx = el.x + el.width / 2
           const mcy = el.y + el.height / 2
           let gx = 0, gy = 0, wMax = 0
@@ -999,18 +1026,70 @@ export function useSimulatorPhysics(
             wMax = Math.max(wMax, w)
           }
           if (wMax > 0) {
+            // [№27-ОБХОД-СОСЕДЕЙ] шаг уступания обходит ЖДУЩИХ РЯДОМ людей —
+            // включая своих по группе (репорт №27: «люди прыгают друг на друга
+            // после уступания»). Раньше уступающий отводился только от ИДУЩЕГО
+            // мимо: двое ждущих, уступая одному и тому же проходному, сходились
+            // в одну точку и накладывались, а шаг в сторону мог затолкать
+            // человека прямо на соседа. Добавка радиальна «от соседа»,
+            // непрерывна по дистанции — реверсов направления не порождает.
+            // Идущий мимо (to_gate/crossing/moving_away) в руление НЕ входит:
+            // от него уступающий отводится штатной радиальной составляющей
+            // выше, а лишняя радиальная примесь размывала боковой отход
+            // (минимальная дистанция пары падала ниже прежнего равновесия).
+            for (const other of aiAgents.value) {
+              if (other.id === agent.id || other.type !== 'person' || other.state === 'done') continue
+              if (other.state !== 'waiting_before' && other.state !== 'waiting_after') continue
+              const ocx = other.element.x + other.element.width / 2
+              const ocy = other.element.y + other.element.height / 2
+              const ox = ocx - mcx
+              const oy = ocy - mcy
+              const od = Math.hypot(ox, oy)
+              if (od < 0.01 || od >= PERSON_YIELD_AVOID) continue
+              const aw = (PERSON_YIELD_AVOID - od) / PERSON_YIELD_AVOID
+              gx += (ox / od) * aw
+              gy += (oy / od) * aw
+            }
             const gm = Math.hypot(gx, gy)
             if (gm > 0.01) {
               const push = wMax * PERSON_SEP_SPEED * dt
-              el.x += (gx / gm) * push
-              // [№20-3б] шаг уступания не выносит корпус на линию забора
-              const nextY = el.y + (gy / gm) * push
-              el.y = personGate ? limitPersonPushY(el, personGate, nextY) : nextY
-              // [БАГ-РЕПОРТ-5-АНИМАЦИЯ] уступающий ШАГАЕТ в сторону, а не
-              // скользит: боковой шаг фиксируется как скорость, чтобы
-              // гистерезис is-paused не замораживал анимацию рук/ног.
-              // Шаг закончился — velocity снова 0, агент «встаёт».
-              el.velocity = Math.max(el.velocity || 0, Math.min(PERSON_SEP_SPEED, push / Math.max(dt, 1e-4)))
+              let vx = (gx / gm) * push
+              let vy = (gy / gm) * push
+              // [№27-СТРАХОВКА-ШАГА] снимаем компоненту шага, заталкивающую
+              // нас в ЧУЖОЙ корпус: после шага дистанция до любого соседа не
+              // упадёт ниже жёсткого разделения (0.9 × PERSON_HARD_SEP).
+              // Шаг при этом скользит по касательной, а не блокируется —
+              // уступание продолжается в свободную сторону.
+              const sepMin = PERSON_HARD_SEP * 0.9
+              for (const other of aiAgents.value) {
+                if (other.id === agent.id || other.type !== 'person' || other.state === 'done') continue
+                const ocx = other.element.x + other.element.width / 2
+                const ocy = other.element.y + other.element.height / 2
+                const ox = ocx - mcx
+                const oy = ocy - mcy
+                const od = Math.hypot(ox, oy)
+                if (od <= 0.01) continue
+                if (od >= PERSON_HARD_SEP + Math.hypot(vx, vy)) continue
+                const ux2 = ox / od
+                const uy2 = oy / od
+                const along = vx * ux2 + vy * uy2
+                if (along > 0 && od - along < sepMin) {
+                  vx -= along * ux2
+                  vy -= along * uy2
+                }
+              }
+              const vm = Math.hypot(vx, vy)
+              if (vm > push * 0.2) {
+                el.x += vx
+                // [№20-3б] шаг уступания не выносит корпус на линию забора
+                const nextY = el.y + vy
+                el.y = personGate ? limitPersonPushY(el, personGate, nextY) : nextY
+                // [БАГ-РЕПОРТ-5-АНИМАЦИЯ] уступающий ШАГАЕТ в сторону, а не
+                // скользит: боковой шаг фиксируется как скорость, чтобы
+                // гистерезис is-paused не замораживал анимацию рук/ног.
+                // Шаг закончился — velocity снова 0, агент «встаёт».
+                el.velocity = Math.max(el.velocity || 0, Math.min(PERSON_SEP_SPEED, vm / Math.max(dt, 1e-4)))
+              }
             }
           }
         }
@@ -1082,7 +1161,15 @@ export function useSimulatorPhysics(
         // посадка не нужна вовсе, уезд немедленно без остатка вежливой
         // паузы и без ожидания закрытия (репорт №24). Одиночная машина при
         // пустых воротах ждёт по [№23] — ветка ниже не менялась.
-        if (agent.type === 'car' && gate && gate.settings &&
+        // [№27-УЕЗД-ЗАКРЫТИЕ] уезд без остановки возможен ТОЛЬКО когда
+        // ворота УЖЕ полностью закрыты: машина ни при каких условиях не
+        // уезжает из-под открытого/закрывающегося шлагбаума (репорт №27:
+        // «могут уезжать при незакрытых воротах, если другая подъехала
+        // ОЧЕНЬ БЛИЗКО»). Пока ворота не закрыты — машина ждёт в общем
+        // порядке ниже (вежливая пауза -> закрытие -> уезд; очередь у
+        // линии [№13] по-прежнему разрешает уезд после паузы).
+        if (agent.type === 'car' && gate?.settings &&
+            !gate.settings.isOpen && !gate.settings.isAnimating &&
             gateHasOtherCarWaiting(aiAgents.value, agent, gate) &&
             tryNoStopDeparture(agent, el, gate)) {
           continue
@@ -1122,7 +1209,11 @@ export function useSimulatorPhysics(
           // («может сразу уехать налево... чтобы не создавать пробку»).
           // Инвариант [№13] не страдает: с оси уходит корпус, свип закрытия
           // досчитывает и закрывает ворота сам.
-          if (agent.type === 'car' && agent.direction === 'enter' && gate &&
+          // [№27-УЕЗД-ЗАКРЫТИЕ] ранний уезд — только при ПОЛНОСТЬЮ закрытых
+          // воротах: при открытых машина ждёт в общем порядке (очередь
+          // выезжающей у линии разрешит уезд после паузы [№13]).
+          if (agent.type === 'car' && agent.direction === 'enter' && gate?.settings &&
+              !gate.settings.isOpen && !gate.settings.isAnimating &&
               exitPendingFor(aiAgents.value, agent, gate)) {
             console.warn('[car-left-departure] выезжающая хочет выезд — ранний уезд налево:', agent.id)
             agent.afterTarget = { x: -60 - el.width / 2, y: el.y + el.height / 2, width: 0, height: 0 }
@@ -1142,7 +1233,14 @@ export function useSimulatorPhysics(
           // кто-то стоит, но обе стороны дороги заняты встречными — ранний
           // уезд откладывается: корректор ниже поднимает машину на глубокую
           // посадку, уезд после закрытия. Инвариант [№13] держит свип [G2].
-          if (agent.type === 'car' && agent.direction === 'exit' && gate &&
+          // [№27-УЕЗД-ЗАКРЫТИЕ] ранний уезд — только при ПОЛНОСТЬЮ закрытых
+          // воротах: подъехавшая близко встречная больше НЕ разрешает уезд
+          // из-под открытого шлагбаума (репорт №27). Пока встречная на
+          // подходе, ворота успевает закрыть свип [G2] (подъезжающая не
+          // очередь — [G3] держит ворота только для waiting_before);
+          // встала у линии — уезд по правилу очереди [№13] после паузы.
+          if (agent.type === 'car' && agent.direction === 'exit' && gate?.settings &&
+              !gate.settings.isOpen && !gate.settings.isAnimating &&
               exitLaneBusy(aiAgents.value, agent, gate)) {
             const curCy0 = el.y + el.height / 2
             const origSide0: 'left' | 'right' = agent.afterTarget.x < el.x ? 'left' : 'right'
@@ -1501,7 +1599,11 @@ export function useSimulatorPhysics(
             // ни вежливой паузы, ни ожидания полного закрытия. Очередь у
             // створа сама оправдывает открытые ворота ([№13]), свип [G2]
             // закроет створ, когда корпус уйдёт из зоны (репорт №24).
-            if (gate && gate.settings && gateHasOtherCarWaiting(aiAgents.value, agent, gate) &&
+            // [№27-УЕЗД-ЗАКРЫТИЕ] — ТОЛЬКО при уже полностью закрытых
+            // воротах: иначе штатная посадка и уезд после закрытия
+            // (репорт №27: «не уезжать при незакрытых воротах»).
+            if (gate?.settings && !gate.settings.isOpen && !gate.settings.isAnimating &&
+                gateHasOtherCarWaiting(aiAgents.value, agent, gate) &&
                 tryNoStopDeparture(agent, el, gate)) {
               continue
             }
@@ -1745,7 +1847,9 @@ export function useSimulatorPhysics(
           // разрешение хода: пока он В МОЁМ коридоре (lateral < 34 — его же
           // порог отхода), я жду; отошёл — один раз трогаюсь. Стоп-гонки
           // «встал-пошёл-встал» больше нет и прохода по корпусу тоже.
-          if (ahead > 8 && ahead < 54 &&
+          // [№27-НАСТРОЙКИ] дистанция — ползунок pStandStopDist, механизм
+          // отключается тумблером pStandStopOn (учёт для коллапса остаётся).
+          if (ahead > 8 && ahead < PERSON_STAND_STOP_DIST &&
               ((lateral < 26 && oVel <= 0.5) ||
                (lateral < 34 && other.state === 'waiting_before'))) {
             standingAhead = true
@@ -1761,11 +1865,11 @@ export function useSimulatorPhysics(
         // отходил от ЕГО линии курса, которая сама дрейфовала вслед за
         // отходом (оба скользили вбок паровозиком, никто не расходился).
         // Транзит идёт: кап дистанции и правый обход разводят их без стопа.
-        if (standingAhead && !bypassActive && !collapseActive &&
+        if (standingAhead && personStandStopOn && !bypassActive && !collapseActive &&
             agent.state !== 'crossing' && agent.state !== 'moving_away') {
           targetSpeed = 0
           holdByAgentId.set(agent.id, 'standing') // [БАГ-РЕПОРТ-7] человек на курсе
-        } else if (!oncomingAhead && personNearAhead < PERSON_SEP_RADIUS * 1.6 && !collapseActive) {
+        } else if (personNearCapOn && !oncomingAhead && personNearAhead < PERSON_SEP_RADIUS * 1.6 && !collapseActive) {
           // [№25] кап скорости НЕ действует на встречных (флаг по курсу
           // корпуса): встречная пара расходится правым обходом на полном
           // ходу, без торможений. Кап остаётся для попутного/стоящего
@@ -1799,7 +1903,9 @@ export function useSimulatorPhysics(
                   const ody = (o.element.y + o.element.height / 2) - cy
                   return Math.hypot(odx, ody) < COLLAPSE_RADIUS
                 })
-                if (!collapseActive && stuck >= COLLAPSE_STUCK_S && gateOpenOk && !breakerNear) {
+                if (!personCollapseOn) {
+                  // [№27-НАСТРОЙКИ] прорыв затора отключён — счётчик не копим
+                } else if (!collapseActive && stuck >= COLLAPSE_STUCK_S && gateOpenOk && !breakerNear) {
                   collapseBreakByAgentId.set(agent.id, COLLAPSE_BREAK_S)
                   collapseStuckByAgentId.delete(agent.id)
                   console.warn('[collapse-break] прорыв затора у прохода:', agent.id)
@@ -2066,10 +2172,8 @@ export function useSimulatorPhysics(
         // (arriveFade) — без излома силы на границе зоны.
         // [№23-КОЛЛАПС] прорыватель идёт своим курсом — встречные уступают
         // ему (обход для него выключен, аварийный клапан работает всегда)
-        if (bypassW > 0 && !collapseActive) {
-          const arriveFade = agent.state === 'to_gate'
-            ? Math.max(0, Math.min(1, dist / ARRIVE_QUIET_ZONE))
-            : 1
+        if (bypassW > 0 && personBypassOn && !collapseActive) {
+          const arriveFade = agent.state === 'to_gate' ? arriveFadeOf(dist) : 1
           const lat = PERSON_BYPASS_SPEED * bypassW * arriveFade * dt
           el.x += -dirY * lat
           // [№20-3б] обход не заносит корпус на линию забора
@@ -2077,12 +2181,11 @@ export function useSimulatorPhysics(
           el.y = personGate ? limitPersonPushY(el, personGate, nextY) : nextY
         }
         // 2) аварийный клапан от наложения (контакт ближе PERSON_HARD_SEP)
-        if (hardW > 0) {
+        // [№27-НАСТРОЙКИ] отключается тумблером pHardSepOn
+        if (hardW > 0 && personHardSepOn) {
           const m = Math.hypot(hardAX, hardAY)
           if (m > 0.01) {
-            const arriveFade = agent.state === 'to_gate'
-              ? Math.max(0, Math.min(1, dist / ARRIVE_QUIET_ZONE))
-              : 1
+            const arriveFade = agent.state === 'to_gate' ? arriveFadeOf(dist) : 1
             const push = PERSON_HARD_SPEED * hardW * arriveFade * dt
             el.x += (hardAX / m) * push
             // [№20-3б] клапан не выносит корпус на линию забора

@@ -1,0 +1,181 @@
+// app/utils/personTuning.ts
+// [№27-НАСТРОЙКИ-ЛЮДЕЙ] Единый реестр настроек ДВИЖЕНИЯ И ЛОГИКИ ЛЮДЕЙ.
+//
+// Репорт №27: «добавь в настройки симулятора ВСЕ настройки движения и
+// логики людей, с возможностью отключать/включать их и регулировать
+// значения плавно. чтобы я сам регулировал».
+//
+// Каждая запись реестра — один ползунок: ключ в config.simulator.personTuning,
+// подпись/подсказка для UI, диапазон и шаг (плавная регулировка), дефолт.
+// Механизмы с тумблером несут toggleKey: выключенный механизм физика
+// пропускает целиком (обход, уступание, расталкивание, стоп, прорыв...).
+//
+// Чтение в физике — через tuneNumber/tuneBool: число клампится диапазоном
+// реестра (ползунок не единственный источник: старые сцены/сейвы могут
+// содержать мусор), отсутствующее значение = дефолт реестра.
+// Значения применяются НА ХОДУ: физика читает их на каждом тике
+// (simOpts.prototype = props.simSettings), перезапуск симуляции не нужен.
+
+export interface PersonTuningField {
+  // ключ значения в config.simulator.personTuning
+  key: string
+  // ключ тумблера механизма (если механизм можно выключить)
+  toggleKey?: string
+  label: string
+  hint: string
+  unit: string
+  min: number
+  max: number
+  step: number
+  def: number
+}
+
+export const PERSON_TUNING_FIELDS: PersonTuningField[] = [
+  // --- 1. Правый обход («каждый правее», №25) ---
+  {
+    key: 'pBypassRadius', toggleKey: 'pBypassOn',
+    label: 'Правый обход — радиус начала',
+    hint: 'С какого расстояния идущий человек начинает смещаться вправо, обходя встречного или медленного соседа.',
+    unit: 'px', min: 20, max: 140, step: 5, def: 80,
+  },
+  {
+    key: 'pBypassSpeed', toggleKey: 'pBypassOn',
+    label: 'Правый обход — темп смещения',
+    hint: 'Боковая скорость обхода. Больше — люди расходятся энергичнее.',
+    unit: 'px/с', min: 10, max: 80, step: 2, def: 40,
+  },
+  // --- 2. Уступание ждущего (шаг в сторону у прохода) ---
+  {
+    key: 'pWaitYieldRadius', toggleKey: 'pYieldOn',
+    label: 'Уступание — радиус реакции',
+    hint: 'Ждущий у прохода отходит вбок, когда к нему подходит человек ближе этого радиуса.',
+    unit: 'px', min: 30, max: 120, step: 3, def: 66,
+  },
+  {
+    key: 'pYieldSpeed', toggleKey: 'pYieldOn',
+    label: 'Уступание — темп шага',
+    hint: 'Скорость бокового шага уступающего.',
+    unit: 'px/с', min: 10, max: 80, step: 2, def: 34,
+  },
+  {
+    key: 'pYieldAvoid', toggleKey: 'pYieldOn',
+    label: 'Уступание — обход соседей',
+    hint: 'Шаг уступания обходит любого соседа в этом радиусе: человек не заталкивается на стоящего рядом (репорт №27 «прыгают друг на друга после уступания»).',
+    unit: 'px', min: 20, max: 100, step: 5, def: 50,
+  },
+  // --- 3. Аварийное расталкивание (контакт) ---
+  {
+    key: 'pHardSep', toggleKey: 'pHardSepOn',
+    label: 'Расталкивание — радиус контакта',
+    hint: 'Дистанция, ближе которой тела физически расталкиваются в стороны.',
+    unit: 'px', min: 16, max: 60, step: 2, def: 30,
+  },
+  {
+    key: 'pHardSpeed', toggleKey: 'pHardSepOn',
+    label: 'Расталкивание — темп',
+    hint: 'Скорость взаимного отталкивания при контакте.',
+    unit: 'px/с', min: 10, max: 120, step: 5, def: 60,
+  },
+  // --- 4. Стоп перед стоящим на курсе ---
+  {
+    key: 'pStandStopDist', toggleKey: 'pStandStopOn',
+    label: 'Стоп перед стоящим — дистанция',
+    hint: 'Идущий останавливается, не доходя столько до стоящего на его курсе (очередь не втаптывает стоящего).',
+    unit: 'px', min: 20, max: 90, step: 2, def: 54,
+  },
+  // --- 5. Притормаживание перед пешеходом ---
+  {
+    key: 'pSepRadius', toggleKey: 'pNearCapOn',
+    label: 'Притормаживание — радиус',
+    hint: 'Идущий сбавляет темп, если по курсу ближе этого радиуса есть человек.',
+    unit: 'px', min: 20, max: 80, step: 5, def: 40,
+  },
+  // --- 6. Сглаживание курса (№24-ПЛАВНЫЙ-ВЫХОД) ---
+  {
+    key: 'pTurnTau', toggleKey: 'pTurnSmoothOn',
+    label: 'Сглаживание курса — постоянная',
+    hint: 'Плавность поворота после паузы/уступания. Больше — плавнее, но менее манёвренно.',
+    unit: 'с', min: 0.05, max: 0.6, step: 0.05, def: 0.15,
+  },
+  // --- 7. Плавный разгон (№20-ПЛАВНОСТЬ) ---
+  {
+    key: 'pAccel', toggleKey: 'pAccelOn',
+    label: 'Плавный разгон',
+    hint: 'Набор скорости после старта/паузы. Максимум (400) — практически мгновенный старт.',
+    unit: 'px/с²', min: 40, max: 400, step: 10, def: 110,
+  },
+  // --- 8. Тихая зона прибытия (№26-ПЛАВНАЯ-ТИХАЯ-ЗОНА) ---
+  {
+    key: 'pQuietZone',
+    label: 'Тихая зона прибытия',
+    hint: 'На последнем отрезке перед точкой останова обход и расталкивание плавно гаснут. 0 — без тихой зоны (может дёргать у посадки).',
+    unit: 'px', min: 0, max: 140, step: 10, def: 70,
+  },
+  // --- 9. Прорыв затора (№23-КОЛЛАПС) ---
+  {
+    key: 'pCollapseStuck', toggleKey: 'pCollapseOn',
+    label: 'Прорыв затора — порог',
+    hint: 'Сколько секунд пара/толпа стоят без прогресса, прежде чем один получит «право прорыва».',
+    unit: 'с', min: 0.5, max: 5, step: 0.5, def: 1,
+  },
+  {
+    key: 'pCollapseBreak', toggleKey: 'pCollapseOn',
+    label: 'Прорыв затора — длительность',
+    hint: 'Сколько секунд прорыватель идёт своим курсом, никого не обходя (остальные уступают ему).',
+    unit: 'с', min: 1, max: 6, step: 0.5, def: 2.5,
+  },
+  // --- 10. Принудительный проход (предохранитель очереди) ---
+  {
+    key: 'pForceCross',
+    label: 'Принуд. проход одиночки',
+    hint: 'Одиночка или лидер группы начинает проход сам, если калитка не открылась за это время.',
+    unit: 'с', min: 3, max: 30, step: 1, def: 5,
+  },
+  {
+    key: 'pForceCrossGroup',
+    label: 'Принуд. проход в группе',
+    hint: 'То же для члена группы (идёт следом даже если предыдущий ещё не прошёл).',
+    unit: 'с', min: 6, max: 60, step: 1, def: 12,
+  },
+]
+
+// Значения по умолчанию (заливаются в config.simulator.personTuning)
+export const defaultPersonTuning = (): Record<string, number | boolean> => {
+  const out: Record<string, number | boolean> = {}
+  for (const f of PERSON_TUNING_FIELDS) {
+    out[f.key] = f.def
+    if (f.toggleKey && out[f.toggleKey] === undefined) out[f.toggleKey] = true
+  }
+  return out
+}
+
+const fieldOf = (key: string): PersonTuningField | undefined =>
+  PERSON_TUNING_FIELDS.find(f => f.key === key)
+
+// Число из personTuning с клампом по диапазону реестра.
+// Нет значения/мусор -> дефолт реестра (или явный def, если передан).
+export const tuneNumber = (
+  src: Record<string, unknown> | undefined | null,
+  key: string,
+  def?: number,
+  min?: number,
+  max?: number,
+): number => {
+  const f = fieldOf(key)
+  const lo = min ?? f?.min ?? 0
+  const hi = max ?? f?.max ?? Number.MAX_SAFE_INTEGER
+  const fallback = def ?? f?.def ?? 0
+  const n = Number(src?.[key])
+  return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : fallback
+}
+
+// Тумблер: отсутствует/null -> def; иначе строгое !== false (включён по умолчанию)
+export const tuneBool = (
+  src: Record<string, unknown> | undefined | null,
+  key: string,
+  def: boolean = true,
+): boolean => {
+  const v = src?.[key]
+  if (v === undefined || v === null) return def
+  return v !== false
+}

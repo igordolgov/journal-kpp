@@ -5,6 +5,8 @@
 
 import { useState, computed } from '#imports'
 import { useDatabase } from './useDatabase'
+// [№27-НАСТРОЙКИ-ЛЮДЕЙ] дефолты реестра движения/логики людей
+import { defaultPersonTuning } from '../utils/personTuning'
 
 // --- Интерфейсы ---
 
@@ -78,6 +80,10 @@ export interface ISimulatorConfig {
   journalManualMigrated?: boolean
   // [ФИКС-флуд] Одноразовый маркер миграции темпа спавна (см. loadConfig)
   spawnPaceMigrated?: boolean
+  // [№27-НАСТРОЙКИ-ЛЮДЕЙ] тумблеры и ползунки логики людей
+  // (ключи/диапазоны/дефолты — реестр PERSON_TUNING_FIELDS, utils/personTuning.ts).
+  // Отсутствующие ключи = дефолты реестра; физика читает их на каждом тике.
+  personTuning?: Record<string, number | boolean>
   // --- Физика движения ---
   ACCEL: number
   DECEL: number
@@ -214,7 +220,9 @@ const defaultConfig: IConfig = {
     DEADLOCK_TIME: 5,
     REVERSE_TIME: 1.5,
     REVERSE_SPEED: 20,
-    SPRITE_ORIENTATION_OFFSET: 0
+    SPRITE_ORIENTATION_OFFSET: 0,
+    // [№27-НАСТРОЙКИ-ЛЮДЕЙ] тумблеры + ползунки логики людей (дефолты реестра)
+    personTuning: defaultPersonTuning(),
   },
 
   seeder: {
@@ -295,6 +303,18 @@ export const useConfig = () => {
 
       if (values.simulator) {
         Object.assign(config.value.simulator, values.simulator)
+        // [№27-НАСТРОЙКИ-ЛЮДЕЙ] personTuning мержится ПО КЛЮЧАМ реестра:
+        // старые сейвы без personTuning получают полный набор дефолтов,
+        // частичные — недостающие ключи; мусорные ключи сейва выкидываются
+        const savedTuning = (values.simulator.personTuning ?? {}) as Record<string, unknown>
+        const mergedTuning = defaultPersonTuning()
+        for (const key of Object.keys(mergedTuning)) {
+          const v = savedTuning[key]
+          if (typeof v === typeof mergedTuning[key] && v !== null) {
+            ;(mergedTuning as Record<string, unknown>)[key] = v
+          }
+        }
+        config.value.simulator.personTuning = mergedTuning
         // [PAYROLL] Одноразовая миграция на ручной журнал: до неё дефолт
         // был autoJournal=true — симулятор сам вёл журнал, и штрафы за
         // записи были недостижимы. Флаг отделяет «старый» конфиг от

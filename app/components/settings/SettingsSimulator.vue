@@ -181,12 +181,44 @@
               label.label.cursor-pointer(title="Эксперимент с рывками: отключите финальное торможение у точки ожидания и сравните плавность")
                 span.label-text Финальное торможение
                 input.toggle.toggle-sm.toggle-primary(type="checkbox" v-model="simSettings.finalBrake")
+
+//- [№27-НАСТРОЙКИ-ЛЮДЕЙ] тумблеры + плавные ползунки движения/логики людей.
+//- Ключи, диапазоны и дефолты — единый реестр PERSON_TUNING_FIELDS
+//- (utils/personTuning.ts). Значения живут в simSettings.personTuning и
+//- применяются физикой НА ХОДУ (читаются на каждом тике) — перезапуск не нужен.
+.card.mb-6.shadow.bg-base-100
+  .card-body
+    h4.card-title.mb-4 🚶 Движение и логика людей
+    p.text-sm.text-gray-500.mb-4 Тумблер включает/выключает механизм, ползунок регулирует его силу плавно. Применяются сразу, без перезапуска симуляции.
+    .grid.gap-3(class="md:grid-cols-2")
+      .border.border-base-300.rounded-xl.p-3.bg-base-200(v-for="f in personTuningFields" :key="f.key")
+        .flex.items-center.justify-between.gap-2
+          label.label.flex.items-center.gap-2.cursor-pointer(:title="f.hint")
+            span.label-text.text-sm {{ f.label }}
+            input.toggle.toggle-sm.toggle-primary(type="checkbox" v-if="f.toggleKey" v-model="simSettings.personTuning[f.toggleKey]")
+          span.text-xs.font-mono.text-gray-400 {{ simSettings.personTuning[f.key] }} {{ f.unit }}
+        input.range.range-xs.range-primary.w-full.mt-1(type="range" :min="f.min" :max="f.max" :step="f.step" v-model.number="simSettings.personTuning[f.key]")
+        label.label
+          span.label-text-alt.text-xs.text-gray-500 {{ f.hint }}
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useConfig } from '~/composables/useConfig'
+import { PERSON_TUNING_FIELDS, defaultPersonTuning } from '~/utils/personTuning'
 
 const configStore = useConfig()
 const simSettings = computed(() => configStore.config.value.simulator)
+
+// [№27-НАСТРОЙКИ-ЛЮДЕЙ] реестр ползунков; personTuning гарантируется
+// дефолтами useConfig, но на всякий случай доливаем дефолты на месте
+const personTuningFields = PERSON_TUNING_FIELDS
+if (!simSettings.value.personTuning) {
+  simSettings.value.personTuning = defaultPersonTuning()
+} else {
+  const cur = simSettings.value.personTuning
+  for (const [key, def] of Object.entries(defaultPersonTuning())) {
+    if (cur[key] === undefined) cur[key] = def
+  }
+}
 </script>

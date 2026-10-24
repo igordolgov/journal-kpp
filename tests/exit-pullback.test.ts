@@ -117,7 +117,7 @@ describe('уезд выезжающей ([№23-ВЫЕЗД-ЗАКРЫТИЕ])', 
     expect(exit.afterTarget.x).toBeGreaterThan(SCENE.width)
   })
 
-  it('встречная подъезжает справа (цель на линии) — У ВОРОТ есть машина: уезд сразу в свободную сторону (налево) ([№23-исключение])', () => {
+  it('встречная подъезжает справа (цель на линии) — уезд ТОЛЬКО после полного закрытия ([№27])', () => {
     const h = buildHarness()
     const enter = mkCar('car-e', 'enter', 'to_gate',
       1000, ENTER_STOP_Y, { x: 580, y: ENTER_STOP_Y }, { x: 580, y: 900 })
@@ -125,8 +125,17 @@ describe('уезд выезжающей ([№23-ВЫЕЗД-ЗАКРЫТИЕ])', 
       580, EXIT_CROSS_Y, { x: 580, y: EXIT_CROSS_Y }, { x: 1300, y: EXIT_CROSS_Y })
     h.aiAgents.value = [enter, exit as any]
 
-    tick(h, 10) // ~1с: пауза истекла — правая сторона занята, левая свободна
-    expect(exit.state).toBe('moving_away')
+    // [№27] подъехавшая близко встречная больше НЕ разрешает уезд из-под
+    // открытого шлагбаума: вежливая пауза прошла, ворота открыты — машина
+    // ждёт закрытия (правая сторона при этом занята встречной)
+    tick(h, 10) // ~1с
+    expect(exit.state).toBe('waiting_after')
+
+    // оператор закрыл ворота — уезд сразу в свободную сторону (налево)
+    h.gate.settings.isOpen = false
+    h.gate.settings.isAnimating = false
+    tick(h, 3)
+    expect(['moving_away', 'done']).toContain(exit.state)
     expect(exit.afterTarget.x).toBeLessThan(0)
   })
 
