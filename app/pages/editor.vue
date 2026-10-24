@@ -111,7 +111,7 @@
         :config="sceneConfig"
         :scripts="sceneConfig.scripts"
         :is-running="simulatorRunning"
-        :sim_settings="simulatorSettings"
+        :sim-settings="simulatorSettings"
         @close="toggleSimulator"
       )
 

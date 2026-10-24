@@ -11,6 +11,9 @@
 //  5) уезд выезжающей — в сторону без встречных въезжающих на дороге;
 //  6) человек не пересекает линию забора вне проёма калитки;
 //  7) скорость людей меняется рампом (анти-рывок), не мгновенно.
+// [№23] машины при пустых воротах ждут ПОЛНОГО закрытия до уезда; проход
+// смещённого уступанием человека — плавная дуга в створ (без прямого
+// возврата на ось); взаимный затор встречных разрешается прорывом.
 
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { ref } from 'vue'
@@ -137,27 +140,35 @@ describe('[№20-БЕЗ-ВОЗВРАТА] цель прохода выезжаю
   })
 })
 
-describe('[№21-ВЫЕЗД/№20-КОРРЕКТОР] точка ожидания выезжающей до закрытия', () => {
-  it('обе стороны дороги заняты — ждёт закрытия на линии; сторона освободилась — уезжает, не дожидаясь заезда', () => {
+describe('[№23-ВЫЕЗД/№20-КОРРЕКТОР] точка ожидания выезжающей до закрытия', () => {
+  it('у ворот никого — ждёт ПОЛНОГО закрытия на линии ([№23]); после закрытия уезд в свободную сторону', () => {
     const h = buildHarness([makeCarGate()])
-    // встречные на дороге слева и справа (корпуса и цели вне осевого
-    // коридора) — уезд некуда, выезжающая ждёт закрытия, стоя на линии
-    const enterL = mkCar('car-l', 'enter', 'to_gate', 200, ENTER_STOP_Y, { x: 300, y: ENTER_STOP_Y }, { x: CX, y: 900 })
-    const enterR = mkCar('car-r', 'enter', 'to_gate', 1000, ENTER_STOP_Y, { x: 900, y: ENTER_STOP_Y }, { x: CX, y: 900 })
+    // встречные — ТРАНЗИТ по дороге (moving_away, цели вне осевого коридора):
+    // у ворот никого — раннего уезда нет ни при каких сторонах. (to_gate не
+    // годится: его цель каждый тик переписывается на стоп-линию ворот —
+    // выходила бы «машина у ворот». moving_away цели не переписываются.)
+    const enterL = mkCar('car-l', 'enter', 'moving_away', 200, ENTER_STOP_Y, { x: 60, y: ENTER_STOP_Y }, { x: 60, y: ENTER_STOP_Y })
+    const enterR = mkCar('car-r', 'enter', 'moving_away', 1000, ENTER_STOP_Y, { x: 1140, y: ENTER_STOP_Y }, { x: 1140, y: ENTER_STOP_Y })
     const exit = mkCar('car-x', 'exit', 'waiting_after', CX, ENTER_STOP_Y, { x: CX, y: ENTER_STOP_Y }, { x: 1300, y: ENTER_STOP_Y })
     h.aiAgents.value = [enterL as any, enterR as any, exit as any]
-    tick(h, 12) // пауза 0.8с+; обе стороны заняты — НЕ уезжает (точку держит корректор)
+    tick(h, 12) // пауза 0.8с+ — ждёт закрытия ([№23]), ворота открыты
+    expect(exit.state).toBe('waiting_after')
+    expect(h.simElements.value[0].settings.isOpen).toBe(true)
+
+    // правая сторона освободилась — ВСЁ РАВНО ждёт закрытия: у ворот никого
+    h.aiAgents.value = [enterL as any, exit as any]
+    tick(h, 12)
     expect(exit.state).toBe('waiting_after')
 
-    // правая сторона освободилась — сразу уезжает по исходной (правой),
-    // ворота ещё открыты
-    h.aiAgents.value = [enterL as any, exit as any]
-    tick(h, 2)
-    expect(exit.state).toBe('moving_away')
+    // оператор закрыл ворота — уезд по правой (свободной) стороне
+    h.simElements.value[0].settings.isOpen = false
+    h.simElements.value[0].settings.isAnimating = false
+    tick(h, 3)
+    expect(['moving_away', 'done']).toContain(exit.state)
     expect(exit.afterTarget.x).toBeGreaterThan(1280)
   })
 
-  it('встречная претендует на ось (цель в коридоре) при занятой встречной стороне — корректор поднимает на посадку', () => {
+  it('у ворот машина (цель в коридоре), обе стороны дороги заняты — корректор поднимает на посадку, уезд после закрытия', () => {
     const h = buildHarness([makeCarGate()])
     // слева встречная на дороге (сторона занята), справа — машина, чья ЦЕЛЬ
     // на линии ожидания (претендует на ось): уезд некуда, линию надо
@@ -167,7 +178,7 @@ describe('[№21-ВЫЕЗД/№20-КОРРЕКТОР] точка ожидани�
     const exit = mkCar('car-x', 'exit', 'waiting_after', CX, ENTER_STOP_Y, { x: CX, y: ENTER_STOP_Y }, { x: 1300, y: ENTER_STOP_Y })
     h.aiAgents.value = [enterL as any, enterR as any, exit as any]
 
-    tick(h, 25) // 2.5с — корректор поднимает выезжающую на посадку
+    tick(h, 25) // 2.5с — корректор поднимает выезжающую на посадку (раннего уезда нет: стороны дороги заняты)
     expect(exit.state).toBe('waiting_after')
     expect(Math.abs(centerOf(exit).y - EXIT_CROSS_Y)).toBeLessThanOrEqual(3)
   })
@@ -200,10 +211,12 @@ describe('[№20-УЕЗД] сторона уезда выезжающей', () =
     const exit = mkCar('car-x', 'exit', 'waiting_after', CX, ENTER_STOP_Y, { x: CX, y: ENTER_STOP_Y }, { x: 1300, y: ENTER_STOP_Y })
     const enter = mkCar('car-e', 'enter', 'to_gate', 950, ENTER_STOP_Y, { x: CX, y: ENTER_STOP_Y }, { x: CX, y: 900 })
     h.aiAgents.value = [exit as any, enter as any]
-    tick(h, 10) // пауза; полоса «занята» целью въезжающей — стоим на посадке? нет: корпус выезжающей уже на линии...
+    // [№23] встречная претендует на ось (цель в коридоре) — У ВОРОТ есть
+    // машина: ранний уезд в свободную сторону сразу после вежливой паузы
+    tick(h, 10)
 
-    // выезжающая поднимется на посадку (линия претендована), затем оператор
-    // закрывает ворота — уезд вбок по фактической полосе и в СВОБОДНУЮ сторону
+    // ранний уезд уже произошёл (ворота открыты); закрытие оператора
+    // не влияет — уезд вбок по фактической полосе и в СВОБОДНУЮ сторону
     h.simElements.value[0].settings.isOpen = false
     h.simElements.value[0].settings.isAnimating = false
     tick(h, 3)
@@ -268,21 +281,21 @@ describe('[№20-КАЛИТКА-ЗАБОР] человек не пересека
   })
 })
 
-describe('[№21-ТВОР] проход строго через проём калитки', () => {
-  it('смещённый уступанием человек сначала выравнивается по оси, затем идёт в створ (не косяк)', () => {
+describe('[№23-ДУГА] проход смещённого человека — плавная дуга в створ', () => {
+  it('смещённый уступанием человек идёт к створу дугой: первая цель НЕ ось, проход строго в проём', () => {
     const h = buildHarness([makeWicket()])
     // человек смещён от оси 580 на 40px (после уступания выходящему)
     const p = mkPerson('p-1', 'waiting_before', 540, 148, { x: 580, y: 148 })
     h.aiAgents.value = [p as any]
 
     tick(h, 1)
-    // фаза выравнивания: цель = ось проёма на текущей высоте
+    // дуга началась: первая точка между стартом и осью, БЕЗ прямого возврата
     expect(p.state).toBe('crossing')
-    expect(p.target.x).toBe(580)
-    expect(Math.abs(p.target.y - centerOf(p).y)).toBeLessThanOrEqual(2)
+    expect(p.target.x).toBeGreaterThan(540)
+    expect(p.target.x).toBeLessThan(580)
 
     // проход: пока корпус пересекает полосу забора (низ в диапазоне F±8),
-    // человек строго на оси — плечи не цепляют косяк
+    // человек в проёме — плечи не цепляют косяк
     let maxDev = 0
     let crossed = false
     for (let i = 0; i < 160; i++) {
@@ -300,7 +313,33 @@ describe('[№21-ТВОР] проход строго через проём ка�
     expect(centerOf(p as any).y).toBeGreaterThan(226)
   })
 
-  it('человек на оси начинает проход без фазы выравнивания', () => {
+  it('человек у самой линии забора после уступания сначала отходит от забора, затем дуга в створ — без наезда на забор', () => {
+    const h = buildHarness([makeWicket()])
+    // визуальный низ ровно на линии F (посадка входа), смещён на 40px
+    const touchCy = F - PERSON.height / 2 + 2   // footPad = 2
+    const p = mkPerson('p-2', 'waiting_before', 540, touchCy, { x: 580, y: 148 })
+    h.aiAgents.value = [p as any]
+    tick(h, 1)
+    expect(p.state).toBe('crossing')
+    // первая точка — отход ОТ забора (Y уменьшается, от линии прочь)
+    expect(p.target.y).toBeLessThan(touchCy - 3)
+
+    // весь проход: пока корпус НЕ в проёме (|cx-580| > 4) — визуальный низ
+    // не ниже линии забора (скольжение вдоль, не сквозь)
+    let violation = false
+    let crossed = false
+    for (let i = 0; i < 200; i++) {
+      tick(h, 1)
+      const c = centerOf(p as any)
+      const visualBottom = p.element.y + p.element.height - FOOT_PAD_PERSON
+      if (Math.abs(c.x - 580) > 4 && visualBottom > F + 0.5) violation = true
+      if (c.y > 226 + 40) { crossed = true; break }
+    }
+    expect(crossed).toBe(true)
+    expect(violation).toBe(false)
+  })
+
+  it('человек на оси начинает проход без дуги', () => {
     const h = buildHarness([makeWicket()])
     const p = mkPerson('p-2', 'waiting_before', 580, 148, { x: 580, y: 148 })
     h.aiAgents.value = [p as any]

@@ -1,11 +1,15 @@
 // tests/wicket-life.test.ts
-// [№21-КАЛИТКА-В-ЖИЗНИ] логика калитки как в жизни (репорт №21):
+// [№21-КАЛИТКА-В-ЖИЗНИ] логика калитки как в жизни (репорт №21) с правкой
+// [№24-РУЧКА] (замок показывает только ручка, полотно не приоткрывается):
 //  1) кнопка «КАЛИТКА ОТКРЫТЬ» / клик по калитке = РАЗБЛОКИРОВКА: звук
-//     щелчка замка + приоткрытие (isAjar), но НЕ полное открытие;
+//     щелчка замка, флаг isAjar/wicketAjar; ПОЛОТНО НЕ ДВИГАЕТСЯ —
+//     индикатор замка это ручка (поворот + цвет, CSS .gate-unlocked);
 //  2) полностью калитку открывают подошедшие люди (физика вызывает
-//     openGateFn, когда человек встал в waiting_before у приоткрытой);
-//  3) если за WICKET_AJAR_TIMEOUT_S её никто не открыл — захлопывается;
-//  4) открытую кликом калитку закрываем (как раньше);
+//     openGateFn, когда человек встал в waiting_before у разблокированной);
+//  3) если за WICKET_AJAR_TIMEOUT_S её никто не открыл — ЗАПИРАЕТСЯ сама
+//     (без твина и удара — полотно не двигалось);
+//  4) открытую кликом калитку закрываем (как раньше); повторный клик по
+//     разблокированной (не открытой) — ЗАПИРАНИЕ;
 //  5) к кнопке «wicket-open» подключена разблокировка, а не полное открытие.
 
 import { describe, it, expect, vi, afterEach } from 'vitest'
@@ -13,7 +17,8 @@ import { ref } from 'vue'
 import { useSimulatorCore } from '~/composables/simulator/useSimulatorCore'
 import { useSimulatorPhysics } from '~/composables/simulator/useSimulatorPhysics'
 import { useSimulatorUI } from '~/composables/simulator/useSimulatorUI'
-import { WICKET_AJAR_SCALE, WICKET_AJAR_TIMEOUT_S } from '~/utils/gateFlow'
+import { generateWicketSVG } from '~/constants/library'
+import { WICKET_AJAR_TIMEOUT_S } from '~/utils/gateFlow'
 import { PERSON_WIDTH, PERSON_HEIGHT } from '~/utils/simulatorConstants'
 
 const DT = 0.1
@@ -36,19 +41,21 @@ const buildCore = (overrides: Record<string, unknown> = {}) => {
   return { wicket, simElements, core }
 }
 
-describe('[№21-КАЛИТКА-В-ЖИЗНИ] разблокировка и приоткрытие', () => {
+describe('[№24-РУЧКА] разблокировка: замок на ручке, полотно на месте', () => {
   afterEach(() => {
     vi.restoreAllMocks()
     vi.useRealTimers()
   })
 
-  it('unlockWicket: приоткрывает (isAjar), НЕ открывает полностью, планирует захлопывание', () => {
+  it('unlockWicket: снимает замок (isAjar+wicketAjar), НЕ открывает, БЕЗ анимации полотна', () => {
     const { wicket, core } = buildCore()
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     expect(core.unlockWicket(wicket as any)).toBe(true)
     expect(wicket.settings.isAjar).toBe(true)
+    expect(wicket.settings.wicketAjar).toBe(true)       // дубль-ключ локальной физики
     expect(wicket.settings.isOpen).toBe(false)          // пройти ещё нельзя
-    expect(wicket.settings.isAnimating).toBe(true)      // анимация приоткрытия идёт
+    expect(wicket.settings.isAnimating).toBe(false)     // полотно НЕ приоткрывается [№24]
+    expect((wicket.settings as any)._animScaleX ?? 1).toBe(1) // полотно на месте
   })
 
   it('повторная разблокировка приоткрытой калитки безопасна', () => {
@@ -70,12 +77,17 @@ describe('[№21-КАЛИТКА-В-ЖИЗНИ] разблокировка и п�
     expect(sliding.core.unlockWicket(sliding.wicket as any)).toBe(false)
   })
 
-  it('клик по калитке = разблокировка; клик по открытой = закрытие', () => {
+  it('клик по калитке = разблокировка; клик по открытой = закрытие; клик по разблокированной = ЗАПИРАНИЕ [№24]', () => {
     const { wicket, core } = buildCore()
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     core.handleGateClick(wicket as any)
     expect(wicket.settings.isAjar).toBe(true)
     expect(wicket.settings.isOpen).toBe(false)
+    // повторный клик: разблокирована и не открыта — запираем, ручка назад
+    core.handleGateClick(wicket as any)
+    expect(wicket.settings.isAjar).toBe(false)
+    expect(wicket.settings.wicketAjar).toBe(false)
+    expect(wicket.settings.isAnimating).toBe(false)     // без холостого твина
 
     const opened = buildCore({ isOpen: true })
     vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -86,14 +98,23 @@ describe('[№21-КАЛИТКА-В-ЖИЗНИ] разблокировка и п�
     expect(opened.wicket.settings.isAjar).toBeFalsy()
   })
 
+  it('«ЗАКРЫТЬ» на разблокированной (полотно не открыто) = запирание без твина и удара [№24]', () => {
+    const { wicket, core } = buildCore()
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    core.unlockWicket(wicket as any)
+    expect(core.closeGate(wicket as any)).toBe(true)
+    expect(wicket.settings.isAjar).toBe(false)
+    expect(wicket.settings.wicketAjar).toBe(false)
+    expect(wicket.settings.isOpen).toBe(false)
+    expect(wicket.settings.isAnimating).toBe(false)
+  })
+
   it('полное открытие снимает разблокировку и её таймер', () => {
     vi.useFakeTimers()
     const { wicket, core } = buildCore()
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     core.unlockWicket(wicket as any)
-    // приоткрытие завершилось (твин в узловой среде не тикает — вручную,
-    // как в wicket-pass)
-    wicket.settings.isAnimating = false
+    // [№24] твина приоткрытия больше нет — полотно ждёт людей на месте
     // человек толкнул: полное открытие
     expect(core.openGate(wicket as any)).toBe(true)
     expect(wicket.settings.isAjar).toBe(false)
@@ -107,30 +128,30 @@ describe('[№21-КАЛИТКА-В-ЖИЗНИ] разблокировка и п�
     expect(wicket.settings.isAjar).toBe(false)
   })
 
-  it('никто не открыл — калитка захлопывается сама (таймаут приоткрытия)', () => {
+  it('никто не открыл — калитка ЗАПИРАЕТСЯ сама по таймауту (без твина и удара) [№24]', () => {
     vi.useFakeTimers()
     const { wicket, core } = buildCore()
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     core.unlockWicket(wicket as any)
-    // завершаем приоткрытие вручную (твин в узловой среде не тикает)
-    wicket.settings.isAnimating = false
     vi.advanceTimersByTime(WICKET_AJAR_TIMEOUT_S * 1000 - 100)
-    expect(wicket.settings.isAjar).toBe(true)           // ещё приоткрыта
+    expect(wicket.settings.isAjar).toBe(true)           // ещё разблокирована
     vi.advanceTimersByTime(200)
-    // захлопывание запущено: закрытие анимируется, разблокировка снята
-    // (isOpen=false остаётся, isAjar снимет onComplete закрытия)
-    expect(wicket.settings.isAnimating).toBe(true)
+    // [№24] полотно не двигалось — таймаут просто ЗАПИРАЕТ: ручка назад,
+    // красная; ни закрытого твина, ни звука удара
+    expect(wicket.settings.isOpen).toBe(false)
+    expect(wicket.settings.isAjar).toBe(false)
+    expect(wicket.settings.wicketAjar).toBe(false)
+    expect(wicket.settings.isAnimating).toBe(false)
     expect(warnSpy.mock.calls.some(c => String(c[0]).includes('wicket-ajar'))).toBe(true)
   })
 
-  it('приоткрытие анимируется не до 0.1 (полное), а до WICKET_AJAR_SCALE', () => {
-    const { wicket, core } = buildCore()
-    vi.spyOn(console, 'warn').mockImplementation(() => {})
-    core.unlockWicket(wicket as any)
-    // твин зарегистрирован с целевым масштабом приоткрытия — проверяем
-    // через верификацию константы, чтобы тест не зависел от тиков gsap
-    expect(WICKET_AJAR_SCALE).toBeGreaterThan(0.5)
-    expect(WICKET_AJAR_SCALE).toBeLessThan(1)
+  it('SVG калитки: ручка — g.wicket-handle, вращается от нижней точки, красная [№24]', () => {
+    const svg = generateWicketSVG(60, 120)
+    expect(svg).toContain('class="wicket-handle"')
+    // handleX = 60 - 8 - 2 - 4 = 46; handleY = (120 - 16)/2 = 52;
+    // нижняя точка ручки: (46 + 8/2, 52 + 16) = (50, 68)
+    expect(svg).toContain('transform-origin: 50px 68px')
+    expect(svg).toContain('fill="#dc2626"')              // красная = заперто
   })
 })
 
@@ -246,13 +267,14 @@ describe('[№22-КНОПКИ] кнопки работают в любой фа�
     return { wicket, core }
   }
 
-  it('unlock перехватывает ЗАКРЫВАЮЩУЮСЯ калитку (как схватить дверь)', () => {
+  it('unlock перехватывает ЗАКРЫВАЮЩУЮСЯ калитку (как схватить дверь) [№24]', () => {
     const { wicket, core } = stageClosing()
     expect(core.unlockWicket(wicket as any)).toBe(true)
-    // твин перехвачен: снова открывается, цель — приоткрытие
+    // твин перехвачен: полотно распахивается обратно В ОТКРЫТОЕ
+    // (приоткрытия больше нет, [№24]); замок снят — ручка зелёная
     expect(wicket.settings.isAnimating).toBe(true)
     expect(wicket.settings.isAjar).toBe(true)
-    expect(core.gateTweenTarget.get('w-1')).toMatchObject({ open: true, ajar: true })
+    expect(core.gateTweenTarget.get('w-1')).toMatchObject({ open: true, ajar: false })
   })
 
   it('unlock при открывающейся — no-op: не сбивает толчок людьми', () => {
@@ -288,11 +310,11 @@ describe('[№22-КНОПКИ] кнопки работают в любой фа�
     expect(core.gateTweens.has('w-1')).toBe(false)           // твин не создан
   })
 
-  it('клик по закрывающейся калитке перехватывает её (unlock)', () => {
+  it('клик по закрывающейся калитке перехватывает её (unlock) [№24]', () => {
     const { wicket, core } = stageClosing()
     core.handleGateClick(wicket as any)
     expect(wicket.settings.isAjar).toBe(true)
-    expect(core.gateTweenTarget.get('w-1')).toMatchObject({ open: true, ajar: true })
+    expect(core.gateTweenTarget.get('w-1')).toMatchObject({ open: true, ajar: false })
   })
 })
 

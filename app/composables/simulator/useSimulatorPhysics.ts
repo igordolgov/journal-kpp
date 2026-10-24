@@ -13,7 +13,8 @@ import { trafficPointsFor } from '~/utils/simulatorTraffic'
 import { walkHoldStep } from '~/utils/simTuning'
 // [№20-ВОРОТА-ИДЕАЛ] общая логика зоны ворот: точка ожидания выезда,
 // ранний уезд въезжающей налево, выбор стороны уезда, забор калитки
-import { clampPersonToFence, exitLaneBusy, exitPendingFor, exitWaitCenterY, limitPersonPushY, roadSideBusyForDeparture } from '~/utils/gateFlow'
+// [№23-ДУГА] построение дуги прохода в створ калитки
+import { buildWicketArcPoints, clampPersonToFence, exitLaneBusy, exitPendingFor, exitWaitCenterY, limitPersonPushY, roadSideBusyForDeparture } from '../../utils/gateFlow'
 
 export function useSimulatorPhysics(
   simElements: Ref<SceneElement[]>,
@@ -53,10 +54,30 @@ export function useSimulatorPhysics(
   // никогда» (остановлены оператором, зависла анимация): по истечении
   // лимита машина уезжает без ожидания (с предупреждением в консоль).
   const gateCloseWaitByAgentId = new Map<string, number>()
-  // [№21-ТВОР] фаза выравнивания прохода: человек, смещённый вбок
-  // уступанием, сначала ШАГАЕТ К ОСИ проёма (горизонтальная фаза), и только
-  // затем идёт сквозь калитку строго по створу — плечо не цепляет косяк.
-  const crossAlignByAgentId = new Set<string>()
+  // [№23-ДУГА] очередь точек дуги прохода: человек, смещённый уступанием,
+  // идёт к створу плавной дугой (квадратичная Безье, см.
+  // gateFlow.buildWicketArcPoints) — без прямого возврата на ось и без
+  // острой смены курса на вертикаль. Последняя точка очереди — сквозная
+  // exitPoint; очередь опустошается перехватом в блоке прибытия crossing.
+  const crossArcByAgentId = new Map<string, { x: number; y: number }[]>()
+  // [№23-КОЛЛАПС] прорыв затора у прохода (репорт №23: «люди должны быстрее
+  // разбираться с коллапсом»; «уступают встречным, если это не создаёт
+  // ситуацию коллапса»). Пока уступание работает — все расходятся правее;
+  // когда пара/толпа взаимно замерли (взаимное standingAhead, скорость у
+  // всех ~0, дрейф отключён его же условием velocity > 0.5) — счётчик
+  // затора копит окна без прогресса, после порога один из участников
+  // получает «право прорыва»: на COLLAPSE_BREAK_S секунд он идёт своим
+  // курсом БЕЗ уступаний/остановок перед стоящими, остальные уступают ему
+  // штатно (он для них движущийся встречный). Затор разрешается за секунды
+  // вместо сторожа-телепорта через 10 с.
+  const collapseStuckByAgentId = new Map<string, number>()   // накопленные секунды затора
+  const collapseBreakByAgentId = new Map<string, number>()   // остаток прорыва, сек
+  const collapseAnchorByAgentId = new Map<string, { x: number; y: number; t: number }>()
+  const COLLAPSE_WINDOW_S = 1.2   // окно оценки прогресса
+  const COLLAPSE_STUCK_S = 2.0    // затор дольше — выдаём прорыв
+  const COLLAPSE_BREAK_S = 2.5    // длительность прорыва
+  const COLLAPSE_MIN_MOVE = 5     // px за окно, меньше — «без прогресса»
+  const COLLAPSE_RADIUS = 70      // рядом не должно быть другого прорывателя
   // [ФИКС-висяки-3] жёсткий предохранитель фазы ПОСЛЕ прохода: суммарное
   // время агента в crossing + moving_away. Штатно это секунды (плюс ~1 мин
   // хода за край у медленного пешехода); превышение лимита означает
@@ -411,7 +432,10 @@ export function useSimulatorPhysics(
         gateCloseWaitByAgentId.delete(agent.id) // [№13] без утечек ожидания закрытия
         postGateTrack.delete(agent.id) // [ФИКС-висяки-3] без утечек
         crossTrack.delete(agent.id) // [ФИКС-застыл-калитка] без утечек
-        crossAlignByAgentId.delete(agent.id) // [№21-ТВОР] без утечек
+        crossArcByAgentId.delete(agent.id) // [№23-ДУГА] без утечек
+        collapseStuckByAgentId.delete(agent.id) // [№23-КОЛЛАПС] без утечек
+        collapseBreakByAgentId.delete(agent.id)
+        collapseAnchorByAgentId.delete(agent.id)
         if (agent.type === 'car') audio.disposePool(`car-${agent.id}`)
         simElements.value = simElements.value.filter(el => el.id !== agent.id)
         return false
@@ -449,18 +473,32 @@ export function useSimulatorPhysics(
           crossTarget = { x: crossTarget.x, y: exitWaitCenterY(exitGate, agent.element.height) }
         }
       }
-      // [№21-ТВОР] человек после уступания смещён вбок от оси проёма: проход
-      // начинается с ВЫРАВНИВАНИЯ по оси калитки (горизонтальный шаг до
-      // створки), затем строго вертикальный проход — в створ, не косяк.
-      // Сквозная цель сохранена в exitPoint; фаза снимается при прибытии
-      // (перехват в блоке прибытия crossing ниже).
+      // [№23-ДУГА] человек после уступания смещён вбок от оси проёма: проход
+      // идёт ПЛАВНОЙ ДУГОЙ к створу (репорт №23: «можно продолжить движение
+      // к цели плавно по дуге», без прямого возврата на своё место). Дуга
+      // выводит на ось за 6px до линии забора, дальше — строго вертикальный
+      // проход в проём (створ чист при любом смещении). Сквозная цель
+      // сохранена в exitPoint — она замыкает очередь точек.
       if (agent.type === 'person' &&
           Number.isFinite(agent.exitPoint?.x) && Number.isFinite(agent.exitPoint?.y)) {
         const pg = simElements.value.find(g => String(g.id) === cfg.personGateId)
         const axisX = pg ? pg.x + pg.width / 2 : agent.exitPoint!.x
-        if (Math.abs((agent.element.x + agent.element.width / 2) - axisX) > 2) {
-          crossAlignByAgentId.add(agent.id)
-          crossTarget = { x: axisX, y: agent.element.y + agent.element.height / 2 }
+        const offX = (agent.element.x + agent.element.width / 2) - axisX
+        if (Math.abs(offX) > 2) {
+          const fenceY = pg ? pg.y + pg.height : agent.exitPoint!.y
+          const arc = buildWicketArcPoints(
+            agent.element.x + agent.element.width / 2,
+            agent.element.y + agent.element.height / 2,
+            axisX,
+            agent.exitPoint!.y,
+            fenceY,
+            agent.element.height / 2,
+          )
+          const first = arc[0]
+          if (first) {
+            crossArcByAgentId.set(agent.id, [...arc, { x: agent.exitPoint!.x, y: agent.exitPoint!.y }])
+            crossTarget = { x: first.x, y: first.y }
+          }
         }
       }
       agent.target = { ...crossTarget, width: 0, height: 0 }
@@ -995,15 +1033,19 @@ export function useSimulatorPhysics(
             waitAfterByAgentId.delete(agent.id)
             continue
           }
-          // [№21-ВЫЕЗД] выезжающая машина уезжает СРАЗУ после вежливой паузы,
-          // если хотя бы одна сторона дороги свободна: встречная, заезжающая
-          // на базу, боковому уезду не мешает («сама машина уезжает в другую
-          // сторону», репорт №21). Ожидание закрытия ворот остаётся только
-          // когда ОБЕ стороны дороги заняты встречными — реальная машина не
-          // выезжает под поток. Инвариант [№13] держит свип закрытия [G2]:
-          // корпус выезжающей НЕ на линии шлагбаума, ворота закроются сами
-          // (очередь [G3] держит их легально).
-          if (agent.type === 'car' && agent.direction === 'exit' && gate) {
+          // [№23-ВЫЕЗД-ЗАКРЫТИЕ] выезжающая машина ОБЯЗАНА дождаться полного
+          // закрытия ворот (репорт №23: «машины обязательно должны ждать
+          // закрытия ворот после въезда/выезда, если у ворот нет другой
+          // машины»). Ранний уезд сразу после вежливой паузы — только когда
+          // У ВОРОТ есть другая машина (стоит или подъезжает: корпус ИЛИ
+          // цель в коридоре оси — exitLaneBusy): она задерживается у створа,
+          // и ранний уезд оправдан (репорты №20-4/№21-7 «не создавать пробку»).
+          // Уезд — в свободную от встречных сторону дороги. Если у ворот
+          // кто-то стоит, но обе стороны дороги заняты встречными — ранний
+          // уезд откладывается: корректор ниже поднимает машину на глубокую
+          // посадку, уезд после закрытия. Инвариант [№13] держит свип [G2].
+          if (agent.type === 'car' && agent.direction === 'exit' && gate &&
+              exitLaneBusy(aiAgents.value, agent, gate)) {
             const curCy0 = el.y + el.height / 2
             const origSide0: 'left' | 'right' = agent.afterTarget.x < el.x ? 'left' : 'right'
             const otherSide0: 'left' | 'right' = origSide0 === 'left' ? 'right' : 'left'
@@ -1019,8 +1061,8 @@ export function useSimulatorPhysics(
               gateCloseWaitByAgentId.delete(agent.id)
               continue
             }
-            // обе стороны заняты — прежний сценарий: корректор + ожидание
-            // закрытия (блок ниже), уезд после закрытия
+            // у ворот машина, но обе стороны дороги заняты встречными —
+            // прежний сценарий: корректор + ожидание закрытия (блок ниже)
           }
           if (!gateGone && !fullyClosed && !queueHoldsGate) {
             // [№20-КОРРЕКТОР-ТОЧКИ] выезжающая машина ждёт закрытия там, где
@@ -1260,16 +1302,19 @@ export function useSimulatorPhysics(
           }
         } 
         else if (agent.state === 'crossing') {
-          // [№21-ТВОР] прибытие в КОНЕЦ фазы выравнивания: разворачиваем цель
-          // на сквозную точку (exitPoint — ось проёма за калиткой) и продолжаем
-          // проход без смены состояния/слоя — переходы ниже не для этой фазы.
-          if (crossAlignByAgentId.has(agent.id)) {
-            crossAlignByAgentId.delete(agent.id)
-            const ex = agent.exitPoint
-            if (ex && Number.isFinite(ex.x) && Number.isFinite(ex.y)) {
-              agent.target = { x: ex.x, y: ex.y, width: 0, height: 0 }
+          // [№23-ДУГА] прибытие в точку дуги: цель = следующая точка очереди
+          // (движение не прерывается, скорость сохраняется). Последняя точка
+          // очереди — сквозная exitPoint: при её достижении очередь пустеет
+          // и штатный блок завершения прохода выполняется как обычно.
+          const arc = crossArcByAgentId.get(agent.id)
+          if (arc && arc.length) {
+            arc.shift()
+            const next = arc[0]
+            if (next) {
+              agent.target = { x: next.x, y: next.y, width: 0, height: 0 }
               continue
             }
+            crossArcByAgentId.delete(agent.id)
           }
           // [ФИКС-РЫВОК-ПОСЛЕ-КАЛИТКИ] скорость на стыке crossing ->
           // moving_away НЕ обнуляется: обнуление на 1-2 кадра ставило анимацию
@@ -1367,6 +1412,16 @@ export function useSimulatorPhysics(
         if (left > 0) bypassByAgentId.set(agent.id, left)
         else bypassByAgentId.delete(agent.id)
       }
+      // [№23-КОЛЛАПС] активен ли прорыв затора (и остаток, сек). Прорыватель
+      // идёт своим курсом без уступаний — остальные уступают ЕМУ штатно
+      // (для них он движущийся встречный, см. [№21-ВСТРЕЧНЫЕ]).
+      let collapseLeft = collapseBreakByAgentId.get(agent.id) ?? 0
+      if (collapseLeft > 0) {
+        collapseLeft -= dt
+        if (collapseLeft > 0) collapseBreakByAgentId.set(agent.id, collapseLeft)
+        else collapseBreakByAgentId.delete(agent.id)
+      }
+      const collapseActive = collapseLeft > 0
 
       let distanceToLeader = Infinity
       let leaderSpeed = Infinity
@@ -1518,7 +1573,10 @@ export function useSimulatorPhysics(
 
       let targetSpeed = agent.speed
       const safeDistance = Math.max(MIN_BUFFER, (el.velocity || 0) * REACTION_TIME)
-      if (distanceToLeader < safeDistance && !bypassActive) {
+      // [№23-КОЛЛАПС] прорыватель игнорирует и следование за стоящим впереди:
+      // в заторе «нос к носу» именно этот кап замораживает пару (gap <= 0),
+      // разойдутся сепарацией и уступанием — как у bypass-прав прохода.
+      if (distanceToLeader < safeDistance && !bypassActive && !collapseActive) {
         holdByAgentId.set(agent.id, 'leader') // [БАГ-РЕПОРТ-7] вежливое следование
         targetSpeed = Math.min(targetSpeed, leaderSpeed * 0.8)
         // [БАГ-РЕПОРТ-6-УСТУПАНИЕ-МАШИН] жёсткий стоп — только за медленным/
@@ -1590,15 +1648,61 @@ export function useSimulatorPhysics(
           }
         }
         personNearAhead = Math.sqrt(near2)
-        if (standingAhead && !bypassActive) {
+        // [№23-КОЛЛАПС] прорыватель не останавливается перед стоящим и не
+        // ползёт: в коллапсе именно эти капы замораживают пару, а дрейф
+        // отключён условием velocity > 0.5 — без прорыва затор вечен
+        if (standingAhead && !bypassActive && !collapseActive) {
           targetSpeed = 0
           holdByAgentId.set(agent.id, 'standing') // [БАГ-РЕПОРТ-7] человек на курсе
-        } else if (!oncomingMovingAhead && personNearAhead < PERSON_SEP_RADIUS * 1.6) {
+        } else if (!oncomingMovingAhead && personNearAhead < PERSON_SEP_RADIUS * 1.6 && !collapseActive) {
           // [№21-ВСТРЕЧНЫЕ] кап скорости НЕ применяется к паре движущихся
           // встречных: они расходятся боковым шагом «каждый правее» без
           // притормаживания. Кап остаётся для попутного/стоящего впереди.
           targetSpeed = Math.min(targetSpeed, Math.max(14, personNearAhead * 0.5))
           holdByAgentId.set(agent.id, 'person-near') // [БАГ-РЕПОРТ-7] ползём за пешеходом
+        }
+        // [№23-КОЛЛАПС] учёт затора и выдача прорыва: окно 1.2с, затор = нет
+        // прогресса (<5px) при встречном/стоящем на курсе. Прорыв — только
+        // при открытых (или отсутствующих) воротах: закрытые ворота с
+        // очередью — легальное ожидание, а не коллапс. Второй прорыватель
+        // рядом не назначается (радиус 70): один идёт, остальные уступают.
+        if ((agent.state === 'to_gate' || agent.state === 'crossing' || agent.state === 'moving_away') &&
+            Number.isFinite(agent.target?.x) && Number.isFinite(agent.target?.y)) {
+          const anch = collapseAnchorByAgentId.get(agent.id)
+          if (!anch) {
+            collapseAnchorByAgentId.set(agent.id, { x: cx, y: cy, t: 0 })
+          } else {
+            anch.t += dt
+            if (anch.t >= COLLAPSE_WINDOW_S) {
+              const moved = Math.hypot(cx - anch.x, cy - anch.y)
+              const blocked = standingAhead || oncomingAhead
+              if (blocked && moved < COLLAPSE_MIN_MOVE) {
+                const stuck = (collapseStuckByAgentId.get(agent.id) ?? 0) + anch.t
+                collapseStuckByAgentId.set(agent.id, stuck)
+                const gateOpenOk = !gate || !!gate.settings?.isOpen
+                const breakerNear = collapseBreakByAgentId.size > 0 && aiAgents.value.some(o => {
+                  if (o.id === agent.id || o.type !== 'person') return false
+                  if ((collapseBreakByAgentId.get(o.id) ?? 0) <= 0) return false
+                  const odx = (o.element.x + o.element.width / 2) - cx
+                  const ody = (o.element.y + o.element.height / 2) - cy
+                  return Math.hypot(odx, ody) < COLLAPSE_RADIUS
+                })
+                if (!collapseActive && stuck >= COLLAPSE_STUCK_S && gateOpenOk && !breakerNear) {
+                  collapseBreakByAgentId.set(agent.id, COLLAPSE_BREAK_S)
+                  collapseStuckByAgentId.delete(agent.id)
+                  console.warn('[collapse-break] прорыв затора у прохода:', agent.id)
+                }
+              } else {
+                collapseStuckByAgentId.delete(agent.id)
+              }
+              anch.x = cx
+              anch.y = cy
+              anch.t = 0
+            }
+          }
+        } else {
+          collapseAnchorByAgentId.delete(agent.id)
+          collapseStuckByAgentId.delete(agent.id)
         }
       }
       // [ФИКС-РЫВОК] плавное торможение к точке останова: скорость
@@ -1819,7 +1923,9 @@ export function useSimulatorPhysics(
           const yieldOncoming = oncomingMovingAhead && !standingAhead
           const driftRadius = yieldOncoming ? PERSON_SEP_RADIUS * 1.5 : PERSON_SEP_RADIUS
           const driftSpeed = yieldOncoming ? PERSON_SEP_SPEED : PERSON_YIELD_SPEED
-          if (personNearAhead < driftRadius && (standingAhead || oncomingAhead)) {
+          // [№23-КОЛЛАПС] прорыватель дрейф «держись правее» не включает —
+          // идёт своим курсом, встречные уступают ему
+          if (personNearAhead < driftRadius && (standingAhead || oncomingAhead) && !collapseActive) {
             el.x += -dirY * driftSpeed * dt
             // [№20-3б] дрейф «держись правее» не заносит корпус на забор
             const nextY = el.y + dirX * driftSpeed * dt

@@ -116,3 +116,20 @@ button, .badge, input {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ==========================================================
+    7. СИМУЛЯТОР: ручка калитки — индикатор замка ([№24-РУЧКА])
+   ========================================================== */
+/* Ручка красная вертикальная = заперто (дефолт SVG). Разблокировка ставит
+   класс .gate-unlocked на .gate-wrapper (SimulatorWidget по settings.isAjar/
+   wicketAjar): ручка поворачивается на 90° ПРОТИВ часовой стрелки относительно
+   НИЖНЕЙ ТОЧКИ ручки (transform-origin задан в generateWicketSVG) и зеленеет.
+   Обратно — при запирании (кнопка «ЗАКРЫТЬ», повторный клик, автозахлопывание). */
+.wicket-handle {
+  transform-box: view-box;
+  transition: transform 0.45s ease, fill 0.35s ease;
+}
+.gate-unlocked .wicket-handle {
+  transform: rotate(-90deg);
+  fill: #16a34a;
+}

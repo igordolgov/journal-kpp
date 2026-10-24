@@ -11,7 +11,10 @@ export const DEFAULT_GATE_PARAMS = {
   barSpacing: 12,
   barOpacity: 0.9,
   openDuration: 2,
-  handleColor: '#d97706',
+  // [№24-РУЧКА] ручка калитки — индикатор замка: красная = заперто,
+  // зелёная = разблокировано. Поворот на 90° против часовой и смену цвета
+  // делает CSS по классу .gate-unlocked на обёртке ворот (main.css).
+  handleColor: '#dc2626',
   handleWidth: 8,
   handleHeight: 16,
   wicketOpenDuration: 0.5,
@@ -73,7 +76,11 @@ export const generateWicketSVG = (width: number, height: number, gateParams: Par
     <rect x="0" y="0" width="${width}" height="${height}" fill="${frameColor}" rx="2"/>
     <g class="wicket-door" style="transform-origin: 0px ${innerH/2}px;">
       ${bars.join('')}
-      <rect x="${handleX}" y="${handleY}" width="${handleWidth}" height="${handleHeight}" fill="${handleColor}" rx="2"/>
+      <!-- [№24-РУЧКА] индикатор замка: вращается ОТНОСИТЕЛЬНО НИЖНЕЙ ТОЧКИ
+           ручки (transform-origin), класс wicket-handle ловит CSS main.css -->
+      <g class="wicket-handle" style="transform-origin: ${handleX + handleWidth / 2}px ${handleY + handleHeight}px;">
+        <rect x="${handleX}" y="${handleY}" width="${handleWidth}" height="${handleHeight}" fill="${handleColor}" rx="2"/>
+      </g>
     </g>
   </svg>`
 }

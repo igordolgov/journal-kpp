@@ -169,6 +169,7 @@
             v-else-if="el.asset?.type === 'svg'"
             :data-gate-id="el.id"
             :style="getGateStyle(el)"
+            :class="{ 'gate-unlocked': gateUnlocked(el) }"
             :ref="n => setGateNode(el, n)"
           )
             div(v-html="getDynamicSvg(el)")
@@ -475,6 +476,14 @@ const { getElementStyle: _getElementStyle, getGateStyle: _getGateStyle, ...core 
 const getElementStyle = (el: any, enableRotation: boolean): CSSProperties =>
   _getElementStyle(toRaw(el), enableRotation, lastPaintAlpha) as CSSProperties
 const getGateStyle = (el: any): CSSProperties => _getGateStyle(toRaw(el)) as CSSProperties
+
+// [№24-РУЧКА] разблокированная калитка (ручка зелёная/повёрнута) — CSS-класс
+// на обёртке ворот; сам поворот и цвет делает main.css, покадровых записей нет.
+// isAjar и wicketAjar — один и тот же замок (второй ключ читает локальная физика).
+const gateUnlocked = (el: any): boolean => {
+  const s: any = el?.settings
+  return !!(s && (s.isAjar || s.wicketAjar))
+}
 
 // [П1][№12] темп шага: --walk-hold задаёт ФАЗУ CSS-анимации ходьбы
 // (секунды). Физика наращивает фазу пропорционально пути

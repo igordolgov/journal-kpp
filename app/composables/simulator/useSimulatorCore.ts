@@ -30,8 +30,10 @@ import { LAYER_CONFIG } from '~/constants/library'
 // кадрах) и paint возвращал обратно. paintCoord делает обе записи одинаковыми:
 // патч пишет ту же строку, что уже стоит в DOM, и позиция не меняется вовсе.
 import { paintCoord } from '~/utils/simulatorPaint'
-// [№21-КАЛИТКА-В-ЖИЗНИ] параметры приоткрытия и таймаута захлопывания
-import { WICKET_AJAR_SCALE, WICKET_AJAR_TIMEOUT_S } from '~/utils/gateFlow'
+// [№21-КАЛИТКА-В-ЖИЗНИ] таймаут захлопывания. [№24-РУЧКА] WICKET_AJAR_SCALE
+// (приоткрытие полотна) больше не используется: разблокировка показывает
+// только ручку (CSS), полотно открывают люди.
+import { WICKET_AJAR_TIMEOUT_S } from '~/utils/gateFlow'
 import { generateSlidingGateSVG, generateWicketSVG } from '~/constants/library'
 import type { SceneElement } from '~/types/simulator'
 
@@ -298,7 +300,10 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
         // открытой: пройти можно только после полного открытия людьми.
         // Полное закрытие сбрасывает разблокировку.
         el.settings.isOpen = targetOpen && !ajarScale
-        if (isWicket && !targetOpen) el.settings.isAjar = false
+        if (isWicket && !targetOpen) {
+          el.settings.isAjar = false
+          el.settings.wicketAjar = false // [№24-РУЧКА] дубль-ключ локальной физики
+        }
         el.settings.isAnimating = false
         gateTweens.delete(gateId)
         gateTweenTarget.delete(gateId)
@@ -403,15 +408,28 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
     // твина (GSAP ставит его в onComplete), поэтому
     // «уже открыта» = открыта и НЕ анимируется.
     if (el.settings.isOpen && !el.settings.isAnimating) return true
+    // [№24-РУЧКА] разблокировка НЕ приоткрывает полотно (правка заказчика:
+    // «не приоткрывалась немного, а ручка поворачивалась»): флаг замка +
+    // щелчок; поворот ручки на 90° против часовой и красный -> зелёный
+    // делает CSS (.gate-unlocked на обёртке ворот). Полностью полотно
+    // открывают подошедшие люди (физика вызывает openGateFn).
+    // Ключ wicketAjar дублирует isAjar: локальная сборка физики читает его
+    // (tests/gate-life-21: settings.wicketAjar).
     el.settings.isAjar = true
+    el.settings.wicketAjar = true
     audio.playFromPool('wicket-sound', 'wicket-lock', 0.7)
-    startGateAnimation(el, true, WICKET_AJAR_SCALE)
+    // [№22→№24] перехват ЗАКРЫВАЮЩЕЙСЯ: дверь «схватили и распахнули» —
+    // полотно возвращаем в открытое (полный твин с текущего положения).
+    // На закрытой полотно НЕ трогаем: замок показывает только ручка [№24],
+    // полное открытие делают подошедшие люди.
+    if (el.settings.isAnimating) startGateAnimation(el, true)
     const gid = String(el.id)
     clearAjarTimer(gid)
     wicketAjarTimers.set(gid, setTimeout(() => {
       wicketAjarTimers.delete(gid)
       const g = simElements.value.find(x => String(x.id) === gid)
-      if (g && g.settings?.isAjar && !g.settings?.isOpen && !g.settings?.isAnimating) {
+      const ajarNow = !!g && !!(g.settings?.isAjar || g.settings?.wicketAjar)
+      if (g && ajarNow && !g.settings?.isOpen && !g.settings?.isAnimating) {
         console.warn('[wicket-ajar] калитку никто не открыл — захлопывается:', gid)
         closeGate(g)
       }
@@ -444,6 +462,9 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
         return true
       }
       if (el.settings.isOpen) return closeGate(el)
+      // [№24-РУЧКА] разблокирована и не открыта (ручка зелёная) —
+      // повторный клик запирает: ручка обратно вертикально, красная
+      if (el.settings.isAjar || el.settings.wicketAjar) return closeGate(el)
       return unlockWicket(el)
     }
     if (el.settings.isStopped) {
@@ -463,6 +484,7 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
     // разблокировку и её таймер захлопывания
     if (el.settings.gateType === 'wicket' || (el.width && el.width <= 60)) {
       el.settings.isAjar = false
+      el.settings.wicketAjar = false // [№24-РУЧКА] дубль-ключ локальной физики
       clearAjarTimer(String(el.id))
     }
     startGateAnimation(el, true)
@@ -482,6 +504,17 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
     if (isWicket) {
       const tgt = gateTweenTarget.get(String(el.id))
       if (el.settings.isAnimating && tgt && !tgt.open) return true
+      // [№24-РУЧКА] «ЗАКРЫТЬ» на разблокированной (ручка зелёная, полотно
+      // на месте): просто запираем — ручка возвращается вертикально и
+      // краснеет. Без холостого твина и удара (сламп звучал бы из пустоты).
+      if (!el.settings.isOpen && !el.settings.isAnimating &&
+          (el.settings.isAjar || el.settings.wicketAjar)) {
+        el.settings.isAjar = false
+        el.settings.wicketAjar = false
+        clearAjarTimer(String(el.id))
+        audio.playFromPool('wicket-sound', 'wicket-lock', 0.7)
+        return true
+      }
       if (!el.settings.isOpen && !el.settings.isAnimating && !el.settings.isAjar) return true
     } else {
       if (el.settings.isAnimating) return false
