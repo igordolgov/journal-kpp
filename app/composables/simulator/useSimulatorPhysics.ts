@@ -207,6 +207,13 @@ export function useSimulatorPhysics(
   // тормозной отрезок (dist < 80), поэтому подход к линии ворот плавный.
   // [№27] 0 = без тихой зоны (arriveFade вырождается в 1 по всей дистанции).
   let ARRIVE_QUIET_ZONE: number   // px
+  // [№29-НАПРЯМУЮ] возврат после уступания: дуга прохода начинается
+  // касателем НА следующую точку (без бокового рывка к оси). Тумблер
+  // pReturnOn выключает выравнивание на ось вовсе — ход строго к
+  // сквозной точке выхода; ползунок pReturnArc (0..100%) задаёт, насколько
+  // рано ход выравнивается на ось прохода у линии забора.
+  let personReturnOn: boolean
+  let PERSON_RETURN_ARC: number   // % (0..100, реестр)
   // [№27] фейд тихой зоны: зона 0 = без гашения (безопасный делитель,
   // dist/0 дал бы NaN при dist=0)
   const arriveFadeOf = (dist: number): number =>
@@ -248,6 +255,8 @@ export function useSimulatorPhysics(
     PERSON_HARD_SEP = tuneNumber(pt, 'pHardSep')
     PERSON_HARD_SPEED = tuneNumber(pt, 'pHardSpeed')
     ARRIVE_QUIET_ZONE = tuneNumber(pt, 'pQuietZone')
+    personReturnOn = tuneBool(pt, 'pReturnOn')
+    PERSON_RETURN_ARC = tuneNumber(pt, 'pReturnArc')
     FORCE_CROSS_AFTER = tuneNumber(pt, 'pForceCross')
     FORCE_CROSS_GROUP_AFTER = tuneNumber(pt, 'pForceCrossGroup')
   }
@@ -620,7 +629,13 @@ export function useSimulatorPhysics(
       // выводит на ось за 6px до линии забора, дальше — строго вертикальный
       // проход в проём (створ чист при любом смещении). Сквозная цель
       // сохранена в exitPoint — она замыкает очередь точек.
-      if (agent.type === 'person' &&
+      // [№29-НАПРЯМУЮ] репорт №29: «слишком резко возвращается на свой путь
+      // вместо того чтобы идти к следующей точке без разгона и напрямую» —
+      // дуга теперь начинается касателем НА СКВОЗНУЮ точку выхода (первый
+      // сегмент — обычный шаг к следующей точке, а не боковой рывок к оси),
+      // кривизна — ползунок pReturnArc. Тумблер pReturnOn выключает
+      // выравнивание на ось вовсе: ход строго к сквозной точке выхода.
+      if (agent.type === 'person' && personReturnOn &&
           Number.isFinite(agent.exitPoint?.x) && Number.isFinite(agent.exitPoint?.y)) {
         const pg = simElements.value.find(g => String(g.id) === cfg.personGateId)
         const axisX = pg ? pg.x + pg.width / 2 : agent.exitPoint!.x
@@ -634,6 +649,7 @@ export function useSimulatorPhysics(
             agent.exitPoint!.y,
             fenceY,
             agent.element.height / 2,
+            PERSON_RETURN_ARC / 100,
           )
           const first = arc[0]
           if (first) {

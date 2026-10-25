@@ -187,19 +187,25 @@ export const limitPersonPushY = (
 // кромка на линию не давит (репорт №23).
 export const WICKET_ARC_PULLBACK = 10
 
-// [№23-ДУГА] Плавная дуга прохода смещённого (уступанием) человека в створ
-// калитки. Квадратичная Безье из текущей точки в точку (axisX, clearY):
-// контрольная точка — на оси проёма на высоте старта, поэтому боковая
-// часть дуги не прижимается к забору, а вертикальный проход начинается
-// на чистом корпусе. clearY — за APERTURE_INSET (6px) до касания линии
-// забора ведущей кромкой (нижней при ходе вниз, верхней при ходе вверх).
-// Человек у самой линии забора сначала коротко отходит от неё
-// (WICKET_ARC_PULLBACK), затем скользит вдоль линии и заходит в проём —
-// створ не задевается ни при каком смещении (репорт №23, п.3/п.4).
-// Возвращает очередь точек-целей (кладётся в crossArcByAgentId): скорость
-// между точками не обнуляется, сквозная exitPoint замыкает очередь в
-// вызывающем коде. Человек на оси (смещение <= 2px) дуги не получает —
-// фильтруется вызывающим кодом.
+// [№23-ДУГА] Плавный ход смещённого (уступанием) человека в створ калитки.
+// [№29-НАПРЯМУЮ] Репорт №29: «когда человек уступил дорогу (отошел вправо),
+// он слишком резко возвращается на свой путь вместо того чтобы идти к
+// следующей точке без разгона и напрямую». Прежняя квадратичная дуга имела
+// контрольную точку НА ОСИ на высоте старта — её начальный касатель был
+// строго горизонтальным, и первый сегмент хода был БОКОВЫМ РЫВКОМ назад
+// к линии прохода (видимый «резкий возврат на свой путь»). Теперь —
+// кубическая Безье, чей начальный касатель смотрит прямо в СКВОЗНУЮ точку
+// выхода (следующую точку пути): человек идёт к ней напрямую обычным шагом
+// и плавно выравнивается на ось только у линии забора. Конечный касатель —
+// строго вертикальный (проход в проём по оси). Гарантии прежней дуги
+// сохранены: ведущая кромка не касается линии забора до выхода на ось
+// (clearY за APERTURE_INSET до линии, контрольные точки зажаты).
+// curve 0..1 — настройка pReturnArc («Возврат после уступания — дуга»):
+// 0 — максимально напрямую (дольше держит курс на выход), 1 — ранний
+// заход на ось. Человек на оси (смещение <= 2px) дуги не получает —
+// фильтруется вызывающим кодом. Возвращает очередь точек-целей (кладётся
+// в crossArcByAgentId): скорость между точками не обнуляется, сквозная
+// exitPoint замыкает очередь в вызывающем коде.
 export const buildWicketArcPoints = (
   startX: number,
   startY: number,
@@ -207,8 +213,9 @@ export const buildWicketArcPoints = (
   exitY: number,
   fenceY: number,
   radius: number,
+  curve = 0.3,
 ): { x: number; y: number }[] => {
-  if (![startX, startY, axisX, exitY, fenceY, radius].every(Number.isFinite)) return []
+  if (![startX, startY, axisX, exitY, fenceY, radius, curve].every(Number.isFinite)) return []
   // Направление прохода: вниз (въезд, exitY ниже старта) или вверх (выезд)
   const dir: 1 | -1 = exitY >= startY ? 1 : -1
   // Граница чистого корпуса: ведущая кромка (низ при ходе вниз, верх при
@@ -220,22 +227,51 @@ export const buildWicketArcPoints = (
   // прочь от линии, скольжение вдоль неё на чистом корпусе, заход в проём
   const pastBoundary = dir > 0 ? startY > clearY : startY < clearY
   const fromY = pastBoundary ? clearY - dir * WICKET_ARC_PULLBACK : startY
-  // Квадратичная Безье: P0 = (startX, fromY), P1 = (ось, fromY) —
-  // контрольная на оси на высоте старта, P2 = (ось, clearY)
+  // Кубическая Безье: P0 = старт, P3 = (ось, clearY).
+  // P1 — на луче из P0 в СКВОЗНУЮ точку выхода (axisX, exitY): начальный
+  // касатель = «идти к следующей точке напрямую». P2 — на оси перед P3:
+  // конечный касатель = вертикальный проход в проём.
   const p0x = startX
   const p0y = fromY
-  const p2x = axisX
-  const p2y = clearY
-  const len = Math.hypot(p2x - p0x, p2y - p0y)
-  const n = Math.min(16, Math.max(6, Math.round(len / 10)))
+  const p3x = axisX
+  const p3y = clearY
+  const dx = p3x - p0x
+  const dy = p3y - p0y
+  const len = Math.hypot(dx, dy)
+  if (len < 0.5) return []
+  const ex = p3x - p0x
+  const ey = exitY - p0y
+  const eLen = Math.hypot(ex, ey)
+  const c = Math.max(0, Math.min(1, curve))
+  const a = 0.7 - 0.5 * c          // доля хода по прямому курсу на выход
+  const b = 0.25 + 0.2 * c         // доля выравнивания на ось у забора
+  const ux = eLen > 0.01 ? ex / eLen : 0
+  const uy = eLen > 0.01 ? ey / eLen : dir
+  // P1 зажат так, чтобы ход не переваливал за границу чистого корпуса
+  // (контрольная точка — не сама кривая, но близкие точки кривой тянутся
+  // к ней: допускаем перелив не глубже 2px — внутри запаса APERTURE_INSET)
+  let L1 = Math.min(a * len, 0.85 * len)
+  if (uy * dir > 0.01) {
+    L1 = Math.min(L1, Math.max(0, (clearY + 2 * dir - p0y) / uy))
+  }
+  const p1x = p0x + ux * L1
+  const p1y = p0y + uy * L1
+  const L2 = Math.min(b * len, Math.abs(dy) * 0.5)
+  const p2x = p3x
+  const p2y = p3y - dir * L2
+  const n = Math.min(20, Math.max(8, Math.round(len / 8)))
   const pts: { x: number; y: number }[] = []
   if (pastBoundary) pts.push({ x: startX, y: fromY })
   for (let i = 1; i <= n; i++) {
     const t = i / n
     const mt = 1 - t
+    const w0 = mt * mt * mt
+    const w1 = 3 * t * mt * mt
+    const w2 = 3 * t * t * mt
+    const w3 = t * t * t
     pts.push({
-      x: mt * mt * p0x + 2 * t * mt * axisX + t * t * p2x,
-      y: mt * mt * p0y + 2 * t * mt * fromY + t * t * p2y,
+      x: w0 * p0x + w1 * p1x + w2 * p2x + w3 * p3x,
+      y: w0 * p0y + w1 * p1y + w2 * p2y + w3 * p3y,
     })
   }
   return pts
