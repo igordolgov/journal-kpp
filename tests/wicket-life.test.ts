@@ -419,10 +419,15 @@ describe('[№22-ТОЛПА] очередь держит калитку откр
     h.wicket.settings.isAnimating = false
 
     // FCFS: первым идёт b (при равном waitStart приоритет enter)…
-    runFrames(h, 3)
-    const crosser = [a, b].find(x => x.state === 'crossing')
-    const waiter = [a, b].find(x => x.state === 'waiting_before')
+    // [№30] проход без торможений — быстрее прежнего: ловим момент
+    // crossing пошагово, а не фиксированным окном
+    let crosser: any = undefined
+    for (let i = 0; i < 40 && !crosser; i++) {
+      runFrames(h, 0.1)
+      crosser = [a, b].find(x => x.state === 'crossing')
+    }
     expect(crosser).toBeTruthy()
+    const waiter = [a, b].find(x => x.state === 'waiting_before')
     expect(waiter).toBeTruthy()
     // …прошёл: moving_away, поставлен таймер закрытия (1с)
     runFrames(h, 3)
@@ -460,10 +465,17 @@ describe('[№22-ТОЛПА] очередь держит калитку откр
     h.wicket.settings.isOpen = true
     h.wicket.settings.isAjar = false
     h.wicket.settings.isAnimating = false
+    // [№30] проход без торможений: через ~2с человек уже за проёмом —
+    // ждём перехода в moving_away, а не фиксированного окна
+    let passed = false
+    for (let i = 0; i < 60 && !passed; i++) {
+      runFrames(h, 0.1)
+      passed = a.state === 'moving_away'
+    }
+    expect(passed).toBe(true)
+    // дать человеку уйти из зоны створа (70px), иначе таймер закрытия
+    // увидит «занято» и не закроет
     runFrames(h, 3)
-    expect(a.state).toBe('crossing')
-    runFrames(h, 3)
-    expect(a.state).toBe('moving_away')
     vi.advanceTimersByTime(1200)
     runFrames(h, 0.1)
     expect(h.closeCalls).toEqual(['w-1'])

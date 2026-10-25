@@ -1,0 +1,1515 @@
+--- a/app/utils/gateFlow.ts
++++ b/app/utils/gateFlow.ts
+@@ -181,100 +181,29 @@
+   return nextY
+ }
+ 
+-// [№23-ДУГА] Короткий отход человека от линии забора перед заходом в
+-// проём: если ведущая кромка уже прижата к линии (уступание у самого
+-// забора), сначала отходим на чистый корпус, потом скользим к оси —
+-// кромка на линию не давит (репорт №23).
+-export const WICKET_ARC_PULLBACK = 10
+-
+-// [№23-ДУГА] Плавный ход смещённого (уступанием) человека в створ калитки.
+-// [№29-НАПРЯМУЮ] Репорт №29: «когда человек уступил дорогу (отошел вправо),
+-// он слишком резко возвращается на свой путь вместо того чтобы идти к
+-// следующей точке без разгона и напрямую». Прежняя квадратичная дуга имела
+-// контрольную точку НА ОСИ на высоте старта — её начальный касатель был
+-// строго горизонтальным, и первый сегмент хода был БОКОВЫМ РЫВКОМ назад
+-// к линии прохода (видимый «резкий возврат на свой путь»). Теперь —
+-// кубическая Безье, чей начальный касатель смотрит прямо в СКВОЗНУЮ точку
+-// выхода (следующую точку пути): человек идёт к ней напрямую обычным шагом
+-// и плавно выравнивается на ось только у линии забора. Конечный касатель —
+-// строго вертикальный (проход в проём по оси). Гарантии прежней дуги
+-// сохранены: ведущая кромка не касается линии забора до выхода на ось
+-// (clearY за APERTURE_INSET до линии, контрольные точки зажаты).
+-// curve 0..1 — настройка pReturnArc («Возврат после уступания — дуга»):
+-// 0 — максимально напрямую (дольше держит курс на выход), 1 — ранний
+-// заход на ось. Человек на оси (смещение <= 2px) дуги не получает —
+-// фильтруется вызывающим кодом. Возвращает очередь точек-целей (кладётся
+-// в crossArcByAgentId): скорость между точками не обнуляется, сквозная
+-// exitPoint замыкает очередь в вызывающем коде.
+-export const buildWicketArcPoints = (
+-  startX: number,
+-  startY: number,
+-  axisX: number,
+-  exitY: number,
+-  fenceY: number,
+-  radius: number,
+-  curve = 0.3,
+-): { x: number; y: number }[] => {
+-  if (![startX, startY, axisX, exitY, fenceY, radius, curve].every(Number.isFinite)) return []
+-  // Направление прохода: вниз (въезд, exitY ниже старта) или вверх (выезд)
+-  const dir: 1 | -1 = exitY >= startY ? 1 : -1
+-  // Граница чистого корпуса: ведущая кромка (низ при ходе вниз, верх при
+-  // ходе вверх) останавливается за 6px до линии забора
+-  const clearY = dir > 0
+-    ? fenceY - radius - APERTURE_INSET
+-    : fenceY + radius + APERTURE_INSET
+-  // Кромка уже за границей (человек у самой линии забора): короткий отход
+-  // прочь от линии, скольжение вдоль неё на чистом корпусе, заход в проём
+-  const pastBoundary = dir > 0 ? startY > clearY : startY < clearY
+-  const fromY = pastBoundary ? clearY - dir * WICKET_ARC_PULLBACK : startY
+-  // Кубическая Безье: P0 = старт, P3 = (ось, clearY).
+-  // P1 — на луче из P0 в СКВОЗНУЮ точку выхода (axisX, exitY): начальный
+-  // касатель = «идти к следующей точке напрямую». P2 — на оси перед P3:
+-  // конечный касатель = вертикальный проход в проём.
+-  const p0x = startX
+-  const p0y = fromY
+-  const p3x = axisX
+-  const p3y = clearY
+-  const dx = p3x - p0x
+-  const dy = p3y - p0y
+-  const len = Math.hypot(dx, dy)
+-  if (len < 0.5) return []
+-  const ex = p3x - p0x
+-  const ey = exitY - p0y
+-  const eLen = Math.hypot(ex, ey)
+-  const c = Math.max(0, Math.min(1, curve))
+-  const a = 0.7 - 0.5 * c          // доля хода по прямому курсу на выход
+-  const b = 0.25 + 0.2 * c         // доля выравнивания на ось у забора
+-  const ux = eLen > 0.01 ? ex / eLen : 0
+-  const uy = eLen > 0.01 ? ey / eLen : dir
+-  // P1 зажат так, чтобы ход не переваливал за границу чистого корпуса
+-  // (контрольная точка — не сама кривая, но близкие точки кривой тянутся
+-  // к ней: допускаем перелив не глубже 2px — внутри запаса APERTURE_INSET)
+-  let L1 = Math.min(a * len, 0.85 * len)
+-  if (uy * dir > 0.01) {
+-    L1 = Math.min(L1, Math.max(0, (clearY + 2 * dir - p0y) / uy))
+-  }
+-  const p1x = p0x + ux * L1
+-  const p1y = p0y + uy * L1
+-  const L2 = Math.min(b * len, Math.abs(dy) * 0.5)
+-  const p2x = p3x
+-  const p2y = p3y - dir * L2
+-  const n = Math.min(20, Math.max(8, Math.round(len / 8)))
+-  const pts: { x: number; y: number }[] = []
+-  if (pastBoundary) pts.push({ x: startX, y: fromY })
+-  for (let i = 1; i <= n; i++) {
+-    const t = i / n
+-    const mt = 1 - t
+-    const w0 = mt * mt * mt
+-    const w1 = 3 * t * mt * mt
+-    const w2 = 3 * t * t * mt
+-    const w3 = t * t * t
+-    pts.push({
+-      x: w0 * p0x + w1 * p1x + w2 * p2x + w3 * p3x,
+-      y: w0 * p0y + w1 * p1y + w2 * p2y + w3 * p3y,
+-    })
+-  }
+-  return pts
++// [№30-БЕЗ-ДУГИ] Проход через калитку — как в жизни, без кривых. Репорт
++// №30: «давай уберем вообще эту "дугу". и сделай рефакторинг и упрощение
++// всей логики движения и уступания, чтобы она была максимально похожа
++// на движения в жизни».
++//
++// Человек, стоящий СБОКУ от проёма (после уступания), в жизни делает
++// короткий БОКОВОЙ шаг пристройки к проёму и идёт сквозь него к своей
++// следующей точке. Пристройка — чисто боковая, на той же высоте: без
++// подъёма/спуска, без рывка и без разгона. Единственная геометрия,
++// которая для этого нужна — ближайшее к человеку x, при котором его
++// корпус ЦЕЛИКОМ проходит в проём (запас APERTURE_INSET от каждой
++// стойки). Калитка уже корпуса — пристройка на ось проёма.
++// Возвращает x точки пристройки (y берёт вызывающий код — высота человека).
++export const wicketAlignX = (
++  cx: number,
++  gate: { x: number; width: number },
++  bodyW: number,
++): number => {
++  if (![cx, gate.x, gate.width, bodyW].every(Number.isFinite)) return gate.x + gate.width / 2
++  const lo = gate.x + APERTURE_INSET + bodyW
++  const hi = gate.x + gate.width - APERTURE_INSET - bodyW
++  if (lo > hi) return gate.x + gate.width / 2
++  return Math.min(hi, Math.max(lo, cx))
+ }
+ 
+ // [№20-3] Забор по краям калитки: корпус человека не пересекает линию
+--- a/app/composables/simulator/useSimulatorPhysics.ts
++++ b/app/composables/simulator/useSimulatorPhysics.ts
+@@ -13,11 +13,11 @@
+ import { walkHoldStep } from '~/utils/simTuning'
+ // [№20-ВОРОТА-ИДЕАЛ] общая логика зоны ворот: точка ожидания выезда,
+ // ранний уезд въезжающей налево, выбор стороны уезда, забор калитки
+-// [№23-ДУГА] построение дуги прохода в створ калитки
++// [№30-БЕЗ-ДУГИ] wicketAlignX — боковая пристройка к проёму калитки
+ // [№24-БЕЗ-ОСТАНОВКИ] GATE_AXIS_WINDOW — коридор оси ворот для проверки
+ // «у ворот есть другая машина»
+ // [№26-РУЧКА] wicketHandlePending — пуш полотна ждёт конца анимации ручки
+-import { buildWicketArcPoints, clampPersonToFence, exitLaneBusy, exitPendingFor, exitWaitCenterY, GATE_AXIS_WINDOW, limitPersonPushY, roadSideBusyForDeparture, wicketHandlePending } from '../../utils/gateFlow'
++import { clampPersonToFence, exitLaneBusy, exitPendingFor, exitWaitCenterY, GATE_AXIS_WINDOW, limitPersonPushY, roadSideBusyForDeparture, wicketAlignX, wicketHandlePending } from '../../utils/gateFlow'
+ // [№27-НАСТРОЙКИ-ЛЮДЕЙ] реестр настроек движения/логики людей (тумблеры +
+ // плавные ползунки в Настройки -> Симулятор); читается на каждом тике
+ import { tuneBool, tuneNumber } from '../../utils/personTuning'
+@@ -60,12 +60,11 @@
+   // никогда» (остановлены оператором, зависла анимация): по истечении
+   // лимита машина уезжает без ожидания (с предупреждением в консоль).
+   const gateCloseWaitByAgentId = new Map<string, number>()
+-  // [№23-ДУГА] очередь точек дуги прохода: человек, смещённый уступанием,
+-  // идёт к створу плавной дугой (квадратичная Безье, см.
+-  // gateFlow.buildWicketArcPoints) — без прямого возврата на ось и без
+-  // острой смены курса на вертикаль. Последняя точка очереди — сквозная
+-  // exitPoint; очередь опустошается перехватом в блоке прибытия crossing.
+-  const crossArcByAgentId = new Map<string, { x: number; y: number }[]>()
++  // [№30-БЕЗ-ДУГИ] очередь точек прохода человека: пристройка к проёму
++  // (короткий боковой шаг на ту же высоту) + сквозная exitPoint. Никаких
++  // кривых — два прямых отрезка, как в жизни: пристроился к двери и
++  // прошёл. Очередь опустошается перехватом в блоке прибытия crossing.
++  const crossWaypointsByAgentId = new Map<string, { x: number; y: number }[]>()
+   // [№23-КОЛЛАПС] прорыв затора у прохода (репорт №23: «люди должны быстрее
+   // разбираться с коллапсом»; «уступают встречным, если это не создаёт
+   // ситуацию коллапса»). Пока уступание работает — все расходятся правее;
+@@ -207,19 +206,223 @@
+   // тормозной отрезок (dist < 80), поэтому подход к линии ворот плавный.
+   // [№27] 0 = без тихой зоны (arriveFade вырождается в 1 по всей дистанции).
+   let ARRIVE_QUIET_ZONE: number   // px
+-  // [№29-НАПРЯМУЮ] возврат после уступания: дуга прохода начинается
+-  // касателем НА следующую точку (без бокового рывка к оси). Тумблер
+-  // pReturnOn выключает выравнивание на ось вовсе — ход строго к
+-  // сквозной точке выхода; ползунок pReturnArc (0..100%) задаёт, насколько
+-  // рано ход выравнивается на ось прохода у линии забора.
+-  let personReturnOn: boolean
+-  let PERSON_RETURN_ARC: number   // % (0..100, реестр)
++  // [№29→№30] параметры дуги возврата удалены вместе с дугой (репорт №30:
++  // «уберем вообще эту дугу») — проход теперь пристройка + прямой ход.
+   // [№27] фейд тихой зоны: зона 0 = без гашения (безопасный делитель,
+   // dist/0 дал бы NaN при dist=0)
+   const arriveFadeOf = (dist: number): number =>
+     ARRIVE_QUIET_ZONE >= 1
+       ? Math.max(0, Math.min(1, dist / ARRIVE_QUIET_ZONE))
+       : 1
++
++  // [№30-ЖИЗНЬ] Уступание ждущего у прохода — как в жизни: стоящий у двери
++  // человек, к которому кто-то подходит, делает небольшой шаг в сторону
++  // (освобождает полосу идущего) и стоит. Шаг непрерывен и плавен:
++  //  • сила растёт по мере приближения идущего (вес по дистанции);
++  //  • направление — прочь от ЛИНИИ его курса (вбок) плюс радиальная
++  //    составляющая «от корпуса»;
++  //  • шаг обходит ждущих рядом (не заталкивает на соседа) и скользит по
++  //    касательной, если упирается в чужой корпус;
++  //  • корпус не выносится на линию забора (limitPersonPushY).
++  // [№27] механизм отключается тумблером pYieldOn.
++  const personYieldStep = (
++    agent: AiAgent,
++    el: SceneElement,
++    dt: number,
++    personGate: SceneElement | undefined,
++  ): void => {
++    if (agent.type !== 'person' || !personYieldOn) return
++    const mcx = el.x + el.width / 2
++    const mcy = el.y + el.height / 2
++    let gx = 0, gy = 0, wMax = 0
++    for (const other of aiAgents.value) {
++      if (other.id === agent.id || other.type !== 'person' || other.state === 'done') continue
++      if (agent.groupId && other.groupId === agent.groupId) continue
++      if (other.state === 'waiting_before' || other.state === 'waiting_after') continue
++      const ocx = other.element.x + other.element.width / 2
++      const ocy = other.element.y + other.element.height / 2
++      const ax = mcx - ocx
++      const ay = mcy - ocy
++      const d = Math.hypot(ax, ay)
++      if (d < 0.01 || d >= PERSON_WAIT_YIELD_RADIUS) continue
++      const w = Math.max(0.45, (PERSON_WAIT_YIELD_RADIUS - d) / PERSON_WAIT_YIELD_RADIUS)
++      // радиальная составляющая «от соседа»
++      gx += (ax / d) * w
++      gy += (ay / d) * w
++      // боковой шаг от линии курса идущего (основа уступания)
++      const rot = other.element.rotation || 0
++      const hx = Math.cos(rot)
++      const hy = Math.sin(rot)
++      const ahead = ax * hx + ay * hy
++      if (ahead < -24) continue // он уже прошёл мимо — не пятимся
++      const par = ahead
++      const px = ax - hx * par
++      const py = ay - hy * par
++      const lat = Math.hypot(px, py)
++      if (lat > 34) continue    // я не на его пути
++      if (lat < 0.5) {
++        // точная лобовая: отходим в сторону, ПРОТИВОПОЛОЖНУЮ правому обходу
++        // идущего, — освобождаем именно его полосу
++        gx += hy * 1.2
++        gy += -hx * 1.2
++      } else {
++        gx += (px / lat) * 1.2
++        gy += (py / lat) * 1.2
++      }
++      wMax = Math.max(wMax, w)
++    }
++    if (wMax > 0) {
++      // шаг уступания обходит ждущих рядом (включая своих по группе):
++      // уступающие не сходятся в одну точку и не накладываются (№27)
++      for (const other of aiAgents.value) {
++        if (other.id === agent.id || other.type !== 'person' || other.state === 'done') continue
++        if (other.state !== 'waiting_before' && other.state !== 'waiting_after') continue
++        const ocx = other.element.x + other.element.width / 2
++        const ocy = other.element.y + other.element.height / 2
++        const ox = ocx - mcx
++        const oy = ocy - mcy
++        const od = Math.hypot(ox, oy)
++        if (od < 0.01 || od >= PERSON_YIELD_AVOID) continue
++        const aw = (PERSON_YIELD_AVOID - od) / PERSON_YIELD_AVOID
++        gx += (ox / od) * aw
++        gy += (oy / od) * aw
++      }
++      const gm = Math.hypot(gx, gy)
++      if (gm > 0.01) {
++        const push = wMax * PERSON_SEP_SPEED * dt
++        let vx = (gx / gm) * push
++        let vy = (gy / gm) * push
++        // страховка шага: не заталкиваем себя в ЧУЖОЙ корпус — компонента
++        // шага, уменьшающая дистанцию ниже 0.9 × PERSON_HARD_SEP,
++        // снимается; шаг скользит по касательной (№27)
++        const sepMin = PERSON_HARD_SEP * 0.9
++        for (const other of aiAgents.value) {
++          if (other.id === agent.id || other.type !== 'person' || other.state === 'done') continue
++          const ocx = other.element.x + other.element.width / 2
++          const ocy = other.element.y + other.element.height / 2
++          const ox = ocx - mcx
++          const oy = ocy - mcy
++          const od = Math.hypot(ox, oy)
++          if (od <= 0.01) continue
++          if (od >= PERSON_HARD_SEP + Math.hypot(vx, vy)) continue
++          const ux2 = ox / od
++          const uy2 = oy / od
++          const along = vx * ux2 + vy * uy2
++          if (along > 0 && od - along < sepMin) {
++            vx -= along * ux2
++            vy -= along * uy2
++          }
++        }
++        const vm = Math.hypot(vx, vy)
++        if (vm > push * 0.2) {
++          el.x += vx
++          // шаг уступания не выносит корпус на линию забора
++          const nextY = el.y + vy
++          el.y = personGate ? limitPersonPushY(el, personGate, nextY) : nextY
++          // уступающий ШАГАЕТ в сторону (скорость для анимации ног),
++          // шаг закончился — velocity снова 0, агент «встаёт»
++          el.velocity = Math.max(el.velocity || 0, Math.min(PERSON_SEP_SPEED, vm / Math.max(dt, 1e-4)))
++        }
++      }
++    }
++  }
++
++  // [№30-ЖИЗНЬ] Расхождение идущих — как в жизни: каждый держится ПРАВЕЕ.
++  // Одно непрерывное правило, без булевых переключателей:
++  //  • вес обхода — плавная функция дистанции до соседа и его бокового
++  //    отклонения от моего курса; знак бокового сдвига — ТОЛЬКО от моего
++  //    курса (правая рука), поэтому траектория без реверсов;
++  //  • встречная пара не тормозит (кап скорости для встречных отключён
++  //    по курсу соседа) — расходятся на полном ходу;
++  //  • аварийный клапан: при контакте (дистанция < PERSON_HARD_SEP)
++  //    радиальное «от соседа» плавно перекрывает всё;
++  //  • в тихой зоне прибытия силы плавно гаснут (arriveFade), у самой
++  //    посадки (< 12px) обход выключен — точная остановка без танца.
++  // Стоящих не толкаем: строй группы и очереди у прохода не расползаются.
++  // [№27] обход — тумблер pBypassOn, клапан — pHardSepOn.
++  const personAvoidanceStep = (
++    agent: AiAgent,
++    el: SceneElement,
++    dirX: number,
++    dirY: number,
++    dist: number,
++    personGate: SceneElement | undefined,
++    collapseActive: boolean,
++    dt: number,
++  ): void => {
++    if (agent.type !== 'person' || (el.velocity || 0) <= 0.5) return
++    if (agent.state === 'crossing') return
++    if (agent.state === 'to_gate' && dist < 12) return
++    const ccx = el.x + el.width / 2
++    const ccy = el.y + el.height / 2
++    let bypassW = 0                  // вес правого обхода 0..1
++    let hardAX = 0, hardAY = 0, hardW = 0
++    for (const other of aiAgents.value) {
++      if (other.id === agent.id || other.type !== 'person' || other.state === 'done') continue
++      // своих по группе не раскидываем — колонна/строй сохраняется
++      if (agent.groupId && other.groupId === agent.groupId) continue
++      const ocx = other.element.x + other.element.width / 2
++      const ocy = other.element.y + other.element.height / 2
++      const ox = ocx - ccx
++      const oy = ocy - ccy
++      const d = Math.hypot(ox, oy)
++      if (d < 0.01) {
++        // центры совпали (спавн в одной точке): детерминированно разводим
++        // по разные стороны от курса по порядку id — иначе взаимный стоп
++        const s = String(agent.id) < String(other.id) ? 1 : -1
++        hardAX += -dirY * s
++        hardAY += dirX * s
++        hardW = Math.max(hardW, 0.6)
++        continue
++      }
++      // аварийный клапан: физический контакт — радиальное «от соседа»,
++      // вес непрерывен по дистанции (работает и на «нерелевантном» соседе)
++      if (d < PERSON_HARD_SEP) {
++        const hw = (PERSON_HARD_SEP - d) / PERSON_HARD_SEP
++        hardAX += -(ox / d) * hw
++        hardAY += -(oy / d) * hw
++        hardW = Math.max(hardW, hw)
++      }
++      if (d >= PERSON_BYPASS_RADIUS) continue
++      const ahead = ox * dirX + oy * dirY
++      const oRot = other.element.rotation || 0
++      const oDot = Math.cos(oRot) * dirX + Math.sin(oRot) * dirY
++      const oncoming = oDot < -0.3
++      // обходить ЛЮБОГО соседа впереди в радиусе — встречного, медленного,
++      // стоящего (классификация «медленнее ли он» запрещена — стробит).
++      // Попутчик СБОКУ в темп и находящийся позади — не помеха.
++      if (ahead < (oncoming ? -6 : 6)) continue
++      // вес обхода: полная сила уже с d ≤ 45% радиуса, дальше спад;
++      // по КУРСУ вес полон в коридоре (≤ 34) и плавно гаснет к 48 —
++      // равновесие «дрейф ↔ возврат к цели» внутри плавного спада
++      const distW = Math.min(1, (PERSON_BYPASS_RADIUS - d) / (PERSON_BYPASS_RADIUS * 0.45))
++      const lateral = Math.abs(ox * dirY - oy * dirX)
++      const courseW = Math.max(0, Math.min(1, (48 - lateral) / 14))
++      bypassW = Math.max(bypassW, distW * courseW)
++    }
++    // 1) правый обход: непрерывный боковой уход к правой руке; в тихой
++    // зоне вес дополнительно гаснет по остатку пути (arriveFade)
++    if (bypassW > 0 && personBypassOn && !collapseActive) {
++      const arriveFade = agent.state === 'to_gate' ? arriveFadeOf(dist) : 1
++      const lat = PERSON_BYPASS_SPEED * bypassW * arriveFade * dt
++      el.x += -dirY * lat
++      // обход не заносит корпус на линию забора
++      const nextY = el.y + dirX * lat
++      el.y = personGate ? limitPersonPushY(el, personGate, nextY) : nextY
++    }
++    // 2) аварийный клапан от наложения (контакт ближе PERSON_HARD_SEP)
++    if (hardW > 0 && personHardSepOn) {
++      const m = Math.hypot(hardAX, hardAY)
++      if (m > 0.01) {
++        const arriveFade = agent.state === 'to_gate' ? arriveFadeOf(dist) : 1
++        const push = PERSON_HARD_SPEED * hardW * arriveFade * dt
++        el.x += (hardAX / m) * push
++        // клапан не выносит корпус на линию забора
++        const nextY = el.y + (hardAY / m) * push
++        el.y = personGate ? limitPersonPushY(el, personGate, nextY) : nextY
++      }
++    }
++  }
+   // [П6] машина на посадке (waiting_after) больше НЕ ждёт закрытия ворот:
+   // уезд после вежливой паузы 0.8с, шлагбаум закрывается сам после
+   // расчистки створа (свип закрытия в конце тика). Прежний предохранитель
+@@ -255,8 +458,6 @@
+     PERSON_HARD_SEP = tuneNumber(pt, 'pHardSep')
+     PERSON_HARD_SPEED = tuneNumber(pt, 'pHardSpeed')
+     ARRIVE_QUIET_ZONE = tuneNumber(pt, 'pQuietZone')
+-    personReturnOn = tuneBool(pt, 'pReturnOn')
+-    PERSON_RETURN_ARC = tuneNumber(pt, 'pReturnArc')
+     FORCE_CROSS_AFTER = tuneNumber(pt, 'pForceCross')
+     FORCE_CROSS_GROUP_AFTER = tuneNumber(pt, 'pForceCrossGroup')
+   }
+@@ -581,7 +782,7 @@
+         gateCloseWaitByAgentId.delete(agent.id) // [№13] без утечек ожидания закрытия
+         postGateTrack.delete(agent.id) // [ФИКС-висяки-3] без утечек
+         crossTrack.delete(agent.id) // [ФИКС-застыл-калитка] без утечек
+-        crossArcByAgentId.delete(agent.id) // [№23-ДУГА] без утечек
++        crossWaypointsByAgentId.delete(agent.id) // [№30] без утечек
+         headingByAgentId.delete(agent.id) // [№24-ПЛАВНЫЙ-ВЫХОД] без утечек
+         collapseStuckByAgentId.delete(agent.id) // [№23-КОЛЛАПС] без утечек
+         collapseBreakByAgentId.delete(agent.id)
+@@ -623,38 +824,25 @@
+           crossTarget = { x: crossTarget.x, y: exitWaitCenterY(exitGate, agent.element.height) }
+         }
+       }
+-      // [№23-ДУГА] человек после уступания смещён вбок от оси проёма: проход
+-      // идёт ПЛАВНОЙ ДУГОЙ к створу (репорт №23: «можно продолжить движение
+-      // к цели плавно по дуге», без прямого возврата на своё место). Дуга
+-      // выводит на ось за 6px до линии забора, дальше — строго вертикальный
+-      // проход в проём (створ чист при любом смещении). Сквозная цель
+-      // сохранена в exitPoint — она замыкает очередь точек.
+-      // [№29-НАПРЯМУЮ] репорт №29: «слишком резко возвращается на свой путь
+-      // вместо того чтобы идти к следующей точке без разгона и напрямую» —
+-      // дуга теперь начинается касателем НА СКВОЗНУЮ точку выхода (первый
+-      // сегмент — обычный шаг к следующей точке, а не боковой рывок к оси),
+-      // кривизна — ползунок pReturnArc. Тумблер pReturnOn выключает
+-      // выравнивание на ось вовсе: ход строго к сквозной точке выхода.
+-      if (agent.type === 'person' && personReturnOn &&
++      // [№30-БЕЗ-ДУГИ] проход человека — как в жизни, без кривых. Репорт
++      // №30: «давай уберем вообще эту "дугу"». Человек, стоящий сбоку от
++      // проёма (после уступания), сначала делает короткий БОКОВОЙ шаг
++      // пристройки к проёму — точка на ЕГО высоте, x = ближайшее положение,
++      // при котором корпус целиком проходит в проём (wicketAlignX). Затем —
++      // сквозь проём к следующей точке пути (exitPoint). Два прямых
++      // отрезка; скорость между ними не обнуляется (без разгона), поворот
++      // сглаживает поворот корпуса. Человек уже в проёме по x (смещение
++      // <= 2px) — пристройка не нужна, цель сразу сквозная.
++      if (agent.type === 'person' &&
+           Number.isFinite(agent.exitPoint?.x) && Number.isFinite(agent.exitPoint?.y)) {
+         const pg = simElements.value.find(g => String(g.id) === cfg.personGateId)
+-        const axisX = pg ? pg.x + pg.width / 2 : agent.exitPoint!.x
+-        const offX = (agent.element.x + agent.element.width / 2) - axisX
+-        if (Math.abs(offX) > 2) {
+-          const fenceY = pg ? pg.y + pg.height : agent.exitPoint!.y
+-          const arc = buildWicketArcPoints(
+-            agent.element.x + agent.element.width / 2,
+-            agent.element.y + agent.element.height / 2,
+-            axisX,
+-            agent.exitPoint!.y,
+-            fenceY,
+-            agent.element.height / 2,
+-            PERSON_RETURN_ARC / 100,
+-          )
+-          const first = arc[0]
+-          if (first) {
+-            crossArcByAgentId.set(agent.id, [...arc, { x: agent.exitPoint!.x, y: agent.exitPoint!.y }])
+-            crossTarget = { x: first.x, y: first.y }
++        if (pg) {
++          const myCx = agent.element.x + agent.element.width / 2
++          const alignX = wicketAlignX(myCx, pg, agent.element.width / 2)
++          if (Math.abs(myCx - alignX) > 2) {
++            const mouth = { x: alignX, y: agent.element.y + agent.element.height / 2 }
++            crossWaypointsByAgentId.set(agent.id, [mouth, { x: agent.exitPoint!.x, y: agent.exitPoint!.y }])
++            crossTarget = mouth
+           }
+         }
+       }
+@@ -902,6 +1090,7 @@
+           // Восстанавливаем конечную цель из afterTarget или выталкиваем за
+           // ближайший боковой край (штатный деспавн за границей сцены).
+           console.warn('[watchdog] NaN-цель — восстановление из afterTarget:', agent.id)
++          crossWaypointsByAgentId.delete(agent.id) // [№30] очередь пристройки неактуальна
+           const at = agent.afterTarget
+           if (Number.isFinite(at?.x) && Number.isFinite(at?.y)) {
+             agent.target = { x: at.x, y: at.y, width: 0, height: 0 }
+@@ -1023,127 +1212,12 @@
+ 
+       if (agent.state === 'waiting_before') {
+         el.velocity = 0
+-        // [БАГ-РЕПОРТ-4-ТОЛЧОК] ждущий у прохода уступает ЗАРАНЕЕ и НАСТИГАЮЩЕ:
+-        //  1) триггер — проходное СОСТОЯНИЕ соседа (to_gate/crossing/
+-        //     moving_away) в радиусе PERSON_WAIT_YIELD_RADIUS, а не его
+-        //     текущая скорость: входящий, уже затормозивший перед стоящим
+-        //     выходящим (или вставший в упор), раньше замораживал пару
+-        //     «оба стоят» — никто не отходил;
+-        //  2) боковой шаг идёт от ЛИНИИ КУРСА встречного — ждущий отходит
+-        //     вбок, освобождая полосу, ещё ДО контакта (раньше отходил
+-        //     радиально «назад» с дистанции 40px, и входящий успевал его
+-        //     толкнуть, прежде чем они расходились).
+-        // Стоящих (waiting_before/waiting_after) не сдвигаем — очередь и
+-        // строй групп не расползаются; своих по группе исключаем.
+-        // [№27-НАСТРОЙКИ] механизм выключается тумблером pYieldOn.
+-        if (agent.type === 'person' && personYieldOn) {
+-          const mcx = el.x + el.width / 2
+-          const mcy = el.y + el.height / 2
+-          let gx = 0, gy = 0, wMax = 0
+-          for (const other of aiAgents.value) {
+-            if (other.id === agent.id || other.type !== 'person' || other.state === 'done') continue
+-            if (agent.groupId && other.groupId === agent.groupId) continue
+-            if (other.state === 'waiting_before' || other.state === 'waiting_after') continue
+-            const ocx = other.element.x + other.element.width / 2
+-            const ocy = other.element.y + other.element.height / 2
+-            const ax = mcx - ocx
+-            const ay = mcy - ocy
+-            const d = Math.hypot(ax, ay)
+-            if (d < 0.01 || d >= PERSON_WAIT_YIELD_RADIUS) continue
+-            const w = Math.max(0.45, (PERSON_WAIT_YIELD_RADIUS - d) / PERSON_WAIT_YIELD_RADIUS)
+-            // радиальная составляющая «от соседа» (как раньше, но шире)
+-            gx += (ax / d) * w
+-            gy += (ay / d) * w
+-            // боковой шаг от линии курса встречного (основа уступания)
+-            const rot = other.element.rotation || 0
+-            const hx = Math.cos(rot)
+-            const hy = Math.sin(rot)
+-            const ahead = ax * hx + ay * hy
+-            if (ahead < -24) continue // он уже проехал мимо — не пятимся
+-            const par = ahead
+-            const px = ax - hx * par
+-            const py = ay - hy * par
+-            const lat = Math.hypot(px, py)
+-            if (lat > 34) continue    // я не на его пути
+-            if (lat < 0.5) {
+-              // точная лобовая: отходим в сторону, ПРОТИВОПОЛОЖНУЮ дрейфу
+-              // встречного («держись правее»), — освобождаем именно его полосу
+-              gx += hy * 1.2
+-              gy += -hx * 1.2
+-            } else {
+-              gx += (px / lat) * 1.2
+-              gy += (py / lat) * 1.2
+-            }
+-            wMax = Math.max(wMax, w)
+-          }
+-          if (wMax > 0) {
+-            // [№27-ОБХОД-СОСЕДЕЙ] шаг уступания обходит ЖДУЩИХ РЯДОМ людей —
+-            // включая своих по группе (репорт №27: «люди прыгают друг на друга
+-            // после уступания»). Раньше уступающий отводился только от ИДУЩЕГО
+-            // мимо: двое ждущих, уступая одному и тому же проходному, сходились
+-            // в одну точку и накладывались, а шаг в сторону мог затолкать
+-            // человека прямо на соседа. Добавка радиальна «от соседа»,
+-            // непрерывна по дистанции — реверсов направления не порождает.
+-            // Идущий мимо (to_gate/crossing/moving_away) в руление НЕ входит:
+-            // от него уступающий отводится штатной радиальной составляющей
+-            // выше, а лишняя радиальная примесь размывала боковой отход
+-            // (минимальная дистанция пары падала ниже прежнего равновесия).
+-            for (const other of aiAgents.value) {
+-              if (other.id === agent.id || other.type !== 'person' || other.state === 'done') continue
+-              if (other.state !== 'waiting_before' && other.state !== 'waiting_after') continue
+-              const ocx = other.element.x + other.element.width / 2
+-              const ocy = other.element.y + other.element.height / 2
+-              const ox = ocx - mcx
+-              const oy = ocy - mcy
+-              const od = Math.hypot(ox, oy)
+-              if (od < 0.01 || od >= PERSON_YIELD_AVOID) continue
+-              const aw = (PERSON_YIELD_AVOID - od) / PERSON_YIELD_AVOID
+-              gx += (ox / od) * aw
+-              gy += (oy / od) * aw
+-            }
+-            const gm = Math.hypot(gx, gy)
+-            if (gm > 0.01) {
+-              const push = wMax * PERSON_SEP_SPEED * dt
+-              let vx = (gx / gm) * push
+-              let vy = (gy / gm) * push
+-              // [№27-СТРАХОВКА-ШАГА] снимаем компоненту шага, заталкивающую
+-              // нас в ЧУЖОЙ корпус: после шага дистанция до любого соседа не
+-              // упадёт ниже жёсткого разделения (0.9 × PERSON_HARD_SEP).
+-              // Шаг при этом скользит по касательной, а не блокируется —
+-              // уступание продолжается в свободную сторону.
+-              const sepMin = PERSON_HARD_SEP * 0.9
+-              for (const other of aiAgents.value) {
+-                if (other.id === agent.id || other.type !== 'person' || other.state === 'done') continue
+-                const ocx = other.element.x + other.element.width / 2
+-                const ocy = other.element.y + other.element.height / 2
+-                const ox = ocx - mcx
+-                const oy = ocy - mcy
+-                const od = Math.hypot(ox, oy)
+-                if (od <= 0.01) continue
+-                if (od >= PERSON_HARD_SEP + Math.hypot(vx, vy)) continue
+-                const ux2 = ox / od
+-                const uy2 = oy / od
+-                const along = vx * ux2 + vy * uy2
+-                if (along > 0 && od - along < sepMin) {
+-                  vx -= along * ux2
+-                  vy -= along * uy2
+-                }
+-              }
+-              const vm = Math.hypot(vx, vy)
+-              if (vm > push * 0.2) {
+-                el.x += vx
+-                // [№20-3б] шаг уступания не выносит корпус на линию забора
+-                const nextY = el.y + vy
+-                el.y = personGate ? limitPersonPushY(el, personGate, nextY) : nextY
+-                // [БАГ-РЕПОРТ-5-АНИМАЦИЯ] уступающий ШАГАЕТ в сторону, а не
+-                // скользит: боковой шаг фиксируется как скорость, чтобы
+-                // гистерезис is-paused не замораживал анимацию рук/ног.
+-                // Шаг закончился — velocity снова 0, агент «встаёт».
+-                el.velocity = Math.max(el.velocity || 0, Math.min(PERSON_SEP_SPEED, vm / Math.max(dt, 1e-4)))
+-              }
+-            }
+-          }
+-        }
++        // [№30-ЖИЗНЬ] уступание ждущего — как в жизни: стоящий у прохода
++        // человек шагает вбок, освобождая полосу идущего, и стоит
++        // (детали — personYieldStep выше; триггер — проходное состояние
++        // соседа в радиусе, шаг — от линии его курса, обход ждущих рядом,
++        // корпус не выносится на забор).
++        personYieldStep(agent, el, dt, personGate)
+         if (!gate) {
+           // [ФИКС-висяки-2] ворота исчезли (удалены/битый gateId) — раньше
+           // агент стоял вечно. После паузы проходим «сквозь»: цель crossing
+@@ -1461,6 +1535,10 @@
+               if (Number.isFinite(exitT?.x) && Number.isFinite(exitT?.y)) {
+                 el.x = exitT.x - el.width / 2
+                 el.y = exitT.y - el.height / 2
++                // [№30] перенос в КОНЕЦ прохода: цель — точка выхода, очередь
++                // пристройки сброшена (иначе агент пошёл бы назад к первой точке)
++                agent.target = { x: exitT.x, y: exitT.y, width: 0, height: 0 }
++                crossWaypointsByAgentId.delete(agent.id)
+               }
+               el.velocity = 0
+             }
+@@ -1550,19 +1628,20 @@
+           }
+         } 
+         else if (agent.state === 'crossing') {
+-          // [№23-ДУГА] прибытие в точку дуги: цель = следующая точка очереди
+-          // (движение не прерывается, скорость сохраняется). Последняя точка
++          // [№30-БЕЗ-ДУГИ] прибытие в точку пристройки: цель = следующая
++          // точка очереди (движение не прерывается, скорость сохраняется —
++          // проход идёт обычным шагом, без разгона). Последняя точка
+           // очереди — сквозная exitPoint: при её достижении очередь пустеет
+           // и штатный блок завершения прохода выполняется как обычно.
+-          const arc = crossArcByAgentId.get(agent.id)
+-          if (arc && arc.length) {
+-            arc.shift()
+-            const next = arc[0]
++          const wp = crossWaypointsByAgentId.get(agent.id)
++          if (wp && wp.length) {
++            wp.shift()
++            const next = wp[0]
+             if (next) {
+               agent.target = { x: next.x, y: next.y, width: 0, height: 0 }
+               continue
+             }
+-            crossArcByAgentId.delete(agent.id)
++            crossWaypointsByAgentId.delete(agent.id)
+           }
+           // [ФИКС-РЫВОК-ПОСЛЕ-КАЛИТКИ] скорость на стыке crossing ->
+           // moving_away НЕ обнуляется: обнуление на 1-2 кадра ставило анимацию
+@@ -1988,7 +2067,12 @@
+       // шарканье), машина 20 -> 24 px/с и 0.55 -> 0.7 (выезжающая проползала
+       // последние 56px почти 3с). Подход живее, рывков нет: скорость к
+       // прибытию монотонно сходится, шаг кадра <= остатка дистанции.
+-      if (arrivalBrake && dist < 80) {
++      // [№30-ЖИЗНЬ] человек в проходе (crossing) — ТРАНЗИТ: проём проходят
++      // обычным шагом, без «шарканья» у пристройки и без разгона после неё
++      // (репорт №30: «без разгона и напрямую»). Машина в crossing
++      // тормозит как раньше (подкат к посадке).
++      const transitPerson = agent.type === 'person' && agent.state === 'crossing'
++      if (arrivalBrake && dist < 80 && !transitPerson) {
+         const brakeFloor = agent.type === 'person' ? 11 : 24
+         const brakeGain = agent.type === 'person' ? 0.6 : 0.7
+         let brakeCap = Math.max(brakeFloor, dist * brakeGain)
+@@ -2134,117 +2218,11 @@
+         el.y += stepY * moveStep
+       }
+ 
+-      // [№25-ПРАВЫЙ-ОБХОД] единое расхождение пешеходов — БЕЗ дуги и БЕЗ
+-      // торможений. (Старая схема: дуга-дрейф [№24] и радиальная сепарация,
+-      // спроецированная на перпендикуляр, толкали в ПРОТИВОПОЛОЖНЫЕ стороны —
+-      // радиальное «от соседа» гасило дрейф «держись правее», пара
+-      // накладывалась; вес дуги и булевы флаги уступания мигали от кадра к
+-      // кадру — отсюда дёргание в вертикальных проходах.)
+-      // Новое правило «каждый правее» — одно и непрерывное:
+-      //   1) вес обхода — плавная функция дистанции до соседа и его бокового
+-      //      отклонения от моего курса; знак бокового сдвига — ТОЛЬКО от
+-      //      моего курса (правая рука, (-dirY, dirX)): сдвиг не может
+-      //      реверсировать из-за позиции соседа — осциллировать нечему;
+-      //   2) встречная пара не тормозит: кап скорости для встречных отключён
+-      //      по курсу соседа (см. скан выше) — расхождение на полном ходу;
+-      //   3) аварийный клапан от наложения: при дистанции < PERSON_HARD_SEP
+-      //      радиальное «от соседа», плавное по весу, перекрывает всё.
+-      // [№26-ПЛАВНАЯ-ТИХАЯ-ЗОНА] в тихой зоне прибытия боковой танец не
+-      // выключается РЕЗКО на границе 70px (прежний скачок силы = излом хода
+-      // перед точкой останова), а ПЛАВНО гаснет: вес умножается на
+-      // arriveFade = dist / ARRIVE_QUIET_ZONE, жёсткое выключение — только
+-      // у самой посадки (< 12px). Аварийный клапан фейдится вместе с ним —
+-      // контакт ближе 30px возможен только вне зоны посадки.
+-      // Стоящих не толкаем: строй группы и очереди у прохода не расползаются.
+-      // [№13-НЕ-СКВОЗЬ] правило действует ПО ВСЕЙ СЦЕНЕ: люди в базе и на
+-      // дороге не проходят друг сквозь друга.
+-      if (agent.type === 'person' && (el.velocity || 0) > 0.5 &&
+-          agent.state !== 'crossing' &&
+-          !(agent.state === 'to_gate' && dist < 12)) {
+-        const ccx = el.x + el.width / 2
+-        const ccy = el.y + el.height / 2
+-        let bypassW = 0                  // вес правого обхода 0..1
+-        let hardAX = 0, hardAY = 0, hardW = 0
+-        for (const other of aiAgents.value) {
+-          if (other.id === agent.id || other.type !== 'person' || other.state === 'done') continue
+-          // своих по группе не раскидываем — колонна/строй сохраняется
+-          if (agent.groupId && other.groupId === agent.groupId) continue
+-          const ocx = other.element.x + other.element.width / 2
+-          const ocy = other.element.y + other.element.height / 2
+-          const ox = ocx - ccx
+-          const oy = ocy - ccy
+-          const d = Math.hypot(ox, oy)
+-          if (d < 0.01) {
+-            // центры совпали (спавн в одной точке): детерминированно разводим
+-            // по разные стороны от курса по порядку id — иначе взаимный стоп
+-            const s = String(agent.id) < String(other.id) ? 1 : -1
+-            hardAX += -dirY * s
+-            hardAY += dirX * s
+-            hardW = Math.max(hardW, 0.6)
+-            continue
+-          }
+-          // 3) аварийный клапан: физический контакт — радиальное «от соседа»,
+-          // вес непрерывен по дистанции (работает и на «нерелевантном» соседе)
+-          if (d < PERSON_HARD_SEP) {
+-            const hw = (PERSON_HARD_SEP - d) / PERSON_HARD_SEP
+-            hardAX += -(ox / d) * hw
+-            hardAY += -(oy / d) * hw
+-            hardW = Math.max(hardW, hw)
+-          }
+-          if (d >= PERSON_BYPASS_RADIUS) continue
+-          const ahead = ox * dirX + oy * dirY
+-          const oRot = other.element.rotation || 0
+-          const oDot = Math.cos(oRot) * dirX + Math.sin(oRot) * dirY
+-          const oncoming = oDot < -0.3
+-          // [№25] обходить ЛЮБОГО соседа впереди в радиусе — встречного,
+-          // медленного, стоящего. Классификация «медленнее ли он меня»
+-          // запрещена: скорость соседа, ползущего за капом, колеблется
+-          // (~13-16 px/с), порог стоит ровно на границе — релевантность
+-          // стробит от кадра к кадру, дрейф мигает = зигзаг (диагностика S5). Вес непрерывен и
+-          // сам гасит манёвр: сосед ушёл вперёд — distW спадает; я обошёл —
+-          // courseW гаснет за границей коридора. Попутчик СБОКУ в темп
+-          // (ahead ≈ 0) и находящийся позади — не помеха, не смещаемся.
+-          if (ahead < (oncoming ? -6 : 6)) continue
+-          // вес обхода: полная сила уже с d ≤ 44px (ранний заход, как у
+-          // прежней дуги с радиусом 88), дальше плавный спад к 80. По КУРСУ
+-          // вес полон в коридоре (≤ 34 = порог отхода ждущего) и плавно
+-          // гаснет к 48: равновесие «дрейф ↔ возврат к цели» оказывается
+-          // ВНУТРИ плавного спада — без предельного цикла на жёсткой границе
+-          // (резкое выключение на 34 давало раскачку «дрейф-возврат» и
+-          // микрореверсы боковой составляющей)
+-          const distW = Math.min(1, (PERSON_BYPASS_RADIUS - d) / (PERSON_BYPASS_RADIUS * 0.45))
+-          const lateral = Math.abs(ox * dirY - oy * dirX)
+-          const courseW = Math.max(0, Math.min(1, (48 - lateral) / 14))
+-          bypassW = Math.max(bypassW, distW * courseW)
+-        }
+-        // 1) правый обход: непрерывный боковой уход к правой руке. Вес
+-        // непрерывен по дистанции, знак фиксирован курсом — реверсов нет.
+-        // [№26] в тихой зоне вес дополнительно гаснет по остатку пути
+-        // (arriveFade) — без излома силы на границе зоны.
+-        // [№23-КОЛЛАПС] прорыватель идёт своим курсом — встречные уступают
+-        // ему (обход для него выключен, аварийный клапан работает всегда)
+-        if (bypassW > 0 && personBypassOn && !collapseActive) {
+-          const arriveFade = agent.state === 'to_gate' ? arriveFadeOf(dist) : 1
+-          const lat = PERSON_BYPASS_SPEED * bypassW * arriveFade * dt
+-          el.x += -dirY * lat
+-          // [№20-3б] обход не заносит корпус на линию забора
+-          const nextY = el.y + dirX * lat
+-          el.y = personGate ? limitPersonPushY(el, personGate, nextY) : nextY
+-        }
+-        // 2) аварийный клапан от наложения (контакт ближе PERSON_HARD_SEP)
+-        // [№27-НАСТРОЙКИ] отключается тумблером pHardSepOn
+-        if (hardW > 0 && personHardSepOn) {
+-          const m = Math.hypot(hardAX, hardAY)
+-          if (m > 0.01) {
+-            const arriveFade = agent.state === 'to_gate' ? arriveFadeOf(dist) : 1
+-            const push = PERSON_HARD_SPEED * hardW * arriveFade * dt
+-            el.x += (hardAX / m) * push
+-            // [№20-3б] клапан не выносит корпус на линию забора
+-            const nextY = el.y + (hardAY / m) * push
+-            el.y = personGate ? limitPersonPushY(el, personGate, nextY) : nextY
+-          }
+-        }
+-      }
++      // [№30-ЖИЗНЬ] расхождение идущих — как в жизни, «каждый правее»:
++      // непрерывный вес по дистанции и курсу, без булевых флагов; при
++      // контакте — аварийный клапан «от соседа»; в тихой зоне силы гаснут
++      // плавно (детали — personAvoidanceStep выше).
++      personAvoidanceStep(agent, el, dirX, dirY, dist, personGate, collapseActive, dt)
+ 
+       // [ФИКС-висяки] деспавн за пределами сцены — для всех одинаково:
+       // прежний skip для exit оставлял вечные призраки при мусорных целях
+--- a/app/utils/personTuning.ts
++++ b/app/utils/personTuning.ts
+@@ -119,20 +119,11 @@
+     hint: 'На последнем отрезке перед точкой останова обход и расталкивание плавно гаснут. 0 — без тихой зоны (может дёргать у посадки).',
+     unit: 'px', min: 0, max: 140, step: 10, def: 70, group: 'Плавность хода',
+   },
+-  // --- 8б. Возврат после уступания (№29-НАПРЯМУЮ) ---
+-  // Репорт №29: «когда человек уступил дорогу (отошел вправо), он слишком
+-  // резко возвращается на свой путь вместо того чтобы идти к следующей
+-  // точке без разгона и напрямую. я не нашел этого параметра в новых
+-  // настройках». Прежняя дуга прохода начиналась касателем К ОСИ — первый
+-  // сегмент был боковым рывком назад к линии. Новая дуга начинается
+-  // касателем НА СКВОЗНУЮ точку выхода (следующую точку пути), ползунок
+-  // задаёт, насколько рано ход выравнивается на ось.
+-  {
+-    key: 'pReturnArc', toggleKey: 'pReturnOn',
+-    label: 'Возврат после уступания — дуга',
+-    hint: 'Ход после бокового отхода у прохода: 0% — идёт к следующей точке максимально напрямую, 100% — сильнее закругляет и раньше выравнивается на ось прохода. Возврат всегда обычным шагом, без рывка вбок и без разгона.',
+-    unit: '%', min: 0, max: 100, step: 5, def: 30, group: 'Плавность хода',
+-  },
++  // --- 8б. Возврат после уступания (№29-НАПРЯМУЮ → №30-БЕЗ-ДУГИ) ---
++  // Репорт №30: «давай уберем вообще эту "дугу"». Параметры дуги прохода
++  // (pReturnOn/pReturnArc) удалены вместе с дугой: проход теперь — два
++  // прямых отрезка, как в жизни (боковая пристройка к проёму + ход сквозь
++  // него к следующей точке), без кривых и без настроек кривизны.
+   // --- 9. Прорыв затора (№23-КОЛЛАПС) ---
+   {
+     key: 'pCollapseStuck', toggleKey: 'pCollapseOn',
+--- a/tests/gate-flow.test.ts
++++ b/tests/gate-flow.test.ts
+@@ -12,8 +12,8 @@
+ //  6) человек не пересекает линию забора вне проёма калитки;
+ //  7) скорость людей меняется рампом (анти-рывок), не мгновенно.
+ // [№23] машины при пустых воротах ждут ПОЛНОГО закрытия до уезда; проход
+-// смещённого уступанием человека — плавная дуга в створ (без прямого
+-// возврата на ось); взаимный затор встречных разрешается прорывом.
++// смещённого уступанием человека — пристройка к проёму и ход сквозь, без
++// дуг (№30); взаимный затор встречных разрешается прорывом.
+ 
+ import { describe, it, expect, vi, afterEach } from 'vitest'
+ import { ref } from 'vue'
+@@ -288,15 +288,15 @@
+   })
+ })
+ 
+-describe('[№23-ДУГА] проход смещённого человека — плавная дуга в створ', () => {
+-  it('смещённый уступанием человек идёт к створу дугой: первая цель НЕ ось, проход строго в проём', () => {
++describe('[№30-БЕЗ-ДУГИ] проход смещённого человека — пристройка и ход сквозь', () => {
++  it('смещённый уступанием человек пристраивается к проёму: первая цель НЕ ось, проход строго в проём', () => {
+     const h = buildHarness([makeWicket()])
+     // человек смещён от оси 580 на 40px (после уступания выходящему)
+     const p = mkPerson('p-1', 'waiting_before', 540, 148, { x: 580, y: 148 })
+     h.aiAgents.value = [p as any]
+ 
+     tick(h, 1)
+-    // дуга началась: первая точка между стартом и осью, БЕЗ прямого возврата
++    // пристройка началась: первая точка между стартом и осью, БЕЗ прямого возврата
+     expect(p.state).toBe('crossing')
+     expect(p.target.x).toBeGreaterThan(540)
+     expect(p.target.x).toBeLessThan(580)
+@@ -320,7 +320,7 @@
+     expect(centerOf(p as any).y).toBeGreaterThan(226)
+   })
+ 
+-  it('человек у самой линии забора после уступания сначала отходит от забора, затем дуга в створ — без наезда на забор', () => {
++  it('человек у самой линии забора: боковая пристройка к проёму — без наезда на забор', () => {
+     const h = buildHarness([makeWicket()])
+     // визуальный низ ровно на линии F (посадка входа), смещён на 40px
+     const touchCy = F - PERSON.height / 2 + 2   // footPad = 2
+@@ -328,8 +328,10 @@
+     h.aiAgents.value = [p as any]
+     tick(h, 1)
+     expect(p.state).toBe('crossing')
+-    // первая точка — отход ОТ забора (Y уменьшается, от линии прочь)
+-    expect(p.target.y).toBeLessThan(touchCy - 3)
++    // [№30-БЕЗ-ДУГИ] пристройка — чисто боковой шаг на той же высоте:
++    // ни отхода от забора, ни рывка к оси, ни старта вниз вдоль забора
++    expect(p.target.x).toBe(550 + 6 + PERSON.width / 2) // 576 — край коридора проёма
++    expect(p.target.y).toBe(touchCy)
+ 
+     // весь проход: пока корпус НЕ в проёме (|cx-580| > 4) — визуальный низ
+     // не ниже линии забора (скольжение вдоль, не сквозь)
+--- a/tests/gate-life-21.test.ts
++++ b/tests/gate-life-21.test.ts
+@@ -99,7 +99,7 @@
+ // 2) [№21-СТВОР] проход строго через проём после уступания
+ // ---------------------------------------------------------------------------
+ describe('[№21-СТВОР] входящий проходит строго через проём калитки', () => {
+-  it('человек сбоку от оси: короткий отход от забора, затем плавная дуга в створ [№23-ДУГА]', () => {
++  it('человек сбоку от оси: боковая пристройка к проёму на той же высоте [№30-БЕЗ-ДУГИ]', () => {
+     const h = buildHarness([makeWicket(true)])
+     // ждущий у калитки после уступания: стоит СБОКУ от оси (cx 520, ось 580),
+     // визуальный низ — на линии забора
+@@ -110,13 +110,15 @@
+ 
+     tick(h, 1)
+     expect(p.state).toBe('crossing')
+-    // [№23-ДУГА] двухфазное выравнивание заменено дугой: первая цель — НЕ
+-    // скачок на ось, а короткий отход от линии забора (кромка была на линии)
++    // [№30-БЕЗ-ДУГИ] пристройка — короткий БОКОВОЙ шаг на ТОЙ ЖЕ высоте:
++    // ни отхода от забора (кромка и так на линии — касание легально),
++    // ни рывка к оси, ни старта хода вдоль забора
+     expect((p.element.settings as any)._alignStage).toBeUndefined()
+-    expect(p.target.x).toBeLessThan(CX)
+-    expect(p.target.y).toBeLessThan(ROAD_Y - 3)
++    expect(p.target.x).toBe(550 + 6 + PERSON.width / 2) // 576 — край коридора проёма
++    expect(p.target.y).toBe(ROAD_Y)
+ 
+-    // дожимаем: проход сходится к оси проёма и уходит строго по ней
++    // дожимаем: проход завершается строго на оси проёма (после пристройки
++    // ход — через проём к следующей точке, корпус в коридоре проёма)
+     tick(h, 140)
+     expect(p.state).toBe('moving_away')
+     expect(Math.abs(centerOf(p).x - CX)).toBeLessThan(0.02)
+--- a/tests/wicket-life.test.ts
++++ b/tests/wicket-life.test.ts
+@@ -419,10 +419,15 @@
+     h.wicket.settings.isAnimating = false
+ 
+     // FCFS: первым идёт b (при равном waitStart приоритет enter)…
+-    runFrames(h, 3)
+-    const crosser = [a, b].find(x => x.state === 'crossing')
+-    const waiter = [a, b].find(x => x.state === 'waiting_before')
++    // [№30] проход без торможений — быстрее прежнего: ловим момент
++    // crossing пошагово, а не фиксированным окном
++    let crosser: any = undefined
++    for (let i = 0; i < 40 && !crosser; i++) {
++      runFrames(h, 0.1)
++      crosser = [a, b].find(x => x.state === 'crossing')
++    }
+     expect(crosser).toBeTruthy()
++    const waiter = [a, b].find(x => x.state === 'waiting_before')
+     expect(waiter).toBeTruthy()
+     // …прошёл: moving_away, поставлен таймер закрытия (1с)
+     runFrames(h, 3)
+@@ -460,10 +465,17 @@
+     h.wicket.settings.isOpen = true
+     h.wicket.settings.isAjar = false
+     h.wicket.settings.isAnimating = false
++    // [№30] проход без торможений: через ~2с человек уже за проёмом —
++    // ждём перехода в moving_away, а не фиксированного окна
++    let passed = false
++    for (let i = 0; i < 60 && !passed; i++) {
++      runFrames(h, 0.1)
++      passed = a.state === 'moving_away'
++    }
++    expect(passed).toBe(true)
++    // дать человеку уйти из зоны створа (70px), иначе таймер закрытия
++    // увидит «занято» и не закроет
+     runFrames(h, 3)
+-    expect(a.state).toBe('crossing')
+-    runFrames(h, 3)
+-    expect(a.state).toBe('moving_away')
+     vi.advanceTimersByTime(1200)
+     runFrames(h, 0.1)
+     expect(h.closeCalls).toEqual(['w-1'])
+--- a/README.md
++++ b/README.md
+@@ -647,6 +647,32 @@
+   Тесты: 251 passed | 1 skipped (34 файла), vue-tsc без ошибок, nuxi
+   generate + nuxt build OK.
+ 
++Фикс №30 (дуга прохода удалена полностью; движение и уступание — «как в
++жизни»):
++
++- «Давай уберем вообще эту "дугу"» — кривые Безье прохода калитки (№23
++  квадратичная, №29 кубическая) и их настройки pReturnOn/pReturnArc
++  удалены. Проход — два прямых отрезка, как в жизни: короткий БОКОВОЙ
++  шаг пристройки к проёму (точка на той же высоте, ближайший x, при
++  котором корпус целиком проходит в проём — gateFlow.wicketAlignX),
++  затем ход сквозь проём к следующей точке пути. Без рывка к оси, без
++  отхода от забора, без разгона.
++- «Максимально похоже на движения в жизни» — человек в проходе больше не
++  тормозит перед точками пути (прогрессивное торможение теперь не
++  действует на транзит в crossing: прежний brake-cap «шаркал» у точек
++  дуги до ~11 px/с); скорость между отрезками не обнуляется; поворот
++  сглаживает поворот корпуса. Уступание ждущего и расхождение идущих
++  вынесены в именованные функции personYieldStep / personAvoidanceStep
++  (математика прежняя, раунды №25-№29).
++- Панель настроек: параметры дуги пропали из реестра personTuning и
++  автоматически исчезли из live-панели симулятора и карточки настроек.
++- Файлы: utils/gateFlow.ts (−buildWicketArcPoints, +wicketAlignX),
++  useSimulatorPhysics.ts (пристройка, транзит без торможений, рефакторинг
++  уступания/обхода), utils/personTuning.ts, tests/return-direct.test.ts
++  удалён, +tests/cross-direct.test.ts, обновлены gate-flow/gate-life-21/
++  wicket-life. Тесты: 288 passed | 1 skipped (38 файлов), vue-tsc без
++  ошибок, nuxi generate OK.
++
+ ### Журнал и смены
+ 
+ `useJournal` — записи въезда/выезда; симулятор сам предлагает запись по
+--- a/Логика-движения-агентов.txt
++++ b/Логика-движения-агентов.txt
+@@ -1191,7 +1191,8 @@
+   Въезжающая машина: семантика прежняя (ждёт закрытия; уезд налево сразу
+   только при exitPendingFor или легальной очереди у линии).
+ 
+-  [№23-ДУГА] Двухфазный проход смещённого человека (№21: прямое
++  [№23-ДУГА] (УСТАРЕЛО №30, см. 14.19 — дуга удалена полностью).
++  Двухфазный проход смещённого человека (№21: прямое
+   выравнивание на ось -> вертикаль) заменён плавной дугой
+   (gateFlow.buildWicketArcPoints): квадратичная Безье из текущей точки в
+   точку (ось, clearY) с контрольной точкой на оси на высоте старта;
+@@ -1230,3 +1231,55 @@
+   (пара нос к носу: замерзла -> прорыв за ~3-4с, без сторожа и прохода
+   сквозь; закрытая калитка с очередью — не коллапс). Итог: 251 passed |
+   1 skipped (34 файла), vue-tsc 0, nuxi generate + nuxt build OK.
++
++14.19. Репорт №30 (25.10.26): дуга прохода удалена полностью, движение и
++  уступание упрощены до «как в жизни».
++  Отзыв заказчика: «давай уберем вообще эту "дугу". и сделай рефакторинг
++  и упрощение всей логики движения и уступания, чтобы она была максимально
++  похожа на движения в жизни».
++
++  [№30-БЕЗ-ДУГИ] Проход через калитку — без кривых. Квадратичная (№23) и
++  кубическая (№29) Безье (gateFlow.buildWicketArcPoints) удалены вместе с
++  настройками pReturnOn/pReturnArc. Вместо дуги — два прямых отрезка, как
++  в жизни: человек, стоящий сбоку от проёма (после уступания), сначала
++  делает короткий БОКОВОЙ шаг пристройки к проёму — точка на ЕГО высоте
++  (без подъёма/спуска, без рывка к оси и без разгона), x = ближайшее
++  положение, при котором корпус целиком проходит в проём с запасом
++  APERTURE_INSET от каждой стойки (gateFlow.wicketAlignX); затем — сквозь
++  проём к следующей точке пути (exitPoint). Скорость между отрезками не
++  обнуляется и не тормозится: человек в crossing — ТРАНЗИТ, блок
++  прогрессивного торможения (arrivalBrake, dist<80) на него не действует
++  (раньше brake-cap «шаркал» у точек дуги до ~11 px/с). Поворот между
++  отрезками сглаживает поворот корпуса (rotation-лерп). Человек на оси
++  (смещение <= 2px) пристройки не получает — цель сразу сквозная.
++  Очередь точек — crossWaypointsByAgentId ([пристройка, exitPoint]),
++  опустошается перехватом в блоке прибытия crossing; сбрасывается при
++  переносе по crossing-cap и при восстановлении NaN-цели (раньше очередь
++  дуги оставалась висеть — latent-баг).
++
++  [№30-ЖИЗНЬ-РЕФАКТОРИНГ] Логика уступания и расхождения вынесена из
++  гигантского цикла в именованные функции (математика без изменений,
++  проверена раундами №25-№29):
++  - personYieldStep — уступание ждущего: боковой шаг от линии курса
++    идущего + радиальная составляющая, обход ждущих рядом, страховка
++    касательной, запрет выноса на забор (тумблер pYieldOn);
++  - personAvoidanceStep — расхождение идущих: «каждый правее» (непрерывный
++    вес по дистанции/курсу, без булевых флагов), аварийный клапан
++    контакта, фейд в тихой зоне (тумблеры pBypassOn/pHardSepOn).
++
++  Панель настроек: параметры дуги исчезли из реестра personTuning — из
++  live-панели в окне симулятора и карточки настроек они пропадают
++  автоматически (реестр — единственный источник). Старые сейвы с ключами
++  pReturn* безвредны: физика их больше не читает.
++
++  Тесты: tests/return-direct.test.ts (№29, дуга) удалён; +tests/cross-direct.test.ts
++  (14 тестов: wicketAlignX — край коридора/осевой/вырожденный/мусор;
++  реестр без pReturn*; пристройка на той же высоте; чисто боковой первый
++  отрезок; ход сквозь проём к следующей точке; отсутствие провалов
++  скорости в crossing; корпус в коридоре проёма; завершение crossing ->
++  moving_away; на оси — без пристройки; выезд вверх симметричен).
++  Обновлены: tests/gate-flow.test.ts, tests/gate-life-21.test.ts
++  (пристройка вместо отхода от забора), tests/wicket-life.test.ts
++  (robust-ожидания вместо фиксированных окон — проход быстрее без
++  торможений). Итог: 288 passed | 1 skipped (38 файлов), vue-tsc 0,
++  nuxi generate OK.
+--- a/tests/return-direct.test.ts
++++ /dev/null
+@@ -1,218 +0,0 @@
+-// tests/return-direct.test.ts
+-// [№29-НАПРЯМУЮ] Репорт №29: «когда человек уступил дорогу (отошел вправо),
+-// он слишком резко возвращается на свой путь вместо того чтобы идти к
+-// следующей точке без разгона и напрямую. я не нашел этого параметра в
+-// новых настройках».
+-//
+-// Проверяется:
+-//  1) РЕЕСТР: в настройках людей есть тумблер pReturnOn и ползунок
+-//     pReturnArc «Возврат после уступания — дуга» (группа «Плавность хода»);
+-//  2) ГЕОМЕТРИЯ: дуга прохода начинается ходом К СКВОЗНОЙ точке выхода —
+-//     первый сегмент преимущественно ПЕРЕДНИЙ (к следующей точке), а не
+-//     боковой рывок к оси, как у прежней квадратичной дуги №23;
+-//  3) ГАРАНТИИ №23 сохранены: кривая не переваливает за границу чистого
+-//     корпуса (2px допуска внутри запаса APERTURE_INSET), заканчивается
+-//     строго на оси прохода, движение вперёд без отката;
+-//  4) ПОЛЗУНОК: pReturnArc=0 — курс на выход держится дольше (выравнивание
+-//     на ось позже), pReturnArc=100 — выравнивание раньше;
+-//  5) ТУМБЛЕР: pReturnOn=false — выравнивания на ось нет вовсе, цель
+-//     прохода = сквозная точка выхода;
+-//  6) ФИЗИКА: человек, отошедший вправо уступанием, после старта прохода
+-//     идёт к следующей точке (передняя составляющая хода больше боковой).
+-
+-import { describe, it, expect } from 'vitest'
+-import { ref } from 'vue'
+-import { buildWicketArcPoints } from '~/utils/gateFlow'
+-import {
+-  PERSON_TUNING_FIELDS, defaultPersonTuning, tuneNumber, tuneBool,
+-} from '~/utils/personTuning'
+-import { useSimulatorPhysics } from '~/composables/simulator/useSimulatorPhysics'
+-import { PERSON_WIDTH, PERSON_HEIGHT } from '~/utils/simulatorConstants'
+-
+-const DT = 0.05
+-const AXIS_X = 800
+-const FENCE_Y = 220
+-const RADIUS = PERSON_HEIGHT / 2
+-// стандартный сценарий: человек уступанием отошёл на 30px вправо от оси,
+-// стоит в 60px перед линией забора, сквозная точка выхода — в 60px за ней
+-const START_X = AXIS_X + 30
+-const START_Y = FENCE_Y - 60
+-const EXIT_Y = FENCE_Y + 60
+-
+-const dist = (ax: number, ay: number, bx: number, by: number) => Math.hypot(bx - ax, by - ay)
+-
+-describe('реестр: настройка «Возврат после уступания» [№29]', () => {
+-  it('ползунок pReturnArc с тумблером pReturnOn есть в реестре', () => {
+-    const f = PERSON_TUNING_FIELDS.find(x => x.key === 'pReturnArc')
+-    expect(f).toBeDefined()
+-    expect(f!.toggleKey).toBe('pReturnOn')
+-    expect(f!.group).toBe('Плавность хода')
+-    expect(f!.min).toBe(0)
+-    expect(f!.max).toBe(100)
+-    expect(f!.step).toBeLessThanOrEqual(5)
+-    expect(f!.def).toBe(30)
+-    const d = defaultPersonTuning()
+-    expect(d.pReturnArc).toBe(30)
+-    expect(d.pReturnOn).toBe(true)
+-  })
+-
+-  it('tuneNumber/tuneBool клампят значения ползунка и тумблера', () => {
+-    expect(tuneNumber({ pReturnArc: 999 }, 'pReturnArc')).toBe(100)
+-    expect(tuneNumber({ pReturnArc: -5 }, 'pReturnArc')).toBe(0)
+-    expect(tuneNumber({ pReturnArc: 55 }, 'pReturnArc')).toBe(55)
+-    expect(tuneNumber({}, 'pReturnArc')).toBe(30)
+-    expect(tuneBool({ pReturnOn: false }, 'pReturnOn')).toBe(false)
+-    expect(tuneBool({}, 'pReturnOn')).toBe(true)
+-  })
+-})
+-
+-describe('геометрия дуги: ход к следующей точке, а не рывок к оси [№29]', () => {
+-  it('первый сегмент дуги — преимущественно передний (к точке выхода)', () => {
+-    const pts = buildWicketArcPoints(START_X, START_Y, AXIS_X, EXIT_Y, FENCE_Y, RADIUS, 0.3)
+-    expect(pts.length).toBeGreaterThanOrEqual(8)
+-    const first = pts[0]!
+-    const mx = first.x - START_X
+-    const my = first.y - START_Y
+-    // прежняя дуга №23: первый сегмент почти ГОРИЗОНТАЛЬНЫЙ к оси
+-    // (|mx| >> |my| — боковой рывок). Новая: ход к следующей точке —
+-    // передняя составляющая больше боковой.
+-    expect(Math.abs(my)).toBeGreaterThan(Math.abs(mx))
+-    // курс первого сегмента близок к направлению «старт -> точка выхода»
+-    const uLen = dist(START_X, START_Y, AXIS_X, EXIT_Y)
+-    const dot = (mx * (AXIS_X - START_X) + my * (EXIT_Y - START_Y)) /
+-      (Math.hypot(mx, my) * uLen)
+-    expect(dot).toBeGreaterThan(0.9)
+-  })
+-
+-  it('гарантии №23 сохранены: без перевала за чистый корпус, финиш на оси, без отката', () => {
+-    const clearY = FENCE_Y - RADIUS - 6
+-    for (const curve of [0, 0.3, 0.7, 1]) {
+-      const pts = buildWicketArcPoints(START_X, START_Y, AXIS_X, EXIT_Y, FENCE_Y, RADIUS, curve)
+-      expect(pts.length).toBeGreaterThan(0)
+-      let prevY = START_Y
+-      for (const p of pts) {
+-        // не глубже границы чистого корпуса + 2px допуска (запас APERTURE_INSET)
+-        expect(p.y).toBeLessThanOrEqual(clearY + 2.5)
+-        // движение вперёд (вниз) без отката
+-        expect(p.y).toBeGreaterThanOrEqual(prevY - 0.5)
+-        prevY = p.y
+-      }
+-      const last = pts[pts.length - 1]!
+-      // финиш строго на оси прохода, у границы чистого корпуса
+-      expect(Math.abs(last.x - AXIS_X)).toBeLessThan(1)
+-      expect(Math.abs(last.y - clearY)).toBeLessThan(1)
+-    }
+-  })
+-
+-  it('человек у самой линии забора: короткий отход, затем ход к оси (pastBoundary)', () => {
+-    const clearY = FENCE_Y - RADIUS - 6
+-    const pts = buildWicketArcPoints(START_X, clearY + 6, AXIS_X, EXIT_Y, FENCE_Y, RADIUS, 0.3)
+-    const first = pts[0]!
+-    // первая точка — отход ОТ линии забора (вверх при ходе вниз)
+-    expect(first.y).toBeLessThan(clearY + 6)
+-    const last = pts[pts.length - 1]!
+-    expect(Math.abs(last.x - AXIS_X)).toBeLessThan(1)
+-  })
+-
+-  it('ползунок: 0% — позже выравнивается на ось, 100% — раньше', () => {
+-    const direct = buildWicketArcPoints(START_X, START_Y, AXIS_X, EXIT_Y, FENCE_Y, RADIUS, 0)
+-    const curved = buildWicketArcPoints(START_X, START_Y, AXIS_X, EXIT_Y, FENCE_Y, RADIUS, 1)
+-    // сравниваем на равной ПРОЙДЕННОЙ дистанции от старта (t кривых несопоставим)
+-    const walked = (points: { x: number; y: number }[], target: number) => {
+-      let acc = 0
+-      let px = START_X
+-      let py = START_Y
+-      for (const p of points) {
+-        acc += dist(px, py, p.x, p.y)
+-        px = p.x
+-        py = p.y
+-        if (acc >= target) return p
+-      }
+-      return points[points.length - 1]!
+-    }
+-    const pDirect = walked(direct, 20)
+-    const pCurved = walked(curved, 20)
+-    // на 20px хода «напрямую» человек ещё дальше от оси, чем при 100%
+-    expect(Math.abs(pDirect.x - AXIS_X)).toBeGreaterThan(Math.abs(pCurved.x - AXIS_X))
+-  })
+-})
+-
+-// --- физика: человек после уступания идёт к следующей точке ---
+-
+-const makeWicket = () => ({
+-  id: 'wicket-1', x: 760, y: 100, width: 80, height: 120,
+-  rotation: 0, velocity: 0, category: 'gate', type: 'gate', name: 'Калитка', zIndex: 300,
+-  settings: { gateType: 'wicket', isOpen: true, isAnimating: false },
+-  asset: { type: 'svg', content: '<svg/>' },
+-})
+-
+-const buildHarness = (tuning: Record<string, unknown> = {}) => {
+-  const simElements = ref<any[]>([makeWicket()])
+-  const aiAgents = ref<any[]>([])
+-  const sceneSize = ref({ width: 1280, height: 720 })
+-  const simOpts: any = {
+-    ACCEL: 100, DECEL: 100, REACTION_TIME: 1.5, MIN_BUFFER: 15,
+-    MAX_LOOKAHEAD: 220, ARRIVE_THRESHOLD: 1,
+-    gateCloseDelay: 10, wicketCloseDelay: 2, stallEscalateTime: 10,
+-    personTuning: tuning,
+-  }
+-  const physics = useSimulatorPhysics(
+-    simElements as any, aiAgents, sceneSize,
+-    (gate: any) => { gate.settings.isOpen = true; return true },
+-    (gate: any) => { gate.settings.isOpen = false; return true },
+-    () => {},
+-    simOpts,
+-    undefined,
+-    undefined,
+-  )
+-  return { simElements, aiAgents, physics }
+-}
+-
+-const mkYieldedPerson = () => ({
+-  id: 'p1',
+-  element: {
+-    id: 'p1', x: START_X - PERSON_WIDTH / 2, y: START_Y - PERSON_HEIGHT / 2,
+-    width: PERSON_WIDTH, height: PERSON_HEIGHT,
+-    rotation: Math.PI / 2, velocity: 0, category: 'human', type: 'actor', direction: 'enter',
+-  },
+-  state: 'waiting_before',
+-  target: { x: START_X, y: START_Y, width: 0, height: 0 },
+-  afterTarget: { x: 900, y: 420, width: 0, height: 0 },
+-  exitPoint: { x: AXIS_X, y: EXIT_Y, width: 0, height: 0 },
+-  speed: 40, type: 'person', direction: 'enter', travelMode: 'walk',
+-})
+-
+-describe('физика: возврат после уступания без рывка к оси [№29]', () => {
+-  it('после старта прохода ход направлен к следующей точке (передний > бокового)', () => {
+-    const h = buildHarness({})
+-    const p = mkYieldedPerson() as any
+-    h.aiAgents.value = [p]
+-    const tick = () => h.physics.updateAiMovement(DT, { carGateId: '', personGateId: 'wicket-1' })
+-
+-    tick()
+-    expect(p.state).toBe('crossing')
+-    // первая цель — точка дуги СМЕЩЁННОГО старта: строго между стартом
+-    // и осью (не сама ось — выравнивание идёт плавно, не рывком)
+-    expect(p.target.x).toBeGreaterThan(AXIS_X + 1)
+-    expect(p.target.x).toBeLessThan(START_X - 1)
+-
+-    const startX = p.element.x + PERSON_WIDTH / 2
+-    const startY = p.element.y + PERSON_HEIGHT / 2
+-    for (let i = 0; i < 10; i++) tick()
+-    const mx = (p.element.x + PERSON_WIDTH / 2) - startX
+-    const my = (p.element.y + PERSON_HEIGHT / 2) - startY
+-    // человек реально пошёл к проходу: вперёд больше, чем вбок
+-    expect(my).toBeGreaterThan(Math.abs(mx) * 1.5)
+-    expect(my).toBeGreaterThan(0)
+-  })
+-
+-  it('тумблер pReturnOn=false — выравнивания на ось нет, цель = точка выхода', () => {
+-    const h = buildHarness({ pReturnOn: false })
+-    const p = mkYieldedPerson() as any
+-    h.aiAgents.value = [p]
+-    h.physics.updateAiMovement(DT, { carGateId: '', personGateId: 'wicket-1' })
+-    expect(p.state).toBe('crossing')
+-    expect(p.target.x).toBeCloseTo(AXIS_X, 5)
+-    expect(p.target.y).toBeCloseTo(EXIT_Y, 5)
+-  })
+-})
+--- /dev/null
++++ b/tests/cross-direct.test.ts
+@@ -0,0 +1,249 @@
++// tests/cross-direct.test.ts
++// [№30-БЕЗ-ДУГИ] Репорт №30: «давай уберем вообще эту "дугу". и сделай
++// рефакторинг и упрощение всей логики движения и уступания, чтобы она была
++// максимально похожа на движения в жизни».
++//
++// Проход через калитку теперь — как в жизни, без кривых:
++//  1) РЕЕСТР: параметров дуги больше нет (pReturnOn/pReturnArc удалены);
++//  2) ПРИСТРОЙКА: первая цель прохода — точка проёма на ТОЙ ЖЕ высоте
++//     (короткий боковой шаг, без подъёма/спуска и без рывка);
++//  3) СКВОЗЬ: после пристройки цель = сквозная точка выхода, ход к ней;
++//  4) БЕЗ ТОРМОЖЕНИЙ: человек в проходе идёт обычным шагом — после набора
++//     хода скорость не проваливается (нет «шарканья» у пристройки и
++//     разгона после неё);
++//  5) ГАРАНТИЯ ЗАБОРА: во втором отрезке корпус не выходит за проём;
++//  6) человек на оси (смещение <= 2px) пристройки не получает — цель
++//     сразу сквозная; направление прохода (вниз/вверх) роли не играет.
++
++import { describe, it, expect } from 'vitest'
++import { ref } from 'vue'
++import { wicketAlignX } from '~/utils/gateFlow'
++import { PERSON_TUNING_FIELDS, defaultPersonTuning } from '~/utils/personTuning'
++import { useSimulatorPhysics } from '~/composables/simulator/useSimulatorPhysics'
++import { PERSON_WIDTH, PERSON_HEIGHT } from '~/utils/simulatorConstants'
++
++const DT = 0.05
++const GATE_X = 760
++const GATE_W = 80
++const AXIS_X = GATE_X + GATE_W / 2
++const FENCE_Y = 220
++// стандартный сценарий: человек уступанием отошёл на 30px вправо от оси,
++// стоит в 60px перед линией забора, сквозная точка выхода — в 60px за ней
++const START_X = AXIS_X + 30
++const START_Y = FENCE_Y - 60
++const EXIT_Y = FENCE_Y + 60
++// коридор центров, при котором корпус целиком проходит в проём
++const LO_X = GATE_X + 6 + PERSON_WIDTH / 2
++const HI_X = GATE_X + GATE_W - 6 - PERSON_WIDTH / 2
++
++const cxOf = (el: any) => el.x + PERSON_WIDTH / 2
++const cyOf = (el: any) => el.y + PERSON_HEIGHT / 2
++
++// --- геометрия пристройки: wicketAlignX ---
++
++describe('геометрия пристройки к проёму [№30]', () => {
++  it('смещённого человека ставит на ближайший проходной x', () => {
++    expect(wicketAlignX(START_X, { x: GATE_X, width: GATE_W }, PERSON_WIDTH / 2)).toBe(HI_X)
++  })
++  it('человека за проёмом не тянет через стойку', () => {
++    expect(wicketAlignX(GATE_X - 60, { x: GATE_X, width: GATE_W }, PERSON_WIDTH / 2)).toBe(LO_X)
++  })
++  it('человек в проёме остаётся на месте', () => {
++    expect(wicketAlignX(AXIS_X + 5, { x: GATE_X, width: GATE_W }, PERSON_WIDTH / 2)).toBe(AXIS_X + 5)
++  })
++  it('узкая калитка — пристройка на ось', () => {
++    // 40px < корпус + 2*запас: коридор вырожден — пристройка на ось калитки
++    expect(wicketAlignX(AXIS_X + 30, { x: GATE_X, width: 40 }, PERSON_WIDTH / 2)).toBe(GATE_X + 20)
++  })
++  it('мусорные входы — ось проёма, без NaN', () => {
++    expect(wicketAlignX(NaN, { x: GATE_X, width: GATE_W }, PERSON_WIDTH / 2)).toBe(AXIS_X)
++  })
++})
++
++describe('реестр: параметров дуги больше нет [№30]', () => {
++  it('pReturnOn/pReturnArc удалены из реестра и дефолтов', () => {
++    expect(PERSON_TUNING_FIELDS.find(f => f.key === 'pReturnArc')).toBeUndefined()
++    expect(PERSON_TUNING_FIELDS.find(f => f.toggleKey === 'pReturnOn')).toBeUndefined()
++    const d = defaultPersonTuning() as Record<string, unknown>
++    expect('pReturnArc' in d).toBe(false)
++    expect('pReturnOn' in d).toBe(false)
++  })
++})
++
++// --- физика: пристройка + ход сквозь проём ---
++
++const makeWicket = () => ({
++  id: 'wicket-1', x: GATE_X, y: 100, width: GATE_W, height: 120,
++  rotation: 0, velocity: 0, category: 'gate', type: 'gate', name: 'Калитка', zIndex: 300,
++  settings: { gateType: 'wicket', isOpen: true, isAnimating: false },
++  asset: { type: 'svg', content: '<svg/>' },
++})
++
++const buildHarness = (tuning: Record<string, unknown> = {}) => {
++  const simElements = ref<any[]>([makeWicket()])
++  const aiAgents = ref<any[]>([])
++  const sceneSize = ref({ width: 1280, height: 720 })
++  const simOpts: any = {
++    ACCEL: 100, DECEL: 100, REACTION_TIME: 1.5, MIN_BUFFER: 15,
++    MAX_LOOKAHEAD: 220, ARRIVE_THRESHOLD: 1,
++    gateCloseDelay: 10, wicketCloseDelay: 2, stallEscalateTime: 10,
++    personTuning: tuning,
++  }
++  const physics = useSimulatorPhysics(
++    simElements as any, aiAgents, sceneSize,
++    (gate: any) => { gate.settings.isOpen = true; return true },
++    (gate: any) => { gate.settings.isOpen = false; return true },
++    () => {},
++    simOpts,
++    undefined,
++    undefined,
++  )
++  return { simElements, aiAgents, physics }
++}
++
++const mkYieldedPerson = () => ({
++  id: 'p1',
++  element: {
++    id: 'p1', x: START_X - PERSON_WIDTH / 2, y: START_Y - PERSON_HEIGHT / 2,
++    width: PERSON_WIDTH, height: PERSON_HEIGHT,
++    rotation: Math.PI / 2, velocity: 0, category: 'human', type: 'actor', direction: 'enter',
++  },
++  state: 'waiting_before',
++  target: { x: START_X, y: START_Y, width: 0, height: 0 },
++  afterTarget: { x: 900, y: 420, width: 0, height: 0 },
++  exitPoint: { x: AXIS_X, y: EXIT_Y, width: 0, height: 0 },
++  speed: 40, type: 'person', direction: 'enter', travelMode: 'walk',
++})
++
++describe('физика: проход как в жизни — пристройка и ход сквозь [№30]', () => {
++  it('первая цель — пристройка к проёму на той же высоте (без рывка)', () => {
++    const h = buildHarness({})
++    const p = mkYieldedPerson() as any
++    h.aiAgents.value = [p]
++    h.physics.updateAiMovement(DT, { carGateId: '', personGateId: 'wicket-1' })
++    expect(p.state).toBe('crossing')
++    // x — ближайший проходной (правый край коридора центров)...
++    expect(p.target.x).toBeCloseTo(HI_X, 5)
++    // ...y — ТОТ ЖЕ: боковой шаг без подъёма/спуска (репорт №29 закрыт
++    // окончательно: ни бокового рывка к оси, ни хода «не туда»)
++    expect(p.target.y).toBeCloseTo(START_Y, 5)
++  })
++
++  it('первый отрезок — чисто боковой шаг', () => {
++    const h = buildHarness({})
++    const p = mkYieldedPerson() as any
++    h.aiAgents.value = [p]
++    const tick = () => h.physics.updateAiMovement(DT, { carGateId: '', personGateId: 'wicket-1' })
++    tick()
++    const sx = cxOf(p.element)
++    const sy = cyOf(p.element)
++    for (let i = 0; i < 4; i++) tick()
++    const mx = cxOf(p.element) - sx
++    const my = cyOf(p.element) - sy
++    // человек пристраивается вбок, а не срывается вниз и не пятается
++    expect(Math.abs(mx)).toBeGreaterThan(1)
++    expect(Math.abs(my)).toBeLessThan(1)
++  })
++
++  it('после пристройки — ход сквозь проём к следующей точке', () => {
++    const h = buildHarness({})
++    const p = mkYieldedPerson() as any
++    h.aiAgents.value = [p]
++    const tick = () => h.physics.updateAiMovement(DT, { carGateId: '', personGateId: 'wicket-1' })
++    tick()
++    // дождаться перехода на сквозную цель
++    let switched = false
++    for (let i = 0; i < 60; i++) {
++      tick()
++      if (Math.abs(p.target.x - AXIS_X) < 0.5 && Math.abs(p.target.y - EXIT_Y) < 0.5) { switched = true; break }
++    }
++    expect(switched).toBe(true)
++    const bx = cxOf(p.element)
++    const by = cyOf(p.element)
++    for (let i = 0; i < 6; i++) tick()
++    const mx = cxOf(p.element) - bx
++    const my = cyOf(p.element) - by
++    // ход к выходу: вперёд больше, чем вбок
++    expect(my).toBeGreaterThan(Math.abs(mx))
++    expect(my).toBeGreaterThan(0)
++  })
++
++  it('человек в проходе не тормозит: после набора хода скорость не проваливается', () => {
++    const h = buildHarness({})
++    const p = mkYieldedPerson() as any
++    h.aiAgents.value = [p]
++    const tick = () => h.physics.updateAiMovement(DT, { carGateId: '', personGateId: 'wicket-1' })
++    let seenCruise = false
++    let minAfter = Infinity
++    for (let i = 0; i < 120; i++) {
++      tick()
++      if (p.state !== 'crossing') break
++      const v = p.element.velocity || 0
++      if (v >= 38) seenCruise = true
++      else if (seenCruise) minAfter = Math.min(minAfter, v)
++    }
++    expect(seenCruise).toBe(true)
++    // прежний brake-cap «шаркал» у точек пути (спад до ~11 px/с);
++    // теперь транзит идёт обычным шагом — без провалов и без разгона
++    expect(minAfter).toBeGreaterThanOrEqual(30)
++  })
++
++  it('гарантия забора: во втором отрезке корпус не выходит за проём', () => {
++    const h = buildHarness({})
++    const p = mkYieldedPerson() as any
++    h.aiAgents.value = [p]
++    const tick = () => h.physics.updateAiMovement(DT, { carGateId: '', personGateId: 'wicket-1' })
++    let leg2 = false
++    let maxCx = -Infinity
++    for (let i = 0; i < 200; i++) {
++      tick()
++      if (p.state !== 'crossing') break
++      if (Math.abs(p.target.x - AXIS_X) < 0.5 && Math.abs(p.target.y - EXIT_Y) < 0.5) leg2 = true
++      if (leg2) maxCx = Math.max(maxCx, cxOf(p.element))
++    }
++    expect(leg2).toBe(true)
++    // центр не правее коридора проёма (правая стойка + запас 6px)
++    expect(maxCx).toBeLessThanOrEqual(HI_X + 0.6)
++  })
++
++  it('проход завершается штатно: crossing -> moving_away', () => {
++    const h = buildHarness({})
++    const p = mkYieldedPerson() as any
++    h.aiAgents.value = [p]
++    const tick = () => h.physics.updateAiMovement(DT, { carGateId: '', personGateId: 'wicket-1' })
++    tick() // waiting_before -> crossing
++    for (let i = 0; i < 200 && p.state === 'crossing'; i++) tick()
++    expect(p.state).toBe('moving_away')
++  })
++
++  it('человек на оси: пристройки нет, цель сразу сквозная', () => {
++    const h = buildHarness({})
++    const p = mkYieldedPerson() as any
++    p.element.x = AXIS_X - PERSON_WIDTH / 2
++    p.target = { x: AXIS_X, y: START_Y, width: 0, height: 0 }
++    h.aiAgents.value = [p]
++    h.physics.updateAiMovement(DT, { carGateId: '', personGateId: 'wicket-1' })
++    expect(p.state).toBe('crossing')
++    expect(p.target.x).toBeCloseTo(AXIS_X, 5)
++    expect(p.target.y).toBeCloseTo(EXIT_Y, 5)
++  })
++
++  it('выезд вверх симметричен: пристройка на той же высоте', () => {
++    const h = buildHarness({})
++    const p = mkYieldedPerson() as any
++    const px = AXIS_X - 30
++    const py = FENCE_Y + 60
++    p.direction = 'exit'
++    p.element.direction = 'exit'
++    p.element.x = px - PERSON_WIDTH / 2
++    p.element.y = py - PERSON_HEIGHT / 2
++    p.target = { x: px, y: py, width: 0, height: 0 }
++    p.afterTarget = { x: 600, y: 60, width: 0, height: 0 }
++    p.exitPoint = { x: AXIS_X, y: FENCE_Y - 60, width: 0, height: 0 }
++    h.aiAgents.value = [p]
++    h.physics.updateAiMovement(DT, { carGateId: '', personGateId: 'wicket-1' })
++    expect(p.state).toBe('crossing')
++    expect(p.target.x).toBeCloseTo(LO_X, 5)
++    expect(p.target.y).toBeCloseTo(py, 5)
++  })
++})
