@@ -1,0 +1,597 @@
+diff -ruN '--exclude=.git' '--exclude=node_modules' '--exclude=.nuxt' '--exclude=.output' '--exclude=dist' '--exclude=.data' /tmp/jkpp-base27/app/components/SimulatorWidget.vue /tmp/no28-after/app/components/SimulatorWidget.vue
+--- a/app/components/SimulatorWidget.vue	2026-10-24 04:00:45.000000000 +0000
++++ b/app/components/SimulatorWidget.vue	2026-10-24 15:42:51.121899232 +0000
+@@ -43,11 +43,18 @@
+       )
+         Gauge.w-4.h-4
+       button.btn.btn-xs.btn-ghost.btn-square(
+-        @click="showSettings = !showSettings"
++        @click="toggleSettingsPopover"
+         :class="showSettings ? 'text-warning bg-warning/20' : 'text-base-content/40'"
+         title="Настройки"
+       )
+         SlidersHorizontal.w-4.h-4
++      //- [№28-ЖИВАЯ-ПАНЕЛЬ] live-настройки движения/логики людей поверх симулятора
++      button.btn.btn-xs.btn-ghost.btn-square(
++        @click="togglePeopleTuning"
++        :class="showPeopleTuning ? 'text-success bg-success/20' : 'text-base-content/40'"
++        title="Движение и логика людей (живые настройки)"
++      )
++        PersonStanding.w-4.h-4
+       //- [№15-ЗВУК] mute/громкость симулятора
+       button.btn.btn-xs.btn-ghost.btn-square(
+         @click="userMuted = !userMuted"
+@@ -113,6 +120,58 @@
+           input(type="range" min="0" max="100" step="5" v-model.number="userVolume" @input="userMuted = false")
+         button.btn.btn-xs.btn-outline.btn-error.mt-2(@click="resetSettings") Сбросить
+ 
++    //- [№28-ЖИВАЯ-ПАНЕЛЬ] компактная панель «Движение и логика людей» поверх
++    //- симулятора: тумблер механизма + плавный ползунок у каждого параметра.
++    //- Физика перечитывает настройки на каждом тике — изменения действуют сразу
++    .absolute.top-11.right-2.z-50.w-72.flex.flex-col.rounded-lg.p-2.shadow-xl(
++      v-if="showPeopleTuning"
++      class="bg-gray-900 border border-white/10 max-h-[calc(100%-3.5rem)]"
++    )
++      .flex.items-center.justify-between.mb-1.flex-none
++        span(class="text-[10px] font-bold text-base-content/70") ДВИЖЕНИЕ И ЛОГИКА ЛЮДЕЙ
++        .flex.items-center.gap-1
++          button.btn.btn-ghost.btn-xs.px-1(
++            class="text-warning"
++            title="Сохранить значения в конфиг (переживут перезапуск приложения)"
++            @click="savePersonTuning"
++          ) сохранить
++          button.btn.btn-ghost.btn-xs.px-1(
++            class="text-warning"
++            title="Вернуть все значения к дефолтам"
++            @click="resetPersonTuning"
++          ) сброс
++      .flex.flex-col.min-h-0.overflow-y-auto(class="gap-0.5 pr-1")
++        template(v-for="(f, i) in personTuningFields" :key="f.key")
++          div(
++            v-if="f.group && f.group !== (personTuningFields[i - 1]?.group ?? null)"
++            class="mt-1 mb-0.5 px-1 uppercase tracking-wider text-[9px] font-bold text-base-content/40"
++          ) {{ f.group }}
++          div(
++            class="rounded px-1 py-0.5 hover:bg-white/5"
++            :class="f.toggleKey && !ptModel[f.toggleKey] ? 'opacity-40' : ''"
++          )
++            .flex.items-center.gap-1
++              input.toggle.toggle-xs.toggle-primary(
++                v-if="f.toggleKey"
++                type="checkbox"
++                v-model="ptModel[f.toggleKey]"
++              )
++              span.flex-1.truncate.leading-tight(
++                :title="f.hint"
++                class="text-[10px] text-base-content/80"
++              ) {{ f.label }}
++              span.whitespace-nowrap.font-mono(
++                class="text-[10px] text-base-content/60"
++              ) {{ fmtTuneVal(f, ptModel[f.key]) }} {{ f.unit }}
++            input.w-full(
++              class="range range-xs range-primary mt-0.5"
++              type="range"
++              :min="f.min"
++              :max="f.max"
++              :step="f.step"
++              v-model.number="ptModel[f.key]"
++            )
++
+   //- Основной холст симуляции
+   //- [БАГ-РЕПОРТ-8-ВЫРАВНИВАНИЕ] окно симулятора прижато ВЛЕВО (как было
+   //- раньше): justify-start/items-start вместо центрирования.
+@@ -302,7 +361,7 @@
+ // литералы ('flex'/'absolute'/'none') без контекстного типа расширяются до
+ // string и не проходят CSSProperties; функции из useSimulatorUI/useSimulatorCore
+ // обёрнуты с приведением (их исходники возвращают widening-объекты).
+-import { ref, watch, onMounted, onUnmounted, nextTick, computed, toRaw } from 'vue'
++import { ref, watch, onMounted, onUnmounted, nextTick, computed, reactive, toRaw } from 'vue'
+ import type { CSSProperties } from 'vue'
+ import TrafficRoad from './editor/TrafficRoad.vue'
+ // [PAYROLL] HUD баланса смены — оверлей поверх холста
+@@ -324,6 +383,12 @@
+ import { loadWidgetSettings, saveWidgetSettings } from '~/utils/widgetSettings'
+ // [ФИКС-флуд-4] чистая санитизация интервалов спавна
+ import { sanitizeSpawnInterval } from '~/utils/simTuning'
++// [№28-ЖИВАЯ-ПАНЕЛЬ] реестр настроек движения/логики людей: компактная панель
++// поверх симулятора (значения живут в config.simulator.personTuning и
++// применяются физикой на ходу — refreshPersonTuning на каждом тике)
++import { PERSON_TUNING_FIELDS, defaultPersonTuning } from '~/utils/personTuning'
++import type { PersonTuningField } from '~/utils/personTuning'
++import { useConfig } from '~/composables/useConfig'
+ // [СМЕНА] напоминание о принятии смены при запуске симуляции
+ import { useShift } from '~/composables/useShift'
+ import {
+@@ -341,7 +406,7 @@
+ // [Фаза 5] Lucide: хедер и empty state
+ import {
+   CarFront, Activity, SlidersHorizontal, X, Gauge,
+-  MonitorX, PencilRuler, ShieldAlert, Volume2, VolumeX
++  MonitorX, PencilRuler, ShieldAlert, Volume2, VolumeX, PersonStanding
+ } from '@lucide/vue'
+ 
+ const audio = useAudioEngine()
+@@ -638,8 +703,55 @@
+ // [№21-ТОРМОЖЕНИЕ] тумблер торможения у точки останова: живой геттер поверх
+ // настроек сцены (физика читает simOpts.* на каждом тике; прототип
+ // сохраняет чтение остальных полей напрямую из props.simSettings)
++// [№28-ЖИВАЯ-ПАНЕЛЬ] модель настроек людей для live-панели: объект
++// props.simSettings.personTuning (общий с config.simulator — правки видны
++// в Настройках и сохраняются кнопкой «сохранить»); если simSettings не
++// передан (scenario-editor) — локальный фолбэк из дефолтов. Физика получает
++// его через own-свойство personTuning (геттер) и перечитывает каждый тик.
++const configStore = useConfig()
++const showPeopleTuning = ref(false)
++const personTuningFields = PERSON_TUNING_FIELDS
++const localPersonTuning = reactive<Record<string, number | boolean>>(defaultPersonTuning())
++const ptModel = computed<Record<string, number | boolean>>(() => {
++  const pt = (props.simSettings as any)?.personTuning
++  return pt && typeof pt === 'object' ? pt : localPersonTuning
++})
++const ensureTuningDefaults = () => {
++  const pt = ptModel.value
++  for (const [key, def] of Object.entries(defaultPersonTuning())) {
++    if (pt[key] === undefined) pt[key] = def
++  }
++}
++ensureTuningDefaults()
++const fmtTuneVal = (f: PersonTuningField, v: unknown): string => {
++  const n = Number(v)
++  if (!Number.isFinite(n)) return '--'
++  return f.step < 1 ? n.toFixed(2) : String(Math.round(n))
++}
++const resetPersonTuning = () => Object.assign(ptModel.value, defaultPersonTuning())
++const savePersonTuning = async () => {
++  try {
++    await configStore.saveConfig()
++  } catch (e) {
++    console.warn('[SimulatorWidget] настройки людей не сохранены:', e)
++  }
++}
++const toggleSettingsPopover = () => {
++  showSettings.value = !showSettings.value
++  if (showSettings.value) showPeopleTuning.value = false
++}
++const togglePeopleTuning = () => {
++  showPeopleTuning.value = !showPeopleTuning.value
++  if (showPeopleTuning.value) {
++    showSettings.value = false
++    ensureTuningDefaults()
++  }
++}
+ const physicsSimOpts: any = Object.create((props.simSettings ?? {}) as object, {
+   arrivalBrake: { get: () => userArrivalBrake.value, enumerable: true },
++  // [№28-ЖИВАЯ-ПАНЕЛЬ] own-свойство с геттером: физика каждый тик читает
++  // актуальный объект personTuning (панель работает даже без simSettings)
++  personTuning: { get: () => ptModel.value, enumerable: true },
+ })
+ 
+ const physics = useSimulatorPhysics(
+diff -ruN '--exclude=.git' '--exclude=node_modules' '--exclude=.nuxt' '--exclude=.output' '--exclude=dist' '--exclude=.data' /tmp/jkpp-base27/app/composables/simulator/useSimulatorPhysics.ts /tmp/no28-after/app/composables/simulator/useSimulatorPhysics.ts
+--- a/app/composables/simulator/useSimulatorPhysics.ts	2026-10-24 14:59:18.185253510 +0000
++++ b/app/composables/simulator/useSimulatorPhysics.ts	2026-10-24 15:42:51.118899215 +0000
+@@ -88,17 +88,17 @@
+   // [№27-НАСТРОЙКИ-ЛЮДЕЙ] все параметры логики людей читаются из
+   // simOpts.personTuning (реестр utils/personTuning.ts) с клампом по
+   // диапазону ползунков; отсутствующее значение = дефолт реестра.
+-  // Изменения применяются НА ХОДУ — физика читает simOpts на каждом тике.
+-  const personTuning = ((simOpts as any)?.personTuning ?? {}) as Record<string, unknown>
+-  const PERSON_TURN_TAU = tuneBool(personTuning, 'pTurnSmoothOn')
+-    ? tuneNumber(personTuning, 'pTurnTau')
+-    : 0            // 0 — сглаживание курса выключено (kb = 1)
++  // [№28-ЖИВАЯ-ПАНЕЛЬ] применяются НА ХОДУ: refreshPersonTuning() перечитывает
++  // simOpts.personTuning (СВЕЖУЮ ссылку и значения) в начале каждого тика —
++  // ползунки/тумблеры панели в окне симулятора и карточки настроек действуют
++  // сразу, без перезапуска, даже если объект personTuning заменён целиком.
++  let PERSON_TURN_TAU: number
+   const COLLAPSE_WINDOW_S = 1.2   // окно оценки прогресса
+   // [№24] порог затора 2.0 -> 1.0 с (репорт №24: «право прорыва» через 1с):
+   // фактически прорыв выдаётся после первого окна без прогресса (1.2с)
+-  const COLLAPSE_STUCK_S = tuneNumber(personTuning, 'pCollapseStuck')
+-  const COLLAPSE_BREAK_S = tuneNumber(personTuning, 'pCollapseBreak')
+-  const personCollapseOn = tuneBool(personTuning, 'pCollapseOn')
++  let COLLAPSE_STUCK_S: number
++  let COLLAPSE_BREAK_S: number
++  let personCollapseOn: boolean
+   const COLLAPSE_MIN_MOVE = 5     // px за окно, меньше — «без прогресса»
+   const COLLAPSE_RADIUS = 70      // рядом не должно быть другого прорывателя
+   // [ФИКС-висяки-3] жёсткий предохранитель фазы ПОСЛЕ прохода: суммарное
+@@ -157,8 +157,8 @@
+   // скачком скорости. Рамп 110 px/с² (шаг с места ~0.4с) сглаживает пульс;
+   // фаза ног ∝ пройденному пути (№12), поэтому темп шага не искажается.
+   // [№27] тумблер pAccelOn: выключен — скорость применяется мгновенно.
+-  const personAccelOn = tuneBool(personTuning, 'pAccelOn')
+-  const PERSON_ACCEL = personAccelOn ? tuneNumber(personTuning, 'pAccel') : 100000
++  let personAccelOn: boolean
++  let PERSON_ACCEL: number
+   // [БАГ-РЕПОРТ-8-СТОП] кап отъезда 150 -> 175: остановка выезда поднята к
+   // линии ворот (240), и отъезд на 150 оставлял выезжающую В зоне прохода
+   // (240+150=390 < граница зоны 160+240=400) — уезжающая вниз машина вежливо
+@@ -183,30 +183,30 @@
+   // PERSON_SEP_RADIUS движущиеся пешеходы плавно смещаются друг от друга
+   // (встречные — каждый в свою сторону), вместо прохода «сквозь» друг друга.
+   // [№27-НАСТРОЙКИ-ЛЮДЕЙ] все константы вынесены в реестр (тумблер + ползунок):
+-  const personYieldOn = tuneBool(personTuning, 'pYieldOn')          // шаг уступания ждущего
+-  const PERSON_WAIT_YIELD_RADIUS = tuneNumber(personTuning, 'pWaitYieldRadius')
+-  const PERSON_SEP_SPEED = tuneNumber(personTuning, 'pYieldSpeed')   // px/с: темп шага уступания
+-  const PERSON_YIELD_AVOID = tuneNumber(personTuning, 'pYieldAvoid') // px: обход соседей при уступании
+-  const personNearCapOn = tuneBool(personTuning, 'pNearCapOn')       // притормаживание перед пешеходом
+-  const PERSON_SEP_RADIUS = tuneNumber(personTuning, 'pSepRadius')   // px: радиус притормаживания
+-  const personStandStopOn = tuneBool(personTuning, 'pStandStopOn')   // стоп перед стоящим
+-  const PERSON_STAND_STOP_DIST = tuneNumber(personTuning, 'pStandStopDist')
++  let personYieldOn: boolean          // шаг уступания ждущего
++  let PERSON_WAIT_YIELD_RADIUS: number
++  let PERSON_SEP_SPEED: number        // px/с: темп шага уступания
++  let PERSON_YIELD_AVOID: number      // px: обход соседей при уступании
++  let personNearCapOn: boolean        // притормаживание перед пешеходом
++  let PERSON_SEP_RADIUS: number       // px: радиус притормаживания
++  let personStandStopOn: boolean      // стоп перед стоящим
++  let PERSON_STAND_STOP_DIST: number
+   // [№25-ПРАВЫЙ-ОБХОД] единое правило «каждый правее» вместо дуги + сепарации:
+   // вес обхода — непрерывная функция дистанции (ни одного булева переключателя),
+   // знак сдвига — только от собственного курса, поэтому траектория без рывков
+-  const personBypassOn = tuneBool(personTuning, 'pBypassOn')
+-  const PERSON_BYPASS_RADIUS = tuneNumber(personTuning, 'pBypassRadius') // px: радиус раннего правого обхода
+-  const PERSON_BYPASS_SPEED = tuneNumber(personTuning, 'pBypassSpeed')   // px/с: темп бокового ухода к правой руке
+-  const personHardSepOn = tuneBool(personTuning, 'pHardSepOn')
+-  const PERSON_HARD_SEP = tuneNumber(personTuning, 'pHardSep')       // px: радиус аварийного расталкивания (контакт)
+-  const PERSON_HARD_SPEED = tuneNumber(personTuning, 'pHardSpeed')   // px/с: темп аварийного расталкивания
++  let personBypassOn: boolean
++  let PERSON_BYPASS_RADIUS: number    // px: радиус раннего правого обхода
++  let PERSON_BYPASS_SPEED: number     // px/с: темп бокового ухода к правой руке
++  let personHardSepOn: boolean
++  let PERSON_HARD_SEP: number         // px: радиус аварийного расталкивания (контакт)
++  let PERSON_HARD_SPEED: number       // px/с: темп аварийного расталкивания
+   // [ФИКС-ЗАСТРЯЛ-ВНИЗУ] «тихая зона» прибытия: на последнем отрезке к точке
+   // остановки расталкивание и дрейф отключены — именно они дёргали агента
+   // перед остановкой (толчок вбок -> коррекция курса -> новый толчок).
+   // [БАГ-РЕПОРТ-4-ДЁРГАНИЕ] зона расширена 34 -> 70: покрывает весь
+   // тормозной отрезок (dist < 80), поэтому подход к линии ворот плавный.
+   // [№27] 0 = без тихой зоны (arriveFade вырождается в 1 по всей дистанции).
+-  const ARRIVE_QUIET_ZONE = tuneNumber(personTuning, 'pQuietZone')   // px
++  let ARRIVE_QUIET_ZONE: number   // px
+   // [№27] фейд тихой зоны: зона 0 = без гашения (безопасный делитель,
+   // dist/0 дал бы NaN при dist=0)
+   const arriveFadeOf = (dist: number): number =>
+@@ -218,8 +218,40 @@
+   // расчистки створа (свип закрытия в конце тика). Прежний предохранитель
+   // WAIT_AFTER_MAX (30с ожидания закрытия) стал не нужен — уезд безусловный.
+   // [№27-НАСТРОЙКИ-ЛЮДЕЙ] предохранители очереди — настраиваемые (pForceCross*)
+-  const FORCE_CROSS_AFTER = tuneNumber(personTuning, 'pForceCross')          // сек: одиночка / лидер группы
+-  const FORCE_CROSS_GROUP_AFTER = tuneNumber(personTuning, 'pForceCrossGroup') // сек: член группы
++  let FORCE_CROSS_AFTER: number           // сек: одиночка / лидер группы
++  let FORCE_CROSS_GROUP_AFTER: number     // сек: член группы
++  // [№28-ЖИВАЯ-ПАНЕЛЬ] перечитать все параметры людей из simOpts.personTuning.
++  // Вызывается при создании физики и в начале КАЖДОГО тика updateAiMovement:
++  // правки в панели симулятора/настройках видны мгновенно; читается свежая
++  // ССЫЛКА simOpts.personTuning — подхватывается и полная замена объекта
++  // (мерж конфига при загрузке сейва).
++  const refreshPersonTuning = () => {
++    const pt = ((simOpts as any)?.personTuning ?? {}) as Record<string, unknown>
++    PERSON_TURN_TAU = tuneBool(pt, 'pTurnSmoothOn') ? tuneNumber(pt, 'pTurnTau') : 0
++    COLLAPSE_STUCK_S = tuneNumber(pt, 'pCollapseStuck')
++    COLLAPSE_BREAK_S = tuneNumber(pt, 'pCollapseBreak')
++    personCollapseOn = tuneBool(pt, 'pCollapseOn')
++    personAccelOn = tuneBool(pt, 'pAccelOn')
++    PERSON_ACCEL = personAccelOn ? tuneNumber(pt, 'pAccel') : 100000
++    personYieldOn = tuneBool(pt, 'pYieldOn')
++    PERSON_WAIT_YIELD_RADIUS = tuneNumber(pt, 'pWaitYieldRadius')
++    PERSON_SEP_SPEED = tuneNumber(pt, 'pYieldSpeed')
++    PERSON_YIELD_AVOID = tuneNumber(pt, 'pYieldAvoid')
++    personNearCapOn = tuneBool(pt, 'pNearCapOn')
++    PERSON_SEP_RADIUS = tuneNumber(pt, 'pSepRadius')
++    personStandStopOn = tuneBool(pt, 'pStandStopOn')
++    PERSON_STAND_STOP_DIST = tuneNumber(pt, 'pStandStopDist')
++    personBypassOn = tuneBool(pt, 'pBypassOn')
++    PERSON_BYPASS_RADIUS = tuneNumber(pt, 'pBypassRadius')
++    PERSON_BYPASS_SPEED = tuneNumber(pt, 'pBypassSpeed')
++    personHardSepOn = tuneBool(pt, 'pHardSepOn')
++    PERSON_HARD_SEP = tuneNumber(pt, 'pHardSep')
++    PERSON_HARD_SPEED = tuneNumber(pt, 'pHardSpeed')
++    ARRIVE_QUIET_ZONE = tuneNumber(pt, 'pQuietZone')
++    FORCE_CROSS_AFTER = tuneNumber(pt, 'pForceCross')
++    FORCE_CROSS_GROUP_AFTER = tuneNumber(pt, 'pForceCrossGroup')
++  }
++  refreshPersonTuning()
+   
+   // [WATCHDOG] страховка от вечных зависаний на сценах с кривыми/старыми
+   // оффсетами: агент в движущемся состоянии (to_gate/crossing/moving_away),
+@@ -498,6 +530,9 @@
+   }
+ 
+   const updateAiMovement = (dt: number, cfg: { carGateId: string; personGateId: string }) => {
++    // [№28-ЖИВАЯ-ПАНЕЛЬ] настройки людей — на каждый тик: ползунки панели
++    // в окне симулятора действуют сразу, без перезапуска симуляции
++    refreshPersonTuning()
+     const ACCEL = simOpts.ACCEL ?? 100
+     const DECEL = simOpts.DECEL ?? 100
+     const REACTION_TIME = simOpts.REACTION_TIME ?? 1.5
+diff -ruN '--exclude=.git' '--exclude=node_modules' '--exclude=.nuxt' '--exclude=.output' '--exclude=dist' '--exclude=.data' /tmp/jkpp-base27/app/utils/personTuning.ts /tmp/no28-after/app/utils/personTuning.ts
+--- a/app/utils/personTuning.ts	2026-10-24 14:45:21.467757208 +0000
++++ b/app/utils/personTuning.ts	2026-10-24 15:42:51.116899204 +0000
+@@ -1,9 +1,15 @@
+ // app/utils/personTuning.ts
+ // [№27-НАСТРОЙКИ-ЛЮДЕЙ] Единый реестр настроек ДВИЖЕНИЯ И ЛОГИКИ ЛЮДЕЙ.
++// [№28-ЖИВАЯ-ПАНЕЛЬ] та же карточка компактно live-панелью в окне
++// симулятора (SimulatorWidget.vue): группы полей (group) рисуются
++// секционными заголовками, значения применяются физикой на ходу.
+ //
+ // Репорт №27: «добавь в настройки симулятора ВСЕ настройки движения и
+ // логики людей, с возможностью отключать/включать их и регулировать
+ // значения плавно. чтобы я сам регулировал».
++// Репорт №28: «добавь все эти настройки движения и логики людей в окно
++// симулятора (только компактно), чтобы я мог изучать их действия во время
++// работы симулятора».
+ //
+ // Каждая запись реестра — один ползунок: ключ в config.simulator.personTuning,
+ // подпись/подсказка для UI, диапазон и шаг (плавная регулировка), дефолт.
+@@ -28,6 +34,8 @@
+   max: number
+   step: number
+   def: number
++  // секция в live-панели симулятора (заголовок группы)
++  group: string
+ }
+ 
+ export const PERSON_TUNING_FIELDS: PersonTuningField[] = [
+@@ -36,106 +44,106 @@
+     key: 'pBypassRadius', toggleKey: 'pBypassOn',
+     label: 'Правый обход — радиус начала',
+     hint: 'С какого расстояния идущий человек начинает смещаться вправо, обходя встречного или медленного соседа.',
+-    unit: 'px', min: 20, max: 140, step: 5, def: 80,
++    unit: 'px', min: 20, max: 140, step: 5, def: 80, group: 'Обход и уступание',
+   },
+   {
+     key: 'pBypassSpeed', toggleKey: 'pBypassOn',
+     label: 'Правый обход — темп смещения',
+     hint: 'Боковая скорость обхода. Больше — люди расходятся энергичнее.',
+-    unit: 'px/с', min: 10, max: 80, step: 2, def: 40,
++    unit: 'px/с', min: 10, max: 80, step: 2, def: 40, group: 'Обход и уступание',
+   },
+   // --- 2. Уступание ждущего (шаг в сторону у прохода) ---
+   {
+     key: 'pWaitYieldRadius', toggleKey: 'pYieldOn',
+     label: 'Уступание — радиус реакции',
+     hint: 'Ждущий у прохода отходит вбок, когда к нему подходит человек ближе этого радиуса.',
+-    unit: 'px', min: 30, max: 120, step: 3, def: 66,
++    unit: 'px', min: 30, max: 120, step: 3, def: 66, group: 'Обход и уступание',
+   },
+   {
+     key: 'pYieldSpeed', toggleKey: 'pYieldOn',
+     label: 'Уступание — темп шага',
+     hint: 'Скорость бокового шага уступающего.',
+-    unit: 'px/с', min: 10, max: 80, step: 2, def: 34,
++    unit: 'px/с', min: 10, max: 80, step: 2, def: 34, group: 'Обход и уступание',
+   },
+   {
+     key: 'pYieldAvoid', toggleKey: 'pYieldOn',
+     label: 'Уступание — обход соседей',
+     hint: 'Шаг уступания обходит любого соседа в этом радиусе: человек не заталкивается на стоящего рядом (репорт №27 «прыгают друг на друга после уступания»).',
+-    unit: 'px', min: 20, max: 100, step: 5, def: 50,
++    unit: 'px', min: 20, max: 100, step: 5, def: 50, group: 'Обход и уступание',
+   },
+   // --- 3. Аварийное расталкивание (контакт) ---
+   {
+     key: 'pHardSep', toggleKey: 'pHardSepOn',
+     label: 'Расталкивание — радиус контакта',
+     hint: 'Дистанция, ближе которой тела физически расталкиваются в стороны.',
+-    unit: 'px', min: 16, max: 60, step: 2, def: 30,
++    unit: 'px', min: 16, max: 60, step: 2, def: 30, group: 'Дистанции и стопы',
+   },
+   {
+     key: 'pHardSpeed', toggleKey: 'pHardSepOn',
+     label: 'Расталкивание — темп',
+     hint: 'Скорость взаимного отталкивания при контакте.',
+-    unit: 'px/с', min: 10, max: 120, step: 5, def: 60,
++    unit: 'px/с', min: 10, max: 120, step: 5, def: 60, group: 'Дистанции и стопы',
+   },
+   // --- 4. Стоп перед стоящим на курсе ---
+   {
+     key: 'pStandStopDist', toggleKey: 'pStandStopOn',
+     label: 'Стоп перед стоящим — дистанция',
+     hint: 'Идущий останавливается, не доходя столько до стоящего на его курсе (очередь не втаптывает стоящего).',
+-    unit: 'px', min: 20, max: 90, step: 2, def: 54,
++    unit: 'px', min: 20, max: 90, step: 2, def: 54, group: 'Дистанции и стопы',
+   },
+   // --- 5. Притормаживание перед пешеходом ---
+   {
+     key: 'pSepRadius', toggleKey: 'pNearCapOn',
+     label: 'Притормаживание — радиус',
+     hint: 'Идущий сбавляет темп, если по курсу ближе этого радиуса есть человек.',
+-    unit: 'px', min: 20, max: 80, step: 5, def: 40,
++    unit: 'px', min: 20, max: 80, step: 5, def: 40, group: 'Дистанции и стопы',
+   },
+   // --- 6. Сглаживание курса (№24-ПЛАВНЫЙ-ВЫХОД) ---
+   {
+     key: 'pTurnTau', toggleKey: 'pTurnSmoothOn',
+     label: 'Сглаживание курса — постоянная',
+     hint: 'Плавность поворота после паузы/уступания. Больше — плавнее, но менее манёвренно.',
+-    unit: 'с', min: 0.05, max: 0.6, step: 0.05, def: 0.15,
++    unit: 'с', min: 0.05, max: 0.6, step: 0.05, def: 0.15, group: 'Плавность хода',
+   },
+   // --- 7. Плавный разгон (№20-ПЛАВНОСТЬ) ---
+   {
+     key: 'pAccel', toggleKey: 'pAccelOn',
+     label: 'Плавный разгон',
+     hint: 'Набор скорости после старта/паузы. Максимум (400) — практически мгновенный старт.',
+-    unit: 'px/с²', min: 40, max: 400, step: 10, def: 110,
++    unit: 'px/с²', min: 40, max: 400, step: 10, def: 110, group: 'Плавность хода',
+   },
+   // --- 8. Тихая зона прибытия (№26-ПЛАВНАЯ-ТИХАЯ-ЗОНА) ---
+   {
+     key: 'pQuietZone',
+     label: 'Тихая зона прибытия',
+     hint: 'На последнем отрезке перед точкой останова обход и расталкивание плавно гаснут. 0 — без тихой зоны (может дёргать у посадки).',
+-    unit: 'px', min: 0, max: 140, step: 10, def: 70,
++    unit: 'px', min: 0, max: 140, step: 10, def: 70, group: 'Плавность хода',
+   },
+   // --- 9. Прорыв затора (№23-КОЛЛАПС) ---
+   {
+     key: 'pCollapseStuck', toggleKey: 'pCollapseOn',
+     label: 'Прорыв затора — порог',
+     hint: 'Сколько секунд пара/толпа стоят без прогресса, прежде чем один получит «право прорыва».',
+-    unit: 'с', min: 0.5, max: 5, step: 0.5, def: 1,
++    unit: 'с', min: 0.5, max: 5, step: 0.5, def: 1, group: 'Предохранители',
+   },
+   {
+     key: 'pCollapseBreak', toggleKey: 'pCollapseOn',
+     label: 'Прорыв затора — длительность',
+     hint: 'Сколько секунд прорыватель идёт своим курсом, никого не обходя (остальные уступают ему).',
+-    unit: 'с', min: 1, max: 6, step: 0.5, def: 2.5,
++    unit: 'с', min: 1, max: 6, step: 0.5, def: 2.5, group: 'Предохранители',
+   },
+   // --- 10. Принудительный проход (предохранитель очереди) ---
+   {
+     key: 'pForceCross',
+     label: 'Принуд. проход одиночки',
+     hint: 'Одиночка или лидер группы начинает проход сам, если калитка не открылась за это время.',
+-    unit: 'с', min: 3, max: 30, step: 1, def: 5,
++    unit: 'с', min: 3, max: 30, step: 1, def: 5, group: 'Предохранители',
+   },
+   {
+     key: 'pForceCrossGroup',
+     label: 'Принуд. проход в группе',
+     hint: 'То же для члена группы (идёт следом даже если предыдущий ещё не прошёл).',
+-    unit: 'с', min: 6, max: 60, step: 1, def: 12,
++    unit: 'с', min: 6, max: 60, step: 1, def: 12, group: 'Предохранители',
+   },
+ ]
+ 
+diff -ruN '--exclude=.git' '--exclude=node_modules' '--exclude=.nuxt' '--exclude=.output' '--exclude=dist' '--exclude=.data' /tmp/jkpp-base27/tests/person-tuning-live.test.ts /tmp/no28-after/tests/person-tuning-live.test.ts
+--- a/tests/person-tuning-live.test.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/tests/person-tuning-live.test.ts	2026-10-24 15:42:51.125899253 +0000
+@@ -0,0 +1,121 @@
++// tests/person-tuning-live.test.ts
++// [№28-ЖИВАЯ-ПАНЕЛЬ] настройки людей применяются НА ХОДУ: физика перечитывает
++// simOpts.personTuning (и значения, и саму ссылку) в начале каждого тика —
++// компактная панель в окне симулятора и карточка «Движение и логика людей»
++// в настройках действуют без перезапуска симуляции.
++//
++// Проверяется:
++//  1) правка ЗНАЧЕНИЯ на ходу: pForceCross 30 -> 1 запускает принудительный
++//     проход сразу после правки (без пересоздания физики);
++//  2) полная ЗАМЕНА объекта personTuning (мерж конфига при загрузке сейва)
++//     подхватывается со следующего тика;
++//  3) тумблер на ходу: pAccelOn=false после первого тика даёт мгновенный
++//     разгон на втором.
++
++import { describe, it, expect, vi, afterEach } from 'vitest'
++import { ref } from 'vue'
++import { useSimulatorPhysics } from '~/composables/simulator/useSimulatorPhysics'
++import { PERSON_WIDTH, PERSON_HEIGHT } from '~/utils/simulatorConstants'
++
++const DT = 0.05
++const PERSON = { width: PERSON_WIDTH, height: PERSON_HEIGHT }
++const SCENE = { width: 1280, height: 720 }
++
++const mkPerson = (id: string, state: string, pos: { x: number; y: number }, target: { x: number; y: number }, direction: 'enter' | 'exit', velocity = 0) => ({
++  id,
++  element: {
++    id, x: pos.x - PERSON.width / 2, y: pos.y - PERSON.height / 2,
++    width: PERSON.width, height: PERSON.height,
++    rotation: 0, velocity, category: 'human', type: 'actor', direction,
++  },
++  state,
++  target: { x: target.x, y: target.y, width: 0, height: 0 },
++  afterTarget: { x: target.x, y: target.y, width: 0, height: 0 },
++  exitPoint: { x: target.x, y: target.y, width: 0, height: 0 },
++  speed: 40, type: 'person', direction, travelMode: 'walk',
++})
++
++const buildHarness = (tuning: Record<string, unknown>) => {
++  const simElements = ref<any[]>([])
++  const aiAgents = ref<any[]>([])
++  const sceneSize = ref({ ...SCENE })
++  const simOpts: any = {
++    ACCEL: 100, DECEL: 100, REACTION_TIME: 1.5, MIN_BUFFER: 15,
++    MAX_LOOKAHEAD: 220, ARRIVE_THRESHOLD: 1,
++    gateCloseDelay: 10, wicketCloseDelay: 2, stallEscalateTime: 10,
++    personTuning: tuning,
++  }
++  const physics = useSimulatorPhysics(
++    simElements as any, aiAgents, sceneSize,
++    (gate: any) => { gate.settings.isOpen = true; return true },
++    (gate: any) => { gate.settings.isOpen = false; return true },
++    () => {},
++    simOpts,
++  )
++  return { simOpts, aiAgents, physics }
++}
++
++describe('настройки людей применяются на ходу [№28-ЖИВАЯ-ПАНЕЛЬ]', () => {
++  afterEach(() => vi.restoreAllMocks())
++
++  it('правка значения на ходу: pForceCross 30 -> 1 запускает проход сразу', () => {
++    const tuning: Record<string, unknown> = { pForceCross: 30, pForceCrossGroup: 30 }
++    const h = buildHarness(tuning)
++    const p = mkPerson('p1', 'waiting_before', { x: 1000, y: 194.5 }, { x: 1000, y: 194.5 }, 'enter')
++    h.aiAgents.value = [p as any]
++    const tick = () => h.physics.updateAiMovement(DT, { carGateId: '', personGateId: 'missing-gate' })
++
++    // 1.5с с большим порогом — проход не начинается
++    for (let i = 0; i < 30; i++) tick()
++    expect(h.aiAgents.value[0]?.state).toBe('waiting_before')
++
++    // «пользователь двинул ползунок в панели» — порог 30 -> 3 (мин реестра;
++    // в замороженной физике прохода не было бы вовсе: порог 30 > 3.5с ожидания)
++    tuning.pForceCross = 3
++    let crossedAt: number | null = null
++    for (let i = 0; i < 40; i++) {
++      tick()
++      if (h.aiAgents.value[0]?.state === 'crossing') { crossedAt = i * DT; break }
++    }
++    expect(crossedAt).not.toBeNull()
++    expect(crossedAt!).toBeLessThan(2.0)
++  })
++
++  it('полная замена объекта personTuning подхватывается со следующего тика', () => {
++    const tuning: Record<string, unknown> = { pForceCross: 30, pForceCrossGroup: 30 }
++    const h = buildHarness(tuning)
++    const p = mkPerson('p1', 'waiting_before', { x: 1000, y: 194.5 }, { x: 1000, y: 194.5 }, 'enter')
++    h.aiAgents.value = [p as any]
++    const tick = () => h.physics.updateAiMovement(DT, { carGateId: '', personGateId: 'missing-gate' })
++
++    for (let i = 0; i < 30; i++) tick()
++    expect(h.aiAgents.value[0]?.state).toBe('waiting_before')
++
++    // мерж конфига при загрузке сейва заменяет объект ЦЕЛИКОМ (3 = мин реестра)
++    h.simOpts.personTuning = { pForceCross: 3, pForceCrossGroup: 6 }
++    let crossedAt: number | null = null
++    for (let i = 0; i < 40; i++) {
++      tick()
++      if (h.aiAgents.value[0]?.state === 'crossing') { crossedAt = i * DT; break }
++    }
++    expect(crossedAt).not.toBeNull()
++    expect(crossedAt!).toBeLessThan(2.0)
++  })
++
++  it('тумблер на ходу: pAccelOn=false — мгновенный разгон со следующего тика', () => {
++    const tuning: Record<string, unknown> = {}
++    const h = buildHarness(tuning)
++    const walker = mkPerson('w', 'moving_away', { x: 1000, y: 300 }, { x: 200, y: 300 }, 'exit')
++    h.aiAgents.value = [walker as any]
++    const tick = () => h.physics.updateAiMovement(DT, { carGateId: '', personGateId: 'wicket-1' })
++
++    // рампа разгона (pAccel 110 по умолчанию): за тик всего ~5.5 px/с
++    tick()
++    expect(walker.element.velocity).toBeLessThan(20)
++
++    // тумблер панели выключает плавный разгон
++    tuning.pAccelOn = false
++    tick()
++    expect(walker.element.velocity).toBeGreaterThan(35)
++  })
++})
+diff -ruN '--exclude=.git' '--exclude=node_modules' '--exclude=.nuxt' '--exclude=.output' '--exclude=dist' '--exclude=.data' /tmp/jkpp-base27/tests/person-tuning.test.ts /tmp/no28-after/tests/person-tuning.test.ts
+--- a/tests/person-tuning.test.ts	2026-10-24 15:07:04.662480303 +0000
++++ b/tests/person-tuning.test.ts	2026-10-24 15:42:51.123899242 +0000
+@@ -103,6 +103,9 @@
+       expect(f.def).toBeGreaterThanOrEqual(f.min)
+       expect(f.def).toBeLessThanOrEqual(f.max)
+       expect(f.step).toBeGreaterThan(0)
++      // [№28-ЖИВАЯ-ПАНЕЛЬ] у каждого поля есть секция для компактной панели
++      expect(typeof f.group).toBe('string')
++      expect(f.group.length).toBeGreaterThan(0)
+     }
+     const defs = defaultPersonTuning()
+     for (const f of PERSON_TUNING_FIELDS) {

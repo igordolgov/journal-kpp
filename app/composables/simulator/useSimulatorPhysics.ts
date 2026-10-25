@@ -88,17 +88,17 @@ export function useSimulatorPhysics(
   // [№27-НАСТРОЙКИ-ЛЮДЕЙ] все параметры логики людей читаются из
   // simOpts.personTuning (реестр utils/personTuning.ts) с клампом по
   // диапазону ползунков; отсутствующее значение = дефолт реестра.
-  // Изменения применяются НА ХОДУ — физика читает simOpts на каждом тике.
-  const personTuning = ((simOpts as any)?.personTuning ?? {}) as Record<string, unknown>
-  const PERSON_TURN_TAU = tuneBool(personTuning, 'pTurnSmoothOn')
-    ? tuneNumber(personTuning, 'pTurnTau')
-    : 0            // 0 — сглаживание курса выключено (kb = 1)
+  // [№28-ЖИВАЯ-ПАНЕЛЬ] применяются НА ХОДУ: refreshPersonTuning() перечитывает
+  // simOpts.personTuning (СВЕЖУЮ ссылку и значения) в начале каждого тика —
+  // ползунки/тумблеры панели в окне симулятора и карточки настроек действуют
+  // сразу, без перезапуска, даже если объект personTuning заменён целиком.
+  let PERSON_TURN_TAU: number
   const COLLAPSE_WINDOW_S = 1.2   // окно оценки прогресса
   // [№24] порог затора 2.0 -> 1.0 с (репорт №24: «право прорыва» через 1с):
   // фактически прорыв выдаётся после первого окна без прогресса (1.2с)
-  const COLLAPSE_STUCK_S = tuneNumber(personTuning, 'pCollapseStuck')
-  const COLLAPSE_BREAK_S = tuneNumber(personTuning, 'pCollapseBreak')
-  const personCollapseOn = tuneBool(personTuning, 'pCollapseOn')
+  let COLLAPSE_STUCK_S: number
+  let COLLAPSE_BREAK_S: number
+  let personCollapseOn: boolean
   const COLLAPSE_MIN_MOVE = 5     // px за окно, меньше — «без прогресса»
   const COLLAPSE_RADIUS = 70      // рядом не должно быть другого прорывателя
   // [ФИКС-висяки-3] жёсткий предохранитель фазы ПОСЛЕ прохода: суммарное
@@ -157,8 +157,8 @@ export function useSimulatorPhysics(
   // скачком скорости. Рамп 110 px/с² (шаг с места ~0.4с) сглаживает пульс;
   // фаза ног ∝ пройденному пути (№12), поэтому темп шага не искажается.
   // [№27] тумблер pAccelOn: выключен — скорость применяется мгновенно.
-  const personAccelOn = tuneBool(personTuning, 'pAccelOn')
-  const PERSON_ACCEL = personAccelOn ? tuneNumber(personTuning, 'pAccel') : 100000
+  let personAccelOn: boolean
+  let PERSON_ACCEL: number
   // [БАГ-РЕПОРТ-8-СТОП] кап отъезда 150 -> 175: остановка выезда поднята к
   // линии ворот (240), и отъезд на 150 оставлял выезжающую В зоне прохода
   // (240+150=390 < граница зоны 160+240=400) — уезжающая вниз машина вежливо
@@ -183,30 +183,30 @@ export function useSimulatorPhysics(
   // PERSON_SEP_RADIUS движущиеся пешеходы плавно смещаются друг от друга
   // (встречные — каждый в свою сторону), вместо прохода «сквозь» друг друга.
   // [№27-НАСТРОЙКИ-ЛЮДЕЙ] все константы вынесены в реестр (тумблер + ползунок):
-  const personYieldOn = tuneBool(personTuning, 'pYieldOn')          // шаг уступания ждущего
-  const PERSON_WAIT_YIELD_RADIUS = tuneNumber(personTuning, 'pWaitYieldRadius')
-  const PERSON_SEP_SPEED = tuneNumber(personTuning, 'pYieldSpeed')   // px/с: темп шага уступания
-  const PERSON_YIELD_AVOID = tuneNumber(personTuning, 'pYieldAvoid') // px: обход соседей при уступании
-  const personNearCapOn = tuneBool(personTuning, 'pNearCapOn')       // притормаживание перед пешеходом
-  const PERSON_SEP_RADIUS = tuneNumber(personTuning, 'pSepRadius')   // px: радиус притормаживания
-  const personStandStopOn = tuneBool(personTuning, 'pStandStopOn')   // стоп перед стоящим
-  const PERSON_STAND_STOP_DIST = tuneNumber(personTuning, 'pStandStopDist')
+  let personYieldOn: boolean          // шаг уступания ждущего
+  let PERSON_WAIT_YIELD_RADIUS: number
+  let PERSON_SEP_SPEED: number        // px/с: темп шага уступания
+  let PERSON_YIELD_AVOID: number      // px: обход соседей при уступании
+  let personNearCapOn: boolean        // притормаживание перед пешеходом
+  let PERSON_SEP_RADIUS: number       // px: радиус притормаживания
+  let personStandStopOn: boolean      // стоп перед стоящим
+  let PERSON_STAND_STOP_DIST: number
   // [№25-ПРАВЫЙ-ОБХОД] единое правило «каждый правее» вместо дуги + сепарации:
   // вес обхода — непрерывная функция дистанции (ни одного булева переключателя),
   // знак сдвига — только от собственного курса, поэтому траектория без рывков
-  const personBypassOn = tuneBool(personTuning, 'pBypassOn')
-  const PERSON_BYPASS_RADIUS = tuneNumber(personTuning, 'pBypassRadius') // px: радиус раннего правого обхода
-  const PERSON_BYPASS_SPEED = tuneNumber(personTuning, 'pBypassSpeed')   // px/с: темп бокового ухода к правой руке
-  const personHardSepOn = tuneBool(personTuning, 'pHardSepOn')
-  const PERSON_HARD_SEP = tuneNumber(personTuning, 'pHardSep')       // px: радиус аварийного расталкивания (контакт)
-  const PERSON_HARD_SPEED = tuneNumber(personTuning, 'pHardSpeed')   // px/с: темп аварийного расталкивания
+  let personBypassOn: boolean
+  let PERSON_BYPASS_RADIUS: number    // px: радиус раннего правого обхода
+  let PERSON_BYPASS_SPEED: number     // px/с: темп бокового ухода к правой руке
+  let personHardSepOn: boolean
+  let PERSON_HARD_SEP: number         // px: радиус аварийного расталкивания (контакт)
+  let PERSON_HARD_SPEED: number       // px/с: темп аварийного расталкивания
   // [ФИКС-ЗАСТРЯЛ-ВНИЗУ] «тихая зона» прибытия: на последнем отрезке к точке
   // остановки расталкивание и дрейф отключены — именно они дёргали агента
   // перед остановкой (толчок вбок -> коррекция курса -> новый толчок).
   // [БАГ-РЕПОРТ-4-ДЁРГАНИЕ] зона расширена 34 -> 70: покрывает весь
   // тормозной отрезок (dist < 80), поэтому подход к линии ворот плавный.
   // [№27] 0 = без тихой зоны (arriveFade вырождается в 1 по всей дистанции).
-  const ARRIVE_QUIET_ZONE = tuneNumber(personTuning, 'pQuietZone')   // px
+  let ARRIVE_QUIET_ZONE: number   // px
   // [№27] фейд тихой зоны: зона 0 = без гашения (безопасный делитель,
   // dist/0 дал бы NaN при dist=0)
   const arriveFadeOf = (dist: number): number =>
@@ -218,8 +218,40 @@ export function useSimulatorPhysics(
   // расчистки створа (свип закрытия в конце тика). Прежний предохранитель
   // WAIT_AFTER_MAX (30с ожидания закрытия) стал не нужен — уезд безусловный.
   // [№27-НАСТРОЙКИ-ЛЮДЕЙ] предохранители очереди — настраиваемые (pForceCross*)
-  const FORCE_CROSS_AFTER = tuneNumber(personTuning, 'pForceCross')          // сек: одиночка / лидер группы
-  const FORCE_CROSS_GROUP_AFTER = tuneNumber(personTuning, 'pForceCrossGroup') // сек: член группы
+  let FORCE_CROSS_AFTER: number           // сек: одиночка / лидер группы
+  let FORCE_CROSS_GROUP_AFTER: number     // сек: член группы
+  // [№28-ЖИВАЯ-ПАНЕЛЬ] перечитать все параметры людей из simOpts.personTuning.
+  // Вызывается при создании физики и в начале КАЖДОГО тика updateAiMovement:
+  // правки в панели симулятора/настройках видны мгновенно; читается свежая
+  // ССЫЛКА simOpts.personTuning — подхватывается и полная замена объекта
+  // (мерж конфига при загрузке сейва).
+  const refreshPersonTuning = () => {
+    const pt = ((simOpts as any)?.personTuning ?? {}) as Record<string, unknown>
+    PERSON_TURN_TAU = tuneBool(pt, 'pTurnSmoothOn') ? tuneNumber(pt, 'pTurnTau') : 0
+    COLLAPSE_STUCK_S = tuneNumber(pt, 'pCollapseStuck')
+    COLLAPSE_BREAK_S = tuneNumber(pt, 'pCollapseBreak')
+    personCollapseOn = tuneBool(pt, 'pCollapseOn')
+    personAccelOn = tuneBool(pt, 'pAccelOn')
+    PERSON_ACCEL = personAccelOn ? tuneNumber(pt, 'pAccel') : 100000
+    personYieldOn = tuneBool(pt, 'pYieldOn')
+    PERSON_WAIT_YIELD_RADIUS = tuneNumber(pt, 'pWaitYieldRadius')
+    PERSON_SEP_SPEED = tuneNumber(pt, 'pYieldSpeed')
+    PERSON_YIELD_AVOID = tuneNumber(pt, 'pYieldAvoid')
+    personNearCapOn = tuneBool(pt, 'pNearCapOn')
+    PERSON_SEP_RADIUS = tuneNumber(pt, 'pSepRadius')
+    personStandStopOn = tuneBool(pt, 'pStandStopOn')
+    PERSON_STAND_STOP_DIST = tuneNumber(pt, 'pStandStopDist')
+    personBypassOn = tuneBool(pt, 'pBypassOn')
+    PERSON_BYPASS_RADIUS = tuneNumber(pt, 'pBypassRadius')
+    PERSON_BYPASS_SPEED = tuneNumber(pt, 'pBypassSpeed')
+    personHardSepOn = tuneBool(pt, 'pHardSepOn')
+    PERSON_HARD_SEP = tuneNumber(pt, 'pHardSep')
+    PERSON_HARD_SPEED = tuneNumber(pt, 'pHardSpeed')
+    ARRIVE_QUIET_ZONE = tuneNumber(pt, 'pQuietZone')
+    FORCE_CROSS_AFTER = tuneNumber(pt, 'pForceCross')
+    FORCE_CROSS_GROUP_AFTER = tuneNumber(pt, 'pForceCrossGroup')
+  }
+  refreshPersonTuning()
   
   // [WATCHDOG] страховка от вечных зависаний на сценах с кривыми/старыми
   // оффсетами: агент в движущемся состоянии (to_gate/crossing/moving_away),
@@ -498,6 +530,9 @@ export function useSimulatorPhysics(
   }
 
   const updateAiMovement = (dt: number, cfg: { carGateId: string; personGateId: string }) => {
+    // [№28-ЖИВАЯ-ПАНЕЛЬ] настройки людей — на каждый тик: ползунки панели
+    // в окне симулятора действуют сразу, без перезапуска симуляции
+    refreshPersonTuning()
     const ACCEL = simOpts.ACCEL ?? 100
     const DECEL = simOpts.DECEL ?? 100
     const REACTION_TIME = simOpts.REACTION_TIME ?? 1.5

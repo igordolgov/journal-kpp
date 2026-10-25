@@ -43,11 +43,18 @@
       )
         Gauge.w-4.h-4
       button.btn.btn-xs.btn-ghost.btn-square(
-        @click="showSettings = !showSettings"
+        @click="toggleSettingsPopover"
         :class="showSettings ? 'text-warning bg-warning/20' : 'text-base-content/40'"
         title="Настройки"
       )
         SlidersHorizontal.w-4.h-4
+      //- [№28-ЖИВАЯ-ПАНЕЛЬ] live-настройки движения/логики людей поверх симулятора
+      button.btn.btn-xs.btn-ghost.btn-square(
+        @click="togglePeopleTuning"
+        :class="showPeopleTuning ? 'text-success bg-success/20' : 'text-base-content/40'"
+        title="Движение и логика людей (живые настройки)"
+      )
+        PersonStanding.w-4.h-4
       //- [№15-ЗВУК] mute/громкость симулятора
       button.btn.btn-xs.btn-ghost.btn-square(
         @click="userMuted = !userMuted"
@@ -112,6 +119,58 @@
           span Громкость звука ({{ Math.round(userVolume * 100) }}%)
           input(type="range" min="0" max="100" step="5" v-model.number="userVolume" @input="userMuted = false")
         button.btn.btn-xs.btn-outline.btn-error.mt-2(@click="resetSettings") Сбросить
+
+    //- [№28-ЖИВАЯ-ПАНЕЛЬ] компактная панель «Движение и логика людей» поверх
+    //- симулятора: тумблер механизма + плавный ползунок у каждого параметра.
+    //- Физика перечитывает настройки на каждом тике — изменения действуют сразу
+    .absolute.top-11.right-2.z-50.w-72.flex.flex-col.rounded-lg.p-2.shadow-xl(
+      v-if="showPeopleTuning"
+      class="bg-gray-900 border border-white/10 max-h-[calc(100%-3.5rem)]"
+    )
+      .flex.items-center.justify-between.mb-1.flex-none
+        span(class="text-[10px] font-bold text-base-content/70") ДВИЖЕНИЕ И ЛОГИКА ЛЮДЕЙ
+        .flex.items-center.gap-1
+          button.btn.btn-ghost.btn-xs.px-1(
+            class="text-warning"
+            title="Сохранить значения в конфиг (переживут перезапуск приложения)"
+            @click="savePersonTuning"
+          ) сохранить
+          button.btn.btn-ghost.btn-xs.px-1(
+            class="text-warning"
+            title="Вернуть все значения к дефолтам"
+            @click="resetPersonTuning"
+          ) сброс
+      .flex.flex-col.min-h-0.overflow-y-auto(class="gap-0.5 pr-1")
+        template(v-for="(f, i) in personTuningFields" :key="f.key")
+          div(
+            v-if="f.group && f.group !== (personTuningFields[i - 1]?.group ?? null)"
+            class="mt-1 mb-0.5 px-1 uppercase tracking-wider text-[9px] font-bold text-base-content/40"
+          ) {{ f.group }}
+          div(
+            class="rounded px-1 py-0.5 hover:bg-white/5"
+            :class="f.toggleKey && !ptModel[f.toggleKey] ? 'opacity-40' : ''"
+          )
+            .flex.items-center.gap-1
+              input.toggle.toggle-xs.toggle-primary(
+                v-if="f.toggleKey"
+                type="checkbox"
+                v-model="ptModel[f.toggleKey]"
+              )
+              span.flex-1.truncate.leading-tight(
+                :title="f.hint"
+                class="text-[10px] text-base-content/80"
+              ) {{ f.label }}
+              span.whitespace-nowrap.font-mono(
+                class="text-[10px] text-base-content/60"
+              ) {{ fmtTuneVal(f, ptModel[f.key]) }} {{ f.unit }}
+            input.w-full(
+              class="range range-xs range-primary mt-0.5"
+              type="range"
+              :min="f.min"
+              :max="f.max"
+              :step="f.step"
+              v-model.number="ptModel[f.key]"
+            )
 
   //- Основной холст симуляции
   //- [БАГ-РЕПОРТ-8-ВЫРАВНИВАНИЕ] окно симулятора прижато ВЛЕВО (как было
@@ -302,7 +361,7 @@
 // литералы ('flex'/'absolute'/'none') без контекстного типа расширяются до
 // string и не проходят CSSProperties; функции из useSimulatorUI/useSimulatorCore
 // обёрнуты с приведением (их исходники возвращают widening-объекты).
-import { ref, watch, onMounted, onUnmounted, nextTick, computed, toRaw } from 'vue'
+import { ref, watch, onMounted, onUnmounted, nextTick, computed, reactive, toRaw } from 'vue'
 import type { CSSProperties } from 'vue'
 import TrafficRoad from './editor/TrafficRoad.vue'
 // [PAYROLL] HUD баланса смены — оверлей поверх холста
@@ -324,6 +383,12 @@ import { useAudioEngine } from '../composables/useAudioEngine'
 import { loadWidgetSettings, saveWidgetSettings } from '~/utils/widgetSettings'
 // [ФИКС-флуд-4] чистая санитизация интервалов спавна
 import { sanitizeSpawnInterval } from '~/utils/simTuning'
+// [№28-ЖИВАЯ-ПАНЕЛЬ] реестр настроек движения/логики людей: компактная панель
+// поверх симулятора (значения живут в config.simulator.personTuning и
+// применяются физикой на ходу — refreshPersonTuning на каждом тике)
+import { PERSON_TUNING_FIELDS, defaultPersonTuning } from '~/utils/personTuning'
+import type { PersonTuningField } from '~/utils/personTuning'
+import { useConfig } from '~/composables/useConfig'
 // [СМЕНА] напоминание о принятии смены при запуске симуляции
 import { useShift } from '~/composables/useShift'
 import {
@@ -341,7 +406,7 @@ import {
 // [Фаза 5] Lucide: хедер и empty state
 import {
   CarFront, Activity, SlidersHorizontal, X, Gauge,
-  MonitorX, PencilRuler, ShieldAlert, Volume2, VolumeX
+  MonitorX, PencilRuler, ShieldAlert, Volume2, VolumeX, PersonStanding
 } from '@lucide/vue'
 
 const audio = useAudioEngine()
@@ -638,8 +703,55 @@ const { visibleAgentLabels, initAudioPools, updateAllAudio, resetAllAudioTimers,
 // [№21-ТОРМОЖЕНИЕ] тумблер торможения у точки останова: живой геттер поверх
 // настроек сцены (физика читает simOpts.* на каждом тике; прототип
 // сохраняет чтение остальных полей напрямую из props.simSettings)
+// [№28-ЖИВАЯ-ПАНЕЛЬ] модель настроек людей для live-панели: объект
+// props.simSettings.personTuning (общий с config.simulator — правки видны
+// в Настройках и сохраняются кнопкой «сохранить»); если simSettings не
+// передан (scenario-editor) — локальный фолбэк из дефолтов. Физика получает
+// его через own-свойство personTuning (геттер) и перечитывает каждый тик.
+const configStore = useConfig()
+const showPeopleTuning = ref(false)
+const personTuningFields = PERSON_TUNING_FIELDS
+const localPersonTuning = reactive<Record<string, number | boolean>>(defaultPersonTuning())
+const ptModel = computed<Record<string, number | boolean>>(() => {
+  const pt = (props.simSettings as any)?.personTuning
+  return pt && typeof pt === 'object' ? pt : localPersonTuning
+})
+const ensureTuningDefaults = () => {
+  const pt = ptModel.value
+  for (const [key, def] of Object.entries(defaultPersonTuning())) {
+    if (pt[key] === undefined) pt[key] = def
+  }
+}
+ensureTuningDefaults()
+const fmtTuneVal = (f: PersonTuningField, v: unknown): string => {
+  const n = Number(v)
+  if (!Number.isFinite(n)) return '--'
+  return f.step < 1 ? n.toFixed(2) : String(Math.round(n))
+}
+const resetPersonTuning = () => Object.assign(ptModel.value, defaultPersonTuning())
+const savePersonTuning = async () => {
+  try {
+    await configStore.saveConfig()
+  } catch (e) {
+    console.warn('[SimulatorWidget] настройки людей не сохранены:', e)
+  }
+}
+const toggleSettingsPopover = () => {
+  showSettings.value = !showSettings.value
+  if (showSettings.value) showPeopleTuning.value = false
+}
+const togglePeopleTuning = () => {
+  showPeopleTuning.value = !showPeopleTuning.value
+  if (showPeopleTuning.value) {
+    showSettings.value = false
+    ensureTuningDefaults()
+  }
+}
 const physicsSimOpts: any = Object.create((props.simSettings ?? {}) as object, {
   arrivalBrake: { get: () => userArrivalBrake.value, enumerable: true },
+  // [№28-ЖИВАЯ-ПАНЕЛЬ] own-свойство с геттером: физика каждый тик читает
+  // актуальный объект personTuning (панель работает даже без simSettings)
+  personTuning: { get: () => ptModel.value, enumerable: true },
 })
 
 const physics = useSimulatorPhysics(

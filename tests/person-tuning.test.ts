@@ -103,6 +103,9 @@ describe('реестр настроек людей [№27]', () => {
       expect(f.def).toBeGreaterThanOrEqual(f.min)
       expect(f.def).toBeLessThanOrEqual(f.max)
       expect(f.step).toBeGreaterThan(0)
+      // [№28-ЖИВАЯ-ПАНЕЛЬ] у каждого поля есть секция для компактной панели
+      expect(typeof f.group).toBe('string')
+      expect(f.group.length).toBeGreaterThan(0)
     }
     const defs = defaultPersonTuning()
     for (const f of PERSON_TUNING_FIELDS) {
