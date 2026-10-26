@@ -90,6 +90,11 @@ export const stableVehicleColor = (plate: unknown): string => {
 export const TRUCK_WIDTH_SCALE = 1.2   // 80 -> 96px
 export const TRUCK_HEIGHT_SCALE = 1.3  // 40 -> 52px
 
+// [№33-ДЕТИ] дети видны глазами: спрайт ребёнка (ageGroup 'child' в БД)
+// рисуется 72% взрослого роста. Раньше ageGroup влиял только на пару черт
+// лица — дети выглядели как взрослые и в толпе не различались.
+export const CHILD_AVATAR_SCALE = 0.72
+
 // Константы анимации (смещение спрайта по умолчанию)
 export const SPRITE_ORIENTATION_OFFSET = 0
 

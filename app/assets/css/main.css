@@ -24,6 +24,20 @@ button, .badge, input {
   border-radius: 6px;
 }
 
+/* [№33-ВЫДЕЛЕНИЕ] кнопки и подписи к ним невозможно выделить
+   (двойной клик/драг по UI больше не красит текст).
+   Окно симулятора целиком тоже без выделения: внутри только кнопки,
+   ползунки и тумблеры — текстовых полей нет, выделение там не нужно. */
+button, .btn, label {
+  -webkit-user-select: none;
+  user-select: none;
+}
+.simulator-widget,
+.simulator-widget * {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 /* 4. Утилиты плотности таблиц */
 .density-compact th, .density-compact td {
   padding: 0.25rem 0.5rem;

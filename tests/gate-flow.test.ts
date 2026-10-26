@@ -184,29 +184,24 @@ describe('[№23-ВЫЕЗД/№20-КОРРЕКТОР] точка ожидани�
   })
 })
 
-describe('[№27-УЕЗД-ЗАКРЫТИЕ] уезд въезжающей налево после закрытия', () => {
-  it('выезжающая хочет выезд — въехавшая ждёт ПОЛНОГО закрытия и уезжает налево', () => {
+describe('[№33-УЕЗД-ВЫЕЗД] заехавшая уезжает налево, не дожидаясь закрытия', () => {
+  it('выезжающая хочет выезд — заехавшая уезжает налево СРАЗУ, при открытых воротах', () => {
     const h = buildHarness([makeCarGate()])
     const enter = mkCar('car-in', 'enter', 'waiting_after', CX, ROAD_Y + 58, { x: CX, y: ROAD_Y + 58 }, { x: CX, y: 900 })
     const exit = mkCar('car-out', 'exit', 'to_gate', CX, 400, { x: CX, y: EXIT_STOP_Y }, { x: 1300, y: EXIT_CROSS_Y })
     h.aiAgents.value = [enter as any, exit as any]
     expect(h.simElements.value[0].settings.isOpen).toBe(true)
 
-    // [№27] подъехавшая выезжающая больше НЕ разрешает уезд из-под
-    // открытого шлагбаума: вежливая пауза прошла, ворота открыты — машина
-    // ждёт закрытия на посадке
+    // [№33] репорт: «заехавшая машина не должна ждать закрытия ворот, если
+    // есть другая машина, которая выезжает» — после вежливой паузы (0.8с)
+    // заехавшая уезжает налево при ЛЮБОМ состоянии шлагбаума: ось освобождается,
+    // очередная выезжающая не ждёт лишний цикл закрытия/открытия
     tick(h, 12) // 1.2с
-    expect(enter.state).toBe('waiting_after')
-
-    // оператор закрыл ворота — уезд налево (коридор уезда занят выезжающей)
-    h.simElements.value[0].settings.isOpen = false
-    h.simElements.value[0].settings.isAnimating = false
-    tick(h, 3)
     expect(enter.state).toBe('moving_away')
     expect(enter.afterTarget.x).toBeLessThan(0)
     expect(Math.abs(enter.afterTarget.y - (ROAD_Y + 58))).toBeLessThanOrEqual(2)
 
-    // выезжающая освобождена и идёт к своей остановке
+    // выезжающая свободна: идёт к своей остановке и проходит
     tick(h, 20)
     expect(centerOf(exit).y).toBeLessThan(400)
   })

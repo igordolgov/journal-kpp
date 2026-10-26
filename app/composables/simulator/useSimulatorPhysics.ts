@@ -585,15 +585,29 @@ export function useSimulatorPhysics(
     const tx = agent.target.x + (agent.target.width || 0) / 2
     const ty = agent.target.y + (agent.target.height || 0) / 2
     const nearStop = Math.hypot(el.x + el.width / 2 - tx, el.y + el.height / 2 - ty) < CAR_YIELD_NEAR_STOP
+    // [№33-УВЕРЕННЫЙ-ПОДХОД] линия дороги F: триггер «встречная в crossing»
+    // учитывает РЕАЛЬНОЕ положение выезжающей. Раньше формальный state=crossing
+    // тормозил заезжающую, даже когда корпус выезжающей УЖЕ поднялся выше
+    // дороги (с её полосы) — «заезжающая, которой уступили, притормаживает».
+    // Ось створа по вертикали: корпус ниже верха ворот + запас (половина
+    // корпуса) значит ещё НЕ выехал с полосы — торможение оправдано.
+    const crossingOnMyLane = (o: AiAgent): boolean => {
+      const ocy = o.element.y + o.element.height / 2
+      return ocy > gate.y - o.element.height / 2 + 10
+    }
     for (const o of aiAgents.value) {
       if (o.id === agent.id || o.type !== 'car' || o.direction === agent.direction || o.state === 'done') continue
-      if (o.state === 'crossing') return nearStop ? 2 : 1
+      if (o.state === 'crossing') return crossingOnMyLane(o) ? (nearStop ? 2 : 1) : 0
       // [№9-ПРИОРИТЕТ-ВЫЕЗДА] выезжающая стоит/подъезжает к своему створу
       // (базовая сторона, зона ворот) — въезжающая освобождает полосу:
       // у остановки отъезжает назад по дороге (2), на подходе тормозит к
       // границе створа (1). Только на подходе/стоянке: в crossing машиной
       // управляют leader-follow и очередь направлений.
+      // [№33-УВЕРЕННЫЙ-ПОДХОД] выезжающая, которая УЖЕ ОТЪЕЗЖАЕТ задним
+      // ходом (carBackoff) — уступает сама: тормозить/отъезжать перед ней
+      // не нужно, заезжающая доезжает до своего стопа обычным ходом.
       if (agent.direction === 'enter' &&
+          !carBackoffByAgentId.has(o.id) &&
           (agent.state === 'to_gate' || agent.state === 'waiting_before') &&
           (o.state === 'to_gate' || o.state === 'waiting_before')) {
         const ocyYield = o.element.y + o.element.height / 2
@@ -1343,11 +1357,15 @@ export function useSimulatorPhysics(
           // («может сразу уехать налево... чтобы не создавать пробку»).
           // Инвариант [№13] не страдает: с оси уходит корпус, свип закрытия
           // досчитывает и закрывает ворота сам.
-          // [№27-УЕЗД-ЗАКРЫТИЕ] ранний уезд — только при ПОЛНОСТЬЮ закрытых
-          // воротах: при открытых машина ждёт в общем порядке (очередь
-          // выезжающей у линии разрешит уезд после паузы [№13]).
+          // [№27-УЕЗД-ЗАКРЫТИЕ] раньше требовалось ПОЛНОЕ закрытие ворот;
+          // [№33-УЕЗД-ВЫЕЗД] репорт: «заехавшая машина не должна ждать
+          // закрытия ворот, если есть другая машина, которая выезжает» —
+          // при живом выездном потоке (exitPendingFor: crossing, подъезд к
+          // створу, очередь waiting_before) заехавшая уезжает налево сразу
+          // после вежливой паузы, при любом состоянии шлагбаума. Очередь у
+          // линии держит ворота открытыми ([G3]) — пустоты под створом нет,
+          // а подъехавшая выезжающая не ждёт лишний цикл закрытия.
           if (agent.type === 'car' && agent.direction === 'enter' && gate?.settings &&
-              !gate.settings.isOpen && !gate.settings.isAnimating &&
               exitPendingFor(aiAgents.value, agent, gate)) {
             console.warn('[car-left-departure] выезжающая хочет выезд — ранний уезд налево:', agent.id)
             agent.afterTarget = { x: -60 - el.width / 2, y: el.y + el.height / 2, width: 0, height: 0 }
@@ -1946,7 +1964,12 @@ export function useSimulatorPhysics(
         // плавно едем за ним без дёргания. Лидер, уходящий ВБОК от курса
         // (мы поднимаемся сквозь ворота, он отъезжает по дороге), по-прежнему
         // останавливает нас жёстко — проедем, когда он расчистит коридор.
-        const softFollow = leaderRetreatsAlongCourse && leaderSpeed > (el.velocity || 0)
+        // [№33-УВЕРЕННЫЙ-ПОДХОД] условие «лидер быстрее» снято: пока отъезд
+        // идёт ВДОЛЬ курса, лидер УДАЛЯЕТСЯ — кап 0.8x не даёт догнать, а
+        // жёсткий стоп за ним давал «притормаживание» уступившей машине
+        // (тормоз в ноль -> стояние -> рывок). Жёсткий стоп остался только
+        // при ПРЯМОМ контакте корпусов (gap <= 0, distanceToLeader = 0).
+        const softFollow = leaderRetreatsAlongCourse && distanceToLeader > 0
         if (distanceToLeader < safeDistance * 0.5 && !softFollow) targetSpeed = 0
       }
       // [ФИКС-УСТУПИ-ДОРОГУ] вблизи любого пешехода ПО КУРСУ (в том числе

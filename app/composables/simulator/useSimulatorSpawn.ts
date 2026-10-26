@@ -12,6 +12,7 @@ import {
   CAR_STOP_OFFSET,
   TRUCK_WIDTH_SCALE,
   TRUCK_HEIGHT_SCALE,
+  CHILD_AVATAR_SCALE,
 } from '~/utils/simulatorConstants'
 // [СХЕМА-ТРАЕКТОРИЙ] единый вывод точек спавна/остановки/прохода/ухода из геометрии ворот
 import { trafficPointsFor, FOOT_PAD_PERSON, type TrafficPoints } from '~/utils/simulatorTraffic'
@@ -232,6 +233,16 @@ export function useSimulatorSpawn(
   }
 
   // ----- Создание группы пешеходов -----
+  // [№33-ДЕТИ] дети видны глазами: спрайт ребёнка меньше взрослого
+  // (CHILD_AVATAR_SCALE), что делает детёныша различимым в толпе;
+  // geometry/клэмпы физики уже работают по фактическим размерам элемента.
+  const personSizeOf = (person: any): { w: number; h: number } => {
+    const w = simOpts.value.personWidth
+    const h = simOpts.value.personHeight
+    const scale = integration.isChildPerson(person) ? CHILD_AVATAR_SCALE : 1
+    return { w: Math.round(w * scale), h: Math.round(h * scale) }
+  }
+
   const createGroup = (
     direction: Direction,
     leaderPerson: any,
@@ -261,9 +272,9 @@ export function useSimulatorSpawn(
     // визуальные ноги (центр + h/2 - FOOT_PAD_PERSON) не ниже нижней линии
     // калитки — подошва стоит НА линии, не утопая в заборе
     const gateBottomY = gate ? gate.y + gate.height : Infinity
-    const clampApproachY = (y: number): number =>
+    const clampApproachY = (y: number, bodyH: number = height): number =>
       direction === 'enter' && Number.isFinite(gateBottomY)
-        ? Math.min(y, gateBottomY - height / 2 + FOOT_PAD_PERSON)
+        ? Math.min(y, gateBottomY - bodyH / 2 + FOOT_PAD_PERSON)
         : y
 
     const groupId = `group_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`
@@ -281,6 +292,8 @@ export function useSimulatorSpawn(
     for (let idx = 0; idx < allPersons.length; idx++) {
       const person = allPersons[idx]
       const isLeader = idx === 0
+      // [№33-ДЕТИ] индивидуальный размер: ребёнок — 72% взрослого роста
+      const { w: pw, h: ph } = personSizeOf(person)
       let hOffset = 0
       let vOffset = 0
 
@@ -316,10 +329,10 @@ export function useSimulatorSpawn(
 
       // точки — ЦЕНТРЫ агентов; элемент позиционируется левым-верхним углом.
       // Смещения колонны — только на спавн и стоп; cross/after общие.
-      const posX = pts.spawn.x + hOffset - width / 2
-      const posY = clampApproachY(pts.spawn.y + vOffset) - height / 2
+      const posX = pts.spawn.x + hOffset - pw / 2
+      const posY = clampApproachY(pts.spawn.y + vOffset, ph) - ph / 2
       const stopCenterX = pts.stop.x + hOffset
-      const stopCenterY = clampApproachY(pts.stop.y + vOffset)
+      const stopCenterY = clampApproachY(pts.stop.y + vOffset, ph)
       const afterX = pts.after.x
       const afterY = pts.after.y
 
@@ -329,7 +342,7 @@ export function useSimulatorSpawn(
           { x: stopCenterX, y: stopCenterY },
           { x: pts.cross.x, y: pts.cross.y },
           { x: afterX, y: afterY },
-          speed, direction, width, height,
+          speed, direction, pw, ph,
           gateId,
           groupId, isLeader, idx, zIndex
         )
@@ -389,21 +402,24 @@ export function useSimulatorSpawn(
       ? trafficPointsFor(gate as any, { width, height }, direction, sceneSize.value)
       : fallbackPoints(direction, 'Person', { width, height }, stopOffset, fixedX, fixedY)
 
+    // [№33-ДЕТИ] индивидуальный размер: ребёнок — 72% взрослого роста
+    const { w: pw, h: ph } = personSizeOf(person)
+
     // [ФИКС-НОГИ-НИЖЕ-КАЛИТКИ] страховочный клэмп приходящих (ЦЕНТР, см. createGroup)
     const gateBottomY = gate ? gate.y + gate.height : Infinity
     if (direction === 'enter' && Number.isFinite(gateBottomY)) {
-      const maxY = gateBottomY - height / 2 + FOOT_PAD_PERSON
+      const maxY = gateBottomY - ph / 2 + FOOT_PAD_PERSON
       pts.spawn.y = Math.min(pts.spawn.y, maxY)
       pts.stop.y = Math.min(pts.stop.y, maxY)
     }
 
     const { element, agent } = createPersonAgent(
       person,
-      pts.spawn.x - width / 2, pts.spawn.y - height / 2,
+      pts.spawn.x - pw / 2, pts.spawn.y - ph / 2,
       { x: pts.stop.x, y: pts.stop.y },
       { x: pts.cross.x, y: pts.cross.y },
       { x: pts.after.x, y: pts.after.y },
-      speed, direction, width, height,
+      speed, direction, pw, ph,
       gateId,
       undefined, false, 0, direction === 'enter' ? 130 : 400
     )
@@ -553,9 +569,16 @@ export function useSimulatorSpawn(
       // [ФИКС-ЛИМИТ] группа спавнится только если в лимите есть хотя бы 2
       // свободных слота, а её размер зажимается остатком бюджета — «Макс.
       // агентов» ограничивает ОДНОВРЕМЕННЫХ людей, а не попытки спавна
+      // [№33-ДЕТИ] ребёнок НЕ ХОДИТ ОДИН (как в жизни): выбранный ребёнок
+      // всегда спавнится группой с взрослым опекуном из его семьи (лидером
+      // становится опекун). Взрослого в семье нет — ребёнок пропускает цикл
+      // (в жизни он не выходит за территорию без сопровождения).
       const budget = Math.max(1, Math.floor(spawnBudgetLeft))
-      const isGroup = Math.random() < 0.15 && budget >= 2
-      if (!isGroup) return createSinglePerson(direction, person, cfg, gate, gateId)
+      const childLead = integration.isChildPerson(person)
+      const isGroup = (Math.random() < 0.15 || childLead) && budget >= 2
+      if (!isGroup) {
+        return childLead ? false : createSinglePerson(direction, person, cfg, gate, gateId)
+      }
 
       const MAX_GROUP_SIZE = simOpts.value.maxGroupSize ?? 4
       const MAX_NON_FAMILY = simOpts.value.maxNonFamily ?? 1
@@ -564,9 +587,22 @@ export function useSimulatorSpawn(
       if (groupSize > MAX_GROUP_SIZE) groupSize = MAX_GROUP_SIZE
       if (groupSize > budget) groupSize = budget
 
-      const familyMembers = Math.random() < 0.7
+      let groupLeader = person
+      let familyMembers = Math.random() < 0.7 || childLead
         ? getFamilyGroup(person, direction, groupSize, activePersonIdsSet.value, extraExcludeIds)
         : []
+
+      // [№33-ДЕТИ] ребёнок-лидер: лидером становится взрослый опекун,
+      // ребёнок идёт первым членом (рядом с опекуном)
+      if (childLead) {
+        const guardian = familyMembers.find(m => !integration.isChildPerson(m))
+        if (!guardian) return false
+        groupLeader = guardian
+        familyMembers = [
+          person,
+          ...familyMembers.filter(m => m.id !== guardian.id && m.id !== person.id),
+        ]
+      }
 
       let members = [...familyMembers]
       let need = groupSize - 1 - members.length
@@ -576,20 +612,20 @@ export function useSimulatorSpawn(
         const allowedToAdd = Math.min(need, MAX_NON_FAMILY - currentNonFamily)
         if (allowedToAdd > 0) {
           const excludeIds = new Set(members.map(m => m.id))
-          const additional = getRandomOccupants(person, direction, allowedToAdd, activePersonIdsSet.value, extraExcludeIds)
-            .filter(occ => !excludeIds.has(occ.id) && integration.canBeWith(person, occ))
+          const additional = getRandomOccupants(groupLeader, direction, allowedToAdd, activePersonIdsSet.value, extraExcludeIds)
+            .filter(occ => !excludeIds.has(occ.id) && integration.canBeWith(groupLeader, occ))
           members.push(...additional)
         }
       }
 
       members = members.filter((m, i, arr) => arr.findIndex(t => t.id === m.id) === i)
-      members = members.filter(m => integration.canBeWith(person, m))
+      members = members.filter(m => integration.canBeWith(groupLeader, m))
 
       if (members.length === 0) {
-        return createSinglePerson(direction, person, cfg, gate, gateId)
+        return childLead ? false : createSinglePerson(direction, person, cfg, gate, gateId)
       }
 
-      return createGroup(direction, person, members, cfg, gate, gateId)
+      return createGroup(direction, groupLeader, members, cfg, gate, gateId)
     } else {
       // [ФИКС-флуд-4] пассажиры реже и мельче: машина с 3-4 пассажирами
       // = 4-5 журнальных записей разом, при ручном журнале не успевать

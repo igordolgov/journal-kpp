@@ -512,6 +512,7 @@ export function useSimulatorIntegration() {
     buildStatusMap,
     reloadJournal,
     canBeWith,
+    isChildPerson,
     getAvailablePerson,
     getFamilyGroup,
     getRandomOccupants,

@@ -234,10 +234,14 @@ export const useAudioEngine = () => {
 
     // ========== 5. Мотор ворот (зацикленный, с остановкой через stopPool или resetPool) ==========
     else if (type === 'gate-motor') {
-      // Параметры настройки:
-      // - гул (rumble): буфер шума, фильтр bandpass 980 Гц, Q=27, гейн 1.2
-      // - два осциллятора: sawtooth 70 Гц и square 100 Гц, смешиваются через oscGain (0.2)
-      // - итоговая громкость: volume * 0.3 (множитель регулирует общую громкость мотора)
+      // Параметры настройки ([№33-ТРЕСК-СКРИП]):
+      // - гул (rumble): буфер 6с — фон шума + ТРЕСК ЗУБЬЕВ шестерни
+      //   (короткие щелчки 4-10мс каждые 18-46мс, рандомная амплитуда)
+      //   + редкий СКРИП (2 вставки на цикл, несущая 520-780 Гц с вибрато
+      //   5-9 Гц и глиссандо) — «как в жизни»: иногда скрипнет, чаще трещит;
+      // - фильтр bandpass 1000 Гц, Q=4 (широкий: пропускает и треск, и скрип);
+      // - два осциллятора (saw 20 Гц, square 25 Гц) держат низкий гул привода;
+      // - итоговая громкость: volume * 0.1
       const currentlyPlaying = pool.find(n => n.state === 'playing')
       if (currentlyPlaying?.nodes) {
         // Останавливаем предыдущий экземпляр, если есть
@@ -251,17 +255,47 @@ export const useAudioEngine = () => {
         currentlyPlaying.state = 'idle'
       }
 
-      const rumbleSize = currentCtx.sampleRate * 2
+      const rumbleSize = currentCtx.sampleRate * 6
       const rumbleBuffer = currentCtx.createBuffer(1, rumbleSize, currentCtx.sampleRate)
       const rumbleData = rumbleBuffer.getChannelData(0)
-      for (let i = 0; i < rumbleSize; i++) rumbleData[i] = Math.random() * 0.2 - 0.1
+      for (let i = 0; i < rumbleSize; i++) rumbleData[i] = Math.random() * 0.32 - 0.16
+      // треск зубьев шестерни: щелчок 4-10мс каждые 18-46мс, рандомная амплитуда
+      let tooth = Math.floor(currentCtx.sampleRate * 0.02)
+      while (tooth < rumbleSize) {
+        const amp = 0.35 + Math.random() * 0.45
+        const len = Math.floor(currentCtx.sampleRate * (0.004 + Math.random() * 0.006))
+        for (let k = 0; k < len && tooth + k < rumbleSize; k++) {
+          const di = tooth + k
+          rumbleData[di] = (rumbleData[di] ?? 0) + (Math.random() * 2 - 1) * amp * Math.exp(-k / (len * 0.35))
+        }
+        tooth += len + Math.floor(currentCtx.sampleRate * (0.018 + Math.random() * 0.028))
+      }
+      // редкий скрип: 2 вставки на 6-секундный цикл, 0.45-0.85с каждая
+      for (let c = 0; c < 2; c++) {
+        const creakStart = Math.floor(currentCtx.sampleRate * (0.8 + Math.random() * 4.2))
+        const creakDur = Math.floor(currentCtx.sampleRate * (0.45 + Math.random() * 0.4))
+        const creakF0 = 520 + Math.random() * 260
+        const creakWob = 5 + Math.random() * 4
+        const creakDrift = 0.8 + Math.random() * 0.6
+        let creakPhase = 0
+        for (let k = 0; k < creakDur && creakStart + k < rumbleSize; k++) {
+          const t = k / currentCtx.sampleRate
+          const env = Math.sin(Math.PI * (k / creakDur))
+          const f = creakF0 * (creakDrift * (k / creakDur) + 0.6) * (1 + 0.11 * Math.sin(2 * Math.PI * creakWob * t))
+          creakPhase += (2 * Math.PI * f) / currentCtx.sampleRate
+          const ph = creakPhase / (2 * Math.PI)
+          const saw = 2 * (ph - Math.floor(ph + 0.5))
+          const ci = creakStart + k
+          rumbleData[ci] = (rumbleData[ci] ?? 0) + saw * env * 0.4
+        }
+      }
       const rumble = currentCtx.createBufferSource()
       rumble.buffer = rumbleBuffer
       rumble.loop = true
       const rumbleFilter = currentCtx.createBiquadFilter()
       rumbleFilter.type = 'bandpass'
-      rumbleFilter.frequency.value = 1180   // НАСТРОЙКА: частота гула
-      rumbleFilter.Q.value = 17             // НАСТРОЙКА: добротность фильтра
+      rumbleFilter.frequency.value = 1000   // НАСТРОЙКА: частота гула
+      rumbleFilter.Q.value = 4              // НАСТРОЙКА: добротность фильтра (широкая полоса)
       const rumbleGain = currentCtx.createGain()
       rumbleGain.gain.value = 0.3           // НАСТРОЙКА: громкость гулаz
       const osc1 = currentCtx.createOscillator()

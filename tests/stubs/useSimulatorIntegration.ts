@@ -60,6 +60,19 @@ export function useSimulatorIntegration(opts: IntegrationStubOptions = {}) {
 
   const canBeWith = () => true
 
+  // [№33-ДЕТИ] единая проверка «это ребёнок» — критерии совпадают с
+  // реальной интеграцией (ageGroup/exit_category/allowed_guardians/category/is_child)
+  const isChildPerson = (person: any): boolean => {
+    if (!person) return false
+    return (
+      person.ageGroup === 'child' ||
+      person.exit_category === 'small' ||
+      (Array.isArray(person.allowed_guardians) && person.allowed_guardians.length > 0) ||
+      (typeof person.category === 'string' && person.category.toLowerCase().includes('ребен')) ||
+      person.is_child === true
+    )
+  }
+
   return {
     getAvailablePerson,
     getFamilyGroup,
@@ -72,6 +85,7 @@ export function useSimulatorIntegration(opts: IntegrationStubOptions = {}) {
     logAgentEvent,
     updateAgentStatusOnly,
     canBeWith,
+    isChildPerson,
     usedPeopleIds,
     allPeople,
   }
