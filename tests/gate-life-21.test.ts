@@ -141,27 +141,30 @@ describe('[№21-СТВОР] входящий проходит строго че
 // 3) [№21-РЫВКИ] финальное торможение отключается настройкой finalBrake
 // ---------------------------------------------------------------------------
 describe('[№21-РЫВКИ] экспериментальный выключатель финального торможения', () => {
-  const speedAtDist40 = (arrivalBrake: boolean | undefined): number => {
+  // [№32-ПОСАДКА] профиль торможения у точки — кинематический v = √(2·a·d):
+  // при крейсерской 40 и a=110 торможение действует на d <= v²/(2a) ≈ 7.3px.
+  // Замер — минимум скорости в зоне (1.5..7] плотным шагом 0.02с.
+  const speedNearStop = (arrivalBrake: boolean | undefined): number => {
     const h = buildHarness([makeWicket(true)], { arrivalBrake })
     const p = mkPerson('p-fb', 'to_gate', CX + 220, ROAD_Y, { x: CX, y: ROAD_Y })
     h.aiAgents.value = [p as any]
-    // минимум скорости в полосе dist (15..40]: с finalBrake профиль монотонно
-    // гасит ход (cap = dist*0.6), без — ход остаётся крейсерским
     let vMin = Infinity
-    for (let i = 0; i < 200; i++) {
-      h.physics.updateAiMovement(DT, { carGateId: '', personGateId: 'wicket-1' })
+    for (let i = 0; i < 600; i++) {
+      h.physics.updateAiMovement(0.02, { carGateId: '', personGateId: 'wicket-1' })
       const dist = Math.abs(centerOf(p).x - CX)
-      if (dist <= 40 && dist > 15) vMin = Math.min(vMin, p.element.velocity || 0)
-      if (p.state !== 'to_gate' || dist <= 15) break
+      if (dist <= 7 && dist > 1.5) vMin = Math.min(vMin, p.element.velocity || 0)
+      if (p.state !== 'to_gate' || dist <= 1.5) break
     }
     return vMin
   }
 
-  it('arrivalBrake: false — торможение dist<80 не применяется, скорость у точки остаётся ходовой', () => {
-    const vOff = speedAtDist40(false)
-    const vOn = speedAtDist40(true)
+  it('arrivalBrake: false — торможение у точки не применяется, скорость остаётся ходовой', () => {
+    const vOff = speedNearStop(false)
+    const vOn = speedNearStop(true)
+    // без торможения человек входит в зону посадки на крейсерской,
+    // с торможением — гасит ход по капу √(2·110·1.5) ≈ 18 px/с и ниже
     expect(vOff).toBeGreaterThan(vOn + 8)
-    expect(vOn).toBeLessThanOrEqual(16) // cap = dist*0.6 в полосе замера
+    expect(vOn).toBeLessThanOrEqual(26)
     expect(vOff).toBeGreaterThanOrEqual(38) // крейсерская без гашения
   })
 })

@@ -271,12 +271,44 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
   const startGateAnimation = (el: SceneElement, targetOpen: boolean, ajarScale?: number) => {
     const gateId = String(el.id)
     if (!el.settings) el.settings = {}
-    gateTweens.get(gateId)?.kill()
+    const liveTween = gateTweens.get(gateId)
+    const isWicket = el.settings?.gateType === 'wicket' || (el.width && el.width <= 60)
+
+    // [№32-ФАНТОМ-МОТОР] репорт: «когда ворота закрыты, при нажатии на кнопку
+    // закрытия слышен звук мотора, пока не нажмёшь отмену закрытия».
+    // Причина: «ЗАКРЫТЬ»/«ОТКРЫТЬ» не проверяли, что створ УЖЕ в целевом
+    // положении, — startGateAnimation запускал холостой твин (0 -> 0) на
+    // весь closeDuration с зацикленным звуком мотора: створ неподвижен,
+    // а мотор гудит до onComplete (или до кнопки «СТОП»). У калиток
+    // холостой вызов отсекался в closeGate, у ворот — нет. Такое состояние
+    // финализируется сразу: без твина, без звука, флаги — как у честно
+    // завершённой анимации (та же семантика, что в onComplete ниже).
+    // Проверка только когда твина НЕТ В РЕЕСТРЕ: запись = анимация в
+    // полёте или только что запрошена (GSAP рендерит лениво, isActive()
+    // у свежесозданного твина false). Перехват идущей анимации (кнопки
+    // в любой фазе, [№22]) обязан работать как раньше — полотно между
+    // положениями разворачивается с текущего места.
+    const alreadyAtTarget = !liveTween && (isWicket
+      ? Math.abs(((el.settings._animScaleX as number) ?? 1) - (targetOpen ? (ajarScale ?? 0.1) : 1)) < 0.001
+      : Math.abs((el.settings._animX || 0) - (targetOpen ? -el.width : 0)) < 0.001)
+    if (alreadyAtTarget) {
+      el.settings.isOpen = targetOpen && !ajarScale
+      if (isWicket && !targetOpen) {
+        el.settings.isAjar = false
+        el.settings.wicketAjar = false // [№24-РУЧКА] дубль-ключ локальной физики
+        delete el.settings._handleAt // [№26-РУЧКА] заперто — анимации ручки нет
+      }
+      el.settings.isAnimating = false
+      el.settings.isStopped = false
+      gateTweenTarget.delete(gateId)
+      return
+    }
+
+    liveTween?.kill()
     el.settings.isAnimating = true
     el.settings.isStopped = false
     gateTweenTarget.set(gateId, { open: targetOpen, ajar: ajarScale != null })
 
-    const isWicket = el.settings?.gateType === 'wicket' || (el.width && el.width <= 60)
 
     if (isWicket) {
       // [№21-КАЛИТКА-В-ЖИЗНИ] звук ПОЛНОГО открытия — скрип (дверь

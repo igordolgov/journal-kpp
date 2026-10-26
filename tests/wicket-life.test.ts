@@ -89,7 +89,9 @@ describe('[№24-РУЧКА] разблокировка: замок на руч�
     expect(wicket.settings.wicketAjar).toBe(false)
     expect(wicket.settings.isAnimating).toBe(false)     // без холостого твина
 
-    const opened = buildCore({ isOpen: true })
+    // [№32] для НАСТОЯЩЕГО закрытия полотно должно быть открыто: флаг
+    // isOpen=true при полотне scale 1 — холостое состояние (анимации нет)
+    const opened = buildCore({ isOpen: true, _animScaleX: 0.1 })
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     opened.core.handleGateClick(opened.wicket as any)
     // закрытие запущено (твин в узловой среде не тикает — isOpen снимет
@@ -271,7 +273,11 @@ describe('[№22-КНОПКИ] кнопки работают в любой фа�
   const stageClosing = () => {
     const { wicket, core } = buildCore()
     vi.spyOn(console, 'warn').mockImplementation(() => {})
+    // реалистичное «открытое» состояние: флаг И полотно у открытой стенки.
+    // [№32] флаг isOpen=true при полотне scale 1 (закрыто) — холостое
+    // состояние: анимации нет, честный closed-стейдж требует открытого полотна.
     wicket.settings.isOpen = true
+    ;(wicket.settings as any)._animScaleX = 0.1
     wicket.settings.isAnimating = false
     expect(core.closeGate(wicket as any)).toBe(true) // запустили закрытие
     expect(wicket.settings.isAnimating).toBe(true)

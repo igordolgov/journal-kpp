@@ -199,6 +199,14 @@ export function useSimulatorPhysics(
   let personHardSepOn: boolean
   let PERSON_HARD_SEP: number         // px: радиус аварийного расталкивания (контакт)
   let PERSON_HARD_SPEED: number       // px/с: темп аварийного расталкивания
+  // [№32-ПОСАДКА] равнозамедленный подход к точке ожидания: v = √(2·a·d).
+  // Репорт №32: «перед точками ожидания люди сначала замирают как бы скользя,
+  // а затем перескакивают на несколько миллиметров» — старый профиль
+  // (пол 11 px/с + дотягивание 11 -> 4 px/с на последних 8px) давал
+  // ползучий хвост с долями пикселя за кадр, а посадка добивала остаток
+  // снапом до 1px. Кинематическое торможение останавливает человека ровно
+  // В точке за время 2d/v, без замирания; финальный шаг <= пары десятых px.
+  let PERSON_ARRIVE_DECEL: number     // px/с²: темп гашения хода у точки
   // [ФИКС-ЗАСТРЯЛ-ВНИЗУ] «тихая зона» прибытия: на последнем отрезке к точке
   // остановки расталкивание и дрейф отключены — именно они дёргали агента
   // перед остановкой (толчок вбок -> коррекция курса -> новый толчок).
@@ -458,6 +466,7 @@ export function useSimulatorPhysics(
     PERSON_HARD_SEP = tuneNumber(pt, 'pHardSep')
     PERSON_HARD_SPEED = tuneNumber(pt, 'pHardSpeed')
     ARRIVE_QUIET_ZONE = tuneNumber(pt, 'pQuietZone')
+    PERSON_ARRIVE_DECEL = tuneNumber(pt, 'pArriveDecel')
     FORCE_CROSS_AFTER = tuneNumber(pt, 'pForceCross')
     FORCE_CROSS_GROUP_AFTER = tuneNumber(pt, 'pForceCrossGroup')
   }
@@ -1609,9 +1618,15 @@ export function useSimulatorPhysics(
       // (>3px — stall-watchdog сбрасывался каждый кадр), а дистанция так и
       // не опускалась ниже порога (цикл |d - s|). Именно так «застревали»
       // вошедший человек и въехавшая машина сразу после ворот.
+      // [№32-ПОСАДКА] пороговый снап (прыжок до 1px) остался только у
+      // СТОЯЩИХ агентов (velocity <= 0.5 — «уже на цели»). Идущий садится
+      // на цель штатным шагом кадра (reachedByStep: остаток <= шага):
+      // последний шаг равен остатку пути (пары десятых px) — перескока
+      // «на несколько миллиметров» после подхода больше нет (репорт №32),
+      // точная посадка в центр цели сохранена.
       const stepLen = (el.velocity || 0) * dt
       const reachedByStep = (el.velocity || 0) > 0.5 && stepLen > 0 && dist <= stepLen
-      if (dist < ARRIVE_THRESHOLD || reachedByStep) {
+      if ((dist < ARRIVE_THRESHOLD && (el.velocity || 0) <= 0.5) || reachedByStep) {
         // точная посадка в центр цели — без остаточной дистанции
         el.x = tx - el.width / 2
         el.y = ty - el.height / 2
@@ -2085,11 +2100,28 @@ export function useSimulatorPhysics(
         const stopsAtTarget = agent.state === 'to_gate' ||
           (agent.type === 'car' && agent.state === 'crossing')
         if (stopsAtTarget) {
-          const taperZone = agent.type === 'person' ? 8 : 12
-          const taperFloor = agent.type === 'person' ? 4 : 8
-          if (dist < taperZone) {
-            const k = Math.max(0, dist) / taperZone
-            brakeCap = taperFloor + (brakeFloor - taperFloor) * k
+          if (agent.type === 'person') {
+            // [№32-ПОСАДКА] репорт: «перед точками ожидания люди сначала
+            // замирают как бы скользя, а затем перескакивают на несколько
+            // миллиметров». Причина — старый профиль человека: на последних
+            // 8px скорость проваливалась 11 -> 4 px/с (доли пикселя за кадр —
+            // видимое «скользящее замирание», фаза ног при такой скорости
+            // почти на паузе), а финальную посадку добивал снап до 1px
+            // (перескок). Заменяем кинематическим равнозамедленным ходом
+            // v = √(2·a·d): человек идёт крейсерской скоростью до зоны
+            // торможения v²/(2a) (~7-8px) и плавно гасит ход ровно В точке
+            // за ~0.4с — ползучего хвоста нет, финальный шаг посадки
+            // <= пары десятых px (перескок невидим). Пол 4px/с — страховка
+            // на лагающих кадрах, перелёт всё равно ловит reachedByStep.
+            brakeCap = Math.max(4, Math.sqrt(2 * PERSON_ARRIVE_DECEL * Math.max(0, dist)))
+          } else {
+            // машина — прежний профиль без изменений (№27: «машины идеальны»)
+            const taperZone = 12
+            const taperFloor = 8
+            if (dist < taperZone) {
+              const k = Math.max(0, dist) / taperZone
+              brakeCap = taperFloor + (brakeFloor - taperFloor) * k
+            }
           }
         }
         targetSpeed = Math.min(targetSpeed, brakeCap)

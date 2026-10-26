@@ -247,7 +247,7 @@ describe('плавный подход к точке останова ([БАГ-Р
     }
   })
 
-  it('человек: последние пиксели — дотягивание без рывка', () => {
+  it('человек: последние пиксели — равнозамедленная посадка без рывка [№32]', () => {
     const simElements = ref<any[]>([])
     const aiAgents = ref<any[]>([])
     const sceneSize = ref({ ...SCENE })
@@ -273,20 +273,34 @@ describe('плавный подход к точке останова ([БАГ-Р
 
     const nearVel: number[] = []
     let arrived = false
+    let lastPos = 1000 - 20
+    let lastStep = Infinity
     for (let i = 0; i < 300; i++) { // 15с
       physics.updateAiMovement(DT, { carGateId: '', personGateId: '' })
       const cx = person.element.x + 20
       const d = Math.abs(cx - 800)
-      if (d <= 8) nearVel.push(person.element.velocity || 0)
-      if (d <= 1.5) { arrived = true; break }
+      // [№32] зона кинематического торможения: v = √(2·a·d), при крейсерской
+      // 40 торможение включается на d <= v²/(2a) ≈ 7.3px
+      if (d <= 6) nearVel.push(person.element.velocity || 0)
+      if (person.state !== 'to_gate') {
+        arrived = true
+        lastStep = Math.abs(lastPos - cx)
+        break
+      }
+      lastPos = cx
     }
 
     expect(arrived).toBe(true)
     expect(nearVel.length).toBeGreaterThan(0)
-    // [№9-РЫВОК] тапер 11 -> 4 px/с на последних 8px: при dist 8 кап = 11
-    expect(Math.max(...nearVel)).toBeLessThanOrEqual(11.5)
+    // торможение реально включено: в зоне замера скорость падает до капа
+    // √(2·110·d) (при d 1.5..2 это ~18-21 px/с), а не держит крейсерскую
+    expect(Math.min(...nearVel)).toBeLessThanOrEqual(24)
+    // монотонное гашение хода — ни одного разгона в зоне посадки («без рывка»)
     for (let i = 1; i < nearVel.length; i++) {
       expect(nearVel[i]).toBeLessThanOrEqual(nearVel[i - 1] + 0.01)
     }
+    // [№32] посадка штатным шагом кадра: последний шаг = остаток пути,
+    // при dt=0.1 это <= шага кадра (в no32-тесте с dt=0.02 — < 0.5px)
+    expect(lastStep).toBeLessThan(1.2)
   })
 })
