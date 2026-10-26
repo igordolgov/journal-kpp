@@ -61,6 +61,16 @@ dialog.modal(
             option(value="Служебный") Служебный
             option(value="Грузовой") Грузовой
 
+      //- [№31-ЦВЕТ] цвет машины: палитра + произвольный (пипетка)
+      .form-control
+        label.label
+          span.label-text.font-semibold Цвет
+        UiColorPicker(
+          v-model="form.color"
+          :palette="VEHICLE_PALETTE"
+          default-color="#1f2937"
+        )
+
       .grid.grid-cols-2.gap-4
         .form-control
           label.label
@@ -167,6 +177,8 @@ dialog.modal(
 import { ref, computed, watch } from 'vue'
 import { Car, X, Save, Trash2, UserRound } from '@lucide/vue'
 import { useToast } from '~/composables/useToast'
+// [№31-ЦВЕТ] палитра машин + приведение цвета записи БД к CSS-цвету
+import { VEHICLE_PALETTE, resolveVehicleColor } from '~/utils/simulatorConstants'
 
 // --- Props ---
 const props = withDefaults(defineProps<{
@@ -191,10 +203,11 @@ useModalA11y({ isOpen: () => props.isOpen, onClose: () => emit('close'), root: m
 const toast = useToast()
 
 // --- State ---
-const form = ref<{ id?: number | null; plate: string; model: string; type: string; owner_id: number | null; allowed_driver_ids: number[] }>({
+const form = ref<{ id?: number | null; plate: string; model: string; type: string; color: string; owner_id: number | null; allowed_driver_ids: number[] }>({
   plate: '',
   model: '',
   type: 'Личный',
+  color: '',
   owner_id: null,
   allowed_driver_ids: []
 })
@@ -210,8 +223,11 @@ watch(() => props.vehicle, (val) => {
   if (val) {
     form.value = { ...val }
     if (!form.value.allowed_driver_ids) form.value.allowed_driver_ids = []
+    // [№31-ЦВЕТ] русские названия ('Черный') показываем приведённым hex:
+    // палитра подсвечивает текущий цвет, пипетка получает валидное значение
+    form.value.color = resolveVehicleColor(val.color) ?? ''
   } else {
-    form.value = { plate: '', model: '', type: 'Личный', owner_id: null, allowed_driver_ids: [] }
+    form.value = { plate: '', model: '', type: 'Личный', color: '', owner_id: null, allowed_driver_ids: [] }
   }
   prevOwnerId = form.value.owner_id
 }, { immediate: true })

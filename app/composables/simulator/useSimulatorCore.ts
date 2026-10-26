@@ -211,7 +211,9 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
   // курса (флаг _facingLeft ставит физика): едет влево — зеркало scaleX(-1),
   // вправо/стоят — нос вправо. Вертикальные участки (проход, убыль) сохраняют
   // последнюю горизонтальную ориентацию, как в прежней схеме.
-  // Люди никогда не вращаются — только по флагу enableRotation.
+  // Люди никогда не вращаются: [№31-БЕЗ-ПОВОРОТА] кнопка «Поворот спрайтов»
+  // и её флаг удалены — el.rotation остаётся только внутренней математикой
+  // расхождения в физике, на отображение она не влияет.
   // [ФИКС-РЫВОК-ДОТЯГИВАНИЯ] позиционирование ПЕРЕВЕДЕНО с left/top на
   // translate3d. left/top обновляются каждый кадр физики и заставляют браузер
   // пересчитывать layout всей сцены; хуже того — SVG-растр внутри
@@ -224,7 +226,7 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
   // [№17-ПРЫЖОК] alpha — доля подшага для интерполяции (см. paintCoord):
   // по умолчанию 1 = прежнее поведение (текущая позиция); виджет передаёт
   // lastPaintAlpha, чтобы шаблонный патч совпадал с покадровой записью paint.
-  const getElementStyle = (el: SceneElement, enableRotation: boolean, alpha = 1) => {
+  const getElementStyle = (el: SceneElement, alpha = 1) => {
     const moving = el.category === 'car' || el.category === 'human'
     const base: Record<string, string | number> = {
       position: 'absolute' as const,
@@ -240,9 +242,6 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
       const facingLeft = (el.settings as any)?._facingLeft ?? el.direction === 'enter'
       base.transform = `${base.transform} scaleX(${facingLeft ? -1 : 1})`
       return base
-    }
-    if (enableRotation) {
-      base.transform = `${base.transform} rotate(${((el.rotation || 0) * 180) / Math.PI}deg)`
     }
     return base
   }

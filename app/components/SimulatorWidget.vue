@@ -24,12 +24,7 @@
 
     .flex.items-center.gap-1
       //- [Фаза 5] Lucide-кнопки вместо эмодзи; активное состояние — через bg-primary/20
-      button.btn.btn-xs.btn-ghost.btn-square(
-        @click="enableVisualRotation = !enableVisualRotation"
-        :class="enableVisualRotation ? 'text-primary bg-primary/20' : 'text-base-content/40'"
-        title="Поворот спрайтов"
-      )
-        CarFront.w-4.h-4
+      //- [№31-БЕЗ-ПОВОРОТА] кнопка «Поворот спрайтов» и её флаг удалены
       button.btn.btn-xs.btn-ghost.btn-square(
         @click="showDebug = !showDebug"
         :class="showDebug ? 'text-warning bg-warning/20' : 'text-base-content/40'"
@@ -196,7 +191,7 @@
         //- монтирующие стили читают RAW-объект (см. getElementStyle), поэтому рендер
         //- не подписывается на x/y/zIndex — покадровые записи делает paintScene
         .absolute.cursor-pointer(
-          :style="getElementStyle(el, enableVisualRotation)"
+          :style="getElementStyle(el)"
           :ref="n => setAgentNode(el, n)"
           class="hover:z-50"
           @click="onElementClick(el)"
@@ -233,6 +228,15 @@
           )
             div(v-html="getDynamicSvg(el)")
           .w-full.h-full(v-else :style="{ backgroundColor: el.asset?.content || '#888' }")
+
+      //- [№31-ШЕСТЕРНЯ] приводная шестерня у нижне-левого угла ворот: крутится
+      //- при открытии (против часовой) и закрытии (по часовой); угол пишет paint
+      template(v-for="el in gearGates" :key="'gear_' + el.id")
+        .gate-gear-overlay.absolute.pointer-events-none(
+          :style="gearStyle(el)"
+          :ref="n => setGearNode(el, n)"
+          v-html="gearMarkup"
+        )
 
       template(v-for="panel in config?.panels" :key="'panel_'+panel.id")
         .absolute(
@@ -377,7 +381,8 @@ import { useSimulatorIntegration } from '../composables/useSimulatorIntegration'
 // [PAYROLL] шина событий оплаты и реестр проходов (ground truth)
 import { publishGateOpened, publishGateNoEntry } from '~/utils/payrollBus'
 import { markPayrollPass, peekPayrollPass } from '~/utils/payrollPass'
-import { generateSlidingGateSVG, generateWicketSVG } from '../constants/library'
+// [№31-ШЕСТЕРНЯ] генератор SVG шестерни ворот
+import { generateSlidingGateSVG, generateWicketSVG, getGateGearSvg } from '../constants/library'
 import { useAudioEngine } from '../composables/useAudioEngine'
 // [ФИКС-НАСТРОЙКИ] сохранение настроек поповера симулятора между запусками
 import { loadWidgetSettings, saveWidgetSettings } from '~/utils/widgetSettings'
@@ -400,12 +405,12 @@ import {
 // [№14-ПЛАВНОСТЬ-DEV] императивный мост физика -> DOM: покадровые стили пишутся
 // напрямую (paintScene из gameLoop), Vue перерисовывает только структурные события
 import {
-  paintAgent, paintLabel, paintGate, paintCommandLine,
+  paintAgent, paintLabel, paintGate, paintGateGear, paintCommandLine,
   isAgentPaused, labelTransform, snapshotPrevPositions,
 } from '~/utils/simulatorPaint'
 // [Фаза 5] Lucide: хедер и empty state
 import {
-  CarFront, Activity, SlidersHorizontal, X, Gauge,
+  Activity, SlidersHorizontal, X, Gauge,
   MonitorX, PencilRuler, ShieldAlert, Volume2, VolumeX, PersonStanding
 } from '@lucide/vue'
 
@@ -538,8 +543,8 @@ const { getElementStyle: _getElementStyle, getGateStyle: _getGateStyle, ...core 
 // [№14-ПЛАВНОСТЬ-DEV] монтирующие стили читают СЫРЫЙ объект (toRaw): чтение прокси
 // в рендере подписывало бы виджет на x/y/zIndex/settings — пересборка каждый кадр.
 // Реактивными остаются только структурные поля (id, name, occupants, asset).
-const getElementStyle = (el: any, enableRotation: boolean): CSSProperties =>
-  _getElementStyle(toRaw(el), enableRotation, lastPaintAlpha) as CSSProperties
+const getElementStyle = (el: any): CSSProperties =>
+  _getElementStyle(toRaw(el), lastPaintAlpha) as CSSProperties
 const getGateStyle = (el: any): CSSProperties => _getGateStyle(toRaw(el)) as CSSProperties
 
 // [№24-РУЧКА] разблокированная калитка (ручка зелёная/повёрнута) — CSS-класс
@@ -767,7 +772,7 @@ const physics = useSimulatorPhysics(
 )
 
 const rendering = useSimulatorRendering(containerRef, sceneSize)
-const { scale, updateScale, enableVisualRotation, initScaling, cleanupScaling } = rendering
+const { scale, updateScale, initScaling, cleanupScaling } = rendering
 
 // [СХЕМА-ТРАЕКТОРИЙ] размер сцены задают настройки конфига — при их смене
 // пересчитываем масштаб подгонки
@@ -901,6 +906,28 @@ const getDynamicSvg = (el: any): string => {
   return el.asset?.content || ''
 }
 
+// [№31-ШЕСТЕРНЯ] шестерня ставится на откатные ворота/шлагбаум (не на калитку).
+// Центр — нижне-левый угол полотна (точка привода), размер пропорционален высоте.
+const gearGates = computed(() =>
+  simElements.value.filter((el: any) => {
+    const r = toRaw(el) as any
+    return (r.category === 'gate' || r.category === 'barrier') &&
+      r.asset?.type === 'svg' && r.settings?.gateType !== 'wicket'
+  })
+)
+const GATE_GEAR_Z = 320 // над полотном ворот (300), под людьми базы (400+)
+const gearStyle = (el: any): Record<string, string | number> => {
+  const r = toRaw(el) as any
+  const size = Math.round(Math.min(40, Math.max(18, (r.height || 120) * 0.28)))
+  return {
+    left: `${(r.x || 0) - size / 2}px`,
+    top: `${(r.y || 0) + (r.height || 0) - size / 2}px`,
+    width: `${size}px`,
+    height: `${size}px`,
+    zIndex: GATE_GEAR_Z,
+  }
+}
+
 // ---------------------------------------------------------------------------
 // [№14-ПЛАВНОСТЬ-DEV] императивный paint-мост: реестры DOM-узлов + покадровая
 // запись стилей из gameLoop, минуя ререндер Vue. Шаблон регистрирует узлы (:ref),
@@ -929,6 +956,12 @@ const setLabelNode = (el: any, n: any) => {
 const setGateNode = (el: any, n: any) => {
   gateNodes.set(String(el.id), (n as HTMLElement) || null)
 }
+// [№31-ШЕСТЕРНЯ] DOM-узлы шестерён (ключ — id ворот) + их SVG-разметка
+const gearNodes = new Map<string, HTMLElement | null>()
+const gearMarkup = getGateGearSvg()
+const setGearNode = (el: any, n: any) => {
+  gearNodes.set(String(el.id), (n as HTMLElement) || null)
+}
 const setLineNode = (cmd: any, n: any) => {
   lineNodes.set(String(cmd.id), (n as SVGLineElement) || null)
 }
@@ -949,6 +982,7 @@ const prunePaintMaps = () => {
   for (const k of Array.from(agentNodes.keys())) if (!ids.has(k)) agentNodes.delete(k)
   for (const k of Array.from(labelNodes.keys())) if (!ids.has(k)) labelNodes.delete(k)
   for (const k of Array.from(gateNodes.keys())) if (!ids.has(k)) gateNodes.delete(k)
+  for (const k of Array.from(gearNodes.keys())) if (!ids.has(k)) gearNodes.delete(k)
   for (const k of Array.from(lineNodes.keys())) if (!ids.has(k)) lineNodes.delete(k)
 }
 watch(() => simElements.value.length, prunePaintMaps)
@@ -956,17 +990,19 @@ watch(() => simElements.value.length, prunePaintMaps)
 // Покадровая запись: агенты (позиция/слой/пауза ног/фаза шага), лейблы,
 // стрелы ворот, линии команд. Чтение через toRaw — без прокси и без отслеживания.
 const paintScene = (alpha = 1) => {
-  const rot = enableVisualRotation.value
+  // [№31-БЕЗ-ПОВОРОТА] флаг enableVisualRotation удалён — агенты не вращаются
   const els = simElements.value
   for (let i = 0; i < els.length; i++) {
     const el = toRaw(els[i]) as any
     const id = String(el.id)
     const rec = agentNodes.get(id)
-    if (rec) paintAgent(rec, el, rot, alpha)
+    if (rec) paintAgent(rec, el, alpha)
     const ln = labelNodes.get(id)
     if (ln) paintLabel(ln, el, alpha)
     const gn = gateNodes.get(id)
     if (gn) paintGate(gn, el.settings)
+    const gr = gearNodes.get(id)
+    if (gr) paintGateGear(gr, el.settings, el.width)
   }
   const cmds = activeCommands.value
   for (let i = 0; i < cmds.length; i++) {
@@ -1217,7 +1253,7 @@ onUnmounted(() => {
   resetAllAudioTimers()
   stopAllCarEngines()
   for (const agent of aiAgents.value) cleanupAgentSounds(agent.id)
-  agentNodes.clear(); labelNodes.clear(); gateNodes.clear(); lineNodes.clear()
+  agentNodes.clear(); labelNodes.clear(); gateNodes.clear(); gearNodes.clear(); lineNodes.clear()
   if ((window as any).__cleanupScale) (window as any).__cleanupScale()
 })
 </script>

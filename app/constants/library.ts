@@ -91,6 +91,27 @@ export const generateWicketSVG = (width: number, height: number, gateParams: Par
   </svg>`
 }
 
+// [№31-ШЕСТЕРНЯ] приводная шестерня ворот: маленькая, у нижне-левого угла.
+// Вращение (открытие — против часовой, закрытие — по часовой) пишет paint
+// (paintGateGear): угол = прогресс сдвига полотна * 360 * GATE_GEAR_TURNS.
+export const GATE_GEAR_TEETH = 8
+
+export const getGateGearSvg = (): string => {
+  const C = 20 // центр в viewBox 40x40
+  const teeth: string[] = []
+  for (let i = 0; i < GATE_GEAR_TEETH; i++) {
+    const a = (i * 360) / GATE_GEAR_TEETH
+    teeth.push(`<rect x="${C - 2.5}" y="1.5" width="5" height="7" rx="1.5" fill="#6b7280" transform="rotate(${a} ${C} ${C})"/>`)
+  }
+  return `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" class="gate-gear-svg">
+    <g class="gate-gear">${teeth.join('')}
+      <circle cx="${C}" cy="${C}" r="13.5" fill="#4b5563" stroke="#1f2937" stroke-width="1.5"/>
+      <circle cx="${C}" cy="${C}" r="8" fill="#6b7280"/>
+      <circle cx="${C}" cy="${C}" r="3.5" fill="#111827"/>
+    </g>
+  </svg>`
+}
+
 // === ГЕНЕРАТОРЫ ГЕОМЕТРИЧЕСКИХ ФИГУР ===
 
 type ShapeSettings = {

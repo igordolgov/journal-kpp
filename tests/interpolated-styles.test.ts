@@ -25,27 +25,27 @@ const makeCore = () => {
 describe('getElementStyle — интерполяция (№17)', () => {
   it('alpha=1 (дефолт) — текущая позиция, прежнее поведение', () => {
     const core = makeCore()
-    const st: any = core.getElementStyle(makePerson() as any, false)
+    const st: any = core.getElementStyle(makePerson() as any)
     expect(st.transform).toBe('translate3d(100px, 200px, 0)')
   })
 
   it('alpha=0.5 с _px/_py — середина между prev и текущей', () => {
     const core = makeCore()
     const el = makePerson({ _px: 90, _py: 180 })
-    const st: any = core.getElementStyle(el as any, false, 0.5)
+    const st: any = core.getElementStyle(el as any, 0.5)
     expect(st.transform).toBe('translate3d(95px, 190px, 0)')
   })
 
   it('alpha=0 — paintCoord возвращает текущую позицию (семантика №15: сброс аккумулятора = снап к физике)', () => {
     const core = makeCore()
     const el = makePerson({ _px: 90, _py: 180 })
-    const st: any = core.getElementStyle(el as any, false, 0)
+    const st: any = core.getElementStyle(el as any, 0)
     expect(st.transform).toBe('translate3d(100px, 200px, 0)')
   })
 
   it('без prev-снимка (новый агент) — fallback на текущую позицию', () => {
     const core = makeCore()
-    const st: any = core.getElementStyle(makePerson() as any, false, 0.3)
+    const st: any = core.getElementStyle(makePerson() as any, 0.3)
     expect(st.transform).toBe('translate3d(100px, 200px, 0)')
   })
 
@@ -55,7 +55,14 @@ describe('getElementStyle — интерполяция (№17)', () => {
       category: 'car', width: 80, height: 40,
       settings: { _facingLeft: true }, _px: 90, _py: 180,
     })
-    const st: any = core.getElementStyle(el as any, false, 0.5)
+    const st: any = core.getElementStyle(el as any, 0.5)
     expect(st.transform).toBe('translate3d(95px, 190px, 0) scaleX(-1)')
+  })
+
+  it('[№31-БЕЗ-ПОВОРОТА] rotation агента никогда не отображается', () => {
+    const core = makeCore()
+    const el = makePerson({ rotation: Math.PI })
+    const st: any = core.getElementStyle(el as any)
+    expect(st.transform).not.toContain('rotate')
   })
 })

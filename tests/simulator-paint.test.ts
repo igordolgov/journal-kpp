@@ -6,6 +6,7 @@ import {
   agentTransform, labelTransform, gateTransform, isAgentPaused,
   paintAgent, paintLabel, paintGate, paintCommandLine,
   paintCoord, snapshotPrevPositions, quantizeWalkHold,
+  gateOpenProgress, gateGearRotationDeg, paintGateGear, GATE_GEAR_TURNS,
 } from '~/utils/simulatorPaint'
 
 const fakeNode = () => {
@@ -56,18 +57,17 @@ describe('isAgentPaused (семантика прежнего :class-биндин
 describe('agentTransform (семантика getElementStyle)', () => {
   it('машина: _facingLeft=true -> зеркало scaleX(-1)', () => {
     const el = { x: 10.5, y: 20, category: 'car', settings: { _facingLeft: true } }
-    expect(agentTransform(el, false)).toBe('translate3d(10.5px, 20px, 0) scaleX(-1)')
+    expect(agentTransform(el)).toBe('translate3d(10.5px, 20px, 0) scaleX(-1)')
   })
   it('машина: без _facingLeft зеркалим по направлению enter', () => {
     const el = { x: 0, y: 0, category: 'car', direction: 'enter', settings: {} }
-    expect(agentTransform(el, false)).toContain('scaleX(-1)')
+    expect(agentTransform(el)).toContain('scaleX(-1)')
     const el2 = { x: 0, y: 0, category: 'car', direction: 'exit', settings: {} }
-    expect(agentTransform(el2, false)).toContain('scaleX(1)')
+    expect(agentTransform(el2)).toContain('scaleX(1)')
   })
-  it('человек: rotate только при enableRotation', () => {
+  it('[№31-БЕЗ-ПОВОРОТА] человек никогда не вращается, даже с заданным rotation', () => {
     const el = { x: 1, y: 2, category: 'human', rotation: Math.PI, settings: {} }
-    expect(agentTransform(el, true)).toBe('translate3d(1px, 2px, 0) rotate(180deg)')
-    expect(agentTransform(el, false)).toBe('translate3d(1px, 2px, 0)')
+    expect(agentTransform(el)).toBe('translate3d(1px, 2px, 0)')
   })
 })
 
@@ -96,20 +96,20 @@ describe('paintAgent', () => {
       x: 5, y: 6, category: 'human', zIndex: 180, velocity: 0,
       settings: { _walkHold: 1.25 },
     }
-    paintAgent({ node, avatar }, el as any, false)
+    paintAgent({ node, avatar }, el as any)
     expect(node.style.transform).toBe('translate3d(5px, 6px, 0)')
     expect(node.style.zIndex).toBe('180')
     expect(avatar.classes.has('is-paused')).toBe(true)
     expect(avatar.style._props['--walk-hold']).toBe('1.25')
 
     el.velocity = 3
-    paintAgent({ node, avatar }, el as any, false)
+    paintAgent({ node, avatar }, el as any)
     expect(avatar.classes.has('is-paused')).toBe(false)
   })
   it('без аватара (машина) — не падает, is-paused не трогается', () => {
     const node: any = fakeNode()
     const el = { x: 1, y: 2, category: 'car', zIndex: 0, settings: { _facingLeft: false } }
-    paintAgent({ node, avatar: null }, el as any, false)
+    paintAgent({ node, avatar: null }, el as any)
     expect(node.style.transform).toBe('translate3d(1px, 2px, 0) scaleX(1)')
     expect(node.style.zIndex).toBe('1')
   })
@@ -126,6 +126,14 @@ describe('paintLabel / paintGate / paintCommandLine', () => {
     paintGate(n, { _animX: -100 } as any)
     expect(n.style.transform).toBe('translateX(-100px) scaleX(1)')
     paintGate(null, { _animX: -100 } as any) // не падает
+  })
+  it('paintGateGear: стоячие ворота пишут 0deg, открытие крутит против часовой', () => {
+    const n: any = fakeNode()
+    paintGateGear(n, { _animX: 0 }, 320)
+    expect(n.style.transform).toBe('rotate(0deg)')
+    paintGateGear(n, { _animX: -160 }, 320)
+    expect(n.style.transform).toBe(`rotate(${-360 * GATE_GEAR_TURNS / 2}deg)`)
+    paintGateGear(null, { _animX: -160 }, 320) // не падает
   })
   it('линия команды — 4 координаты; без актора — тихий выход', () => {
     const line: any = fakeNode()
@@ -175,9 +183,9 @@ describe('№15: интерполяция рендера (fixed timestep)', () =
 
   it('agentTransform с alpha интерполирует translate3d, зеркало не ломается', () => {
     const car: any = { x: 10, y: 20, _px: 0, _py: 0, category: 'car', direction: 'enter' }
-    expect(agentTransform(car, false, 0.5)).toBe('translate3d(5px, 10px, 0) scaleX(-1)')
+    expect(agentTransform(car, 0.5)).toBe('translate3d(5px, 10px, 0) scaleX(-1)')
     const person: any = { x: 10, y: 20, _px: 0, _py: 0 }
-    expect(agentTransform(person, false, 0.5)).toBe('translate3d(5px, 10px, 0)')
+    expect(agentTransform(person, 0.5)).toBe('translate3d(5px, 10px, 0)')
   })
 
   it('labelTransform с alpha следует за агентом', () => {
@@ -195,12 +203,12 @@ describe('№16: кэш записей (write-once)', () => {
   it('повтор с тем же состоянием не меняет transform; изменение — пишет', () => {
     const node: any = fakeNode()
     const el: any = { x: 5, y: 6, category: 'human', zIndex: 10, velocity: 0 }
-    paintAgent({ node, avatar: null }, el, false)
+    paintAgent({ node, avatar: null }, el)
     const t1 = node.style.transform
-    paintAgent({ node, avatar: null }, el, false)
+    paintAgent({ node, avatar: null }, el)
     expect(node.style.transform).toBe(t1)
     el.x = 7
-    paintAgent({ node, avatar: null }, el, false)
+    paintAgent({ node, avatar: null }, el)
     expect(node.style.transform).toBe('translate3d(7px, 6px, 0)')
   })
 
@@ -208,12 +216,12 @@ describe('№16: кэш записей (write-once)', () => {
     const node: any = fakeNode()
     const avatar = mkAvatar()
     const el: any = { x: 0, y: 0, velocity: 0 } // стоит -> пауза
-    paintAgent({ node, avatar }, el, false)
+    paintAgent({ node, avatar }, el)
     expect(avatar.classes.has('is-paused')).toBe(true)
-    paintAgent({ node, avatar }, el, false)
+    paintAgent({ node, avatar }, el)
     expect(avatar.classes.has('is-paused')).toBe(true)
     el.velocity = 2
-    paintAgent({ node, avatar }, el, false)
+    paintAgent({ node, avatar }, el)
     expect(avatar.classes.has('is-paused')).toBe(false)
   })
 
@@ -228,7 +236,7 @@ describe('№16: кэш записей (write-once)', () => {
     const node: any = fakeNode()
     const avatar = mkAvatar()
     const el: any = { x: 0, y: 0, velocity: 1, settings: { _walkHold: 1.234 } }
-    paintAgent({ node, avatar }, el, false)
+    paintAgent({ node, avatar }, el)
     // 1.234*60 = 74.04 -> 74 -> 74/60
     expect(avatar.style._props['--walk-hold']).toBe(String(74 / 60))
   })
@@ -237,8 +245,45 @@ describe('№16: кэш записей (write-once)', () => {
     const a: any = fakeNode()
     const b: any = fakeNode()
     const el: any = { x: 1, y: 1, category: 'human', velocity: 0 }
-    paintAgent({ node: a, avatar: null }, el, false)
-    paintAgent({ node: b, avatar: null }, el, false)
+    paintAgent({ node: a, avatar: null }, el)
+    paintAgent({ node: b, avatar: null }, el)
     expect(a.style.transform).toBe(b.style.transform)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// [№31-ШЕСТЕРНЯ] угол приводной шестерни выводится из прогресса сдвига полотна:
+// открытие (_animX 0 -> -width) — против часовой (отрицательный угол), закрытие
+// отматывает угол назад (по часовой). Кламп 0..1 защищает от мусорных _animX.
+// ---------------------------------------------------------------------------
+describe('№31: шестерня ворот (gateOpenProgress / gateGearRotationDeg)', () => {
+  it('прогресс: закрыто 0, открыто 1, середина 0.5; мусор — 0', () => {
+    expect(gateOpenProgress(undefined, 320)).toBe(0)
+    expect(gateOpenProgress({ _animX: 0 }, 320)).toBe(0)
+    expect(gateOpenProgress({ _animX: -320 }, 320)).toBe(1)
+    expect(gateOpenProgress({ _animX: -160 }, 320)).toBe(0.5)
+    expect(gateOpenProgress({ _animX: -1000 }, 320)).toBe(1) // кламп сверху
+    expect(gateOpenProgress({ _animX: 50 }, 320)).toBe(0)    // кламп снизу
+    expect(gateOpenProgress({ _animX: NaN }, 320)).toBe(0)
+    expect(gateOpenProgress({ _animScaleX: 0.5 }, 320)).toBe(0) // масштабный режим не про _animX
+    expect(gateOpenProgress({ _animX: -160 }, 0)).toBe(0)      // вырожденная ширина
+  })
+
+  it('угол: открытие — против часовой (минус), GATE_GEAR_TURNS полных оборотов', () => {
+    expect(gateGearRotationDeg({ _animX: 0 }, 320)).toBe(0)
+    expect(gateGearRotationDeg({ _animX: -320 }, 320)).toBe(-360 * GATE_GEAR_TURNS)
+    expect(gateGearRotationDeg({ _animX: -160 }, 320)).toBe(-360 * GATE_GEAR_TURNS / 2)
+    // закрытие: полотно вернулось на четверть — угол отмотался (по часовой)
+    expect(gateGearRotationDeg({ _animX: -240 }, 320)).toBe(-360 * GATE_GEAR_TURNS * 0.75)
+  })
+
+  it('paintGateGear пишет угол через кэш: повтор без изменения — без записи', () => {
+    const n: any = fakeNode()
+    paintGateGear(n, { _animX: -80 }, 320)
+    const t1 = n.style.transform
+    paintGateGear(n, { _animX: -80 }, 320)
+    expect(n.style.transform).toBe(t1)
+    paintGateGear(n, { _animX: -160 }, 320)
+    expect(n.style.transform).toBe(`rotate(${-360 * GATE_GEAR_TURNS / 2}deg)`)
   })
 })

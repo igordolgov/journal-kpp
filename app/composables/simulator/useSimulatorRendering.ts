@@ -1,11 +1,11 @@
 // composables/simulator/useSimulatorRendering.ts
-// Масштабирование, поворот спрайтов, стилизация.
+// Масштабирование холста под контейнер.
+// [№31-БЕЗ-ПОВОРОТА] флаг enableVisualRotation и функции поворота спрайтов
+// удалены вместе с кнопкой «Поворот спрайтов» в окне симулятора.
 import { ref, type Ref } from 'vue'
-import type { SceneElement } from '~/types/simulator'
 
 export function useSimulatorRendering(containerRef: Ref<HTMLElement | null>, sceneSize: Ref<{ width: number; height: number }>) {
   const scale = ref(1)
-  const enableVisualRotation = ref(false)
 
   // Подгон масштаба холста под контейнер: вся сцена (её КОНФИГ-размер)
   // уменьшается, чтобы поместиться целиком — без обрезки краёв
@@ -30,42 +30,10 @@ export function useSimulatorRendering(containerRef: Ref<HTMLElement | null>, sce
     // Удаляем обработчик, если он был добавлен (но обычно возвращаем из initScaling)
   }
 
-  // Получение стиля элемента (позиция, размер, поворот)
-  const getElementStyle = (el: SceneElement) => ({
-    position: 'absolute',
-    left: `${el.x}px`,
-    top: `${el.y}px`,
-    width: `${el.width}px`,
-    height: `${el.height}px`,
-    transform: enableVisualRotation.value && el.rotation ? `rotate(${el.rotation}deg)` : 'none',
-    zIndex: el.zIndex || 10,
-  })
-
-  const getLabelStyle = (el: SceneElement) => {
-    // Стиль для текстовой метки над агентом
-    return {
-      position: 'absolute',
-      left: `${el.x + el.width / 2}px`,
-      top: `${el.y - 20}px`,
-      transform: 'translateX(-50%)',
-      backgroundColor: 'rgba(0,0,0,0.7)',
-      color: 'white',
-      fontSize: '12px',
-      padding: '2px 6px',
-      borderRadius: '4px',
-      whiteSpace: 'nowrap',
-      pointerEvents: 'none',
-      zIndex: 200,
-    }
-  }
-
   return {
     scale,
     updateScale,
-    enableVisualRotation,
     initScaling,
     cleanupScaling,
-    getElementStyle,
-    getLabelStyle,
   }
 }

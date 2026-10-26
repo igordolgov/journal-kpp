@@ -11,6 +11,8 @@ import { useFamily } from './useFamily'
 import type { Direction, TravelMode, PersonInfo } from '~/types/simulator'
 // [№21-РАНДОМ] выбор с «охлаждением»: недавно появлявшиеся — в конец очереди
 import { pickRecentAware } from '~/utils/simTuning'
+// [№31-ЦВЕТ] приведение цвета машины из БД к CSS-цвету + стабильный fallback
+import { resolveVehicleColor, stableVehicleColor } from '~/utils/simulatorConstants'
 
 // Временные статусы, при которых человек не может участвовать в симуляции
 const EXCLUDED_STATUSES = ['Командировка', 'Отпуск', 'Болен']
@@ -337,13 +339,11 @@ export function useSimulatorIntegration() {
     return null
   }
 
-  const getVehicleColor = (vehicle: any): string => {
-    if (vehicle?.color) return vehicle.color
-    const CAR_COLORS = ['forestgreen', 'brown', 'blueviolet', 'darkkhaki', '#ef4444', '#3b82f6', '#22c55e', '#eab308', '#f8fafc', '#1e293b']
-    // [ИСПРАВЛЕНО] обращение по индексу массива даёт string | undefined —
-    // fallback (та же правка, что в TrafficRoad и simulatorSvg)
-    return CAR_COLORS[Math.floor(Math.random() * CAR_COLORS.length)] ?? '#808080'
-  }
+  // [№31-ЦВЕТ] цвет машины из БД: русские названия сидера ('Черный' и т.п.)
+  // раньше вставлялись в SVG fill как есть — невалидный CSS-цвет рендерился
+  // чёрным. Теперь справочник -> CSS-цвет; без цвета — стабильный по номеру.
+  const getVehicleColor = (vehicle: any): string =>
+    resolveVehicleColor(vehicle?.color) ?? stableVehicleColor(vehicle?.plate)
 
   // Логирование события (оптимистичное обновление статуса)
   const logAgentEvent = async (

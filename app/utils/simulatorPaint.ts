@@ -42,18 +42,17 @@ export const isAgentPaused = (el: RawEl): boolean =>
   el.isPaused ?? ((el.velocity || 0) < 0.1)
 
 // transform агента: семантика идентична getElementStyle в useSimulatorCore
-// (translate3d + зеркало машины по _facingLeft/направлению + опциональный
-// поворот человека при enableVisualRotation).
+// (translate3d + зеркало машины по _facingLeft/направлению).
+// [№31-БЕЗ-ПОВОРОТА] кнопка «Поворот спрайтов» удалена: агенты никогда не
+// вращаются по курсу (el.rotation остаётся только внутренней математикой
+// расхождения в физике — на отображение она не влияет).
 // [№15] alpha — доля физического шага для интерполяции (см. paintCoord);
 // по умолчанию 1 (текущая позиция) — прежние вызовы/тесты не меняются.
-export const agentTransform = (el: RawEl, enableRotation: boolean, alpha = 1): string => {
+export const agentTransform = (el: RawEl, alpha = 1): string => {
   const t = `translate3d(${paintCoord(el, 'x', alpha)}px, ${paintCoord(el, 'y', alpha)}px, 0)`
   if (el.category === 'car') {
     const facingLeft = el.settings?._facingLeft ?? el.direction === 'enter'
     return `${t} scaleX(${facingLeft ? -1 : 1})`
-  }
-  if (enableRotation && el.rotation) {
-    return `${t} rotate(${(el.rotation * 180) / Math.PI}deg)`
   }
   return t
 }
@@ -111,9 +110,9 @@ export const quantizeWalkHold = (v: number | undefined | null): number =>
 // Покадровая запись агента: позиция+слой на корневом узле, пауза конечностей
 // и фаза шага (--walk-hold) на обёртке аватара (только у людей).
 // [№16] каждая запись проходит через кэш: unchanged-значения не пишутся.
-export const paintAgent = (t: AgentPaintTargets, el: RawEl, enableRotation: boolean, alpha = 1): void => {
+export const paintAgent = (t: AgentPaintTargets, el: RawEl, alpha = 1): void => {
   if (t.node) {
-    writeOnce(t.node, t.node, 'transform', agentTransform(el, enableRotation, alpha))
+    writeOnce(t.node, t.node, 'transform', agentTransform(el, alpha))
     writeOnce(t.node, t.node, 'zIndex', String(el.zIndex || 1))
     // [№16-КОМПОЗИТИНГ] ОТКЛОНЕНО экспериментом (Xvfb CPU×6: j25 408 vs 242 у
     // бейзлайна): собственные слои на ПОЛНОМ экране агентов дороже, чем
@@ -140,6 +139,38 @@ export const paintLabel = (node: HTMLElement | null, el: RawEl, alpha = 1): void
 // сторожа — paint каждый кадр переносит фактическое состояние settings в DOM).
 export const paintGate = (node: HTMLElement | null, s: RawEl | undefined | null): void => {
   if (node) writeOnce(node, node, 'transform', gateTransform(s))
+}
+
+// ---------------------------------------------------------------------------
+// [№31-ШЕСТЕРНЯ] приводная шестерня откатных ворот: открываются — крутится
+// ПРОТИВ часовой, закрываются — ПО часовой. Направление обратимо само собой:
+// угол выводится из прогресса сдвига полотна (_animX: 0 закрыто .. -width
+// открыто), поэтому закрытие просто отматывает угол назад.
+// ---------------------------------------------------------------------------
+// Полных оборотов за полный ход полотна (openDuration ~2-8с: 1 оборот выглядит
+// вяло, 3+ — мельтешение).
+export const GATE_GEAR_TURNS = 2
+
+// Прогресс открытия сдвижных ворот 0..1 по _animX (масштабный режим калитки
+// _animScaleX шестерню не получает — она ставится только на ворота/шлагбаум).
+export const gateOpenProgress = (s: RawEl | undefined | null, gateWidth: number): number => {
+  const w = Number(gateWidth)
+  if (!Number.isFinite(w) || w <= 0 || !s) return 0
+  const x = typeof s._animX === 'number' && Number.isFinite(s._animX) ? s._animX : 0
+  return Math.max(0, Math.min(1, -x / w))
+}
+
+// Угол шестерни в градусах: минус = против часовой (CSS-поворот по часовой
+// положителен). Открытие: 0 -> -360*GEAR_GEAR_TURNS; закрытие отматывает обратно.
+// p=0 -> явный 0 (без -0: «rotate(-0deg)» в style никому не нужен).
+export const gateGearRotationDeg = (s: RawEl | undefined | null, gateWidth: number): number => {
+  const p = gateOpenProgress(s, gateWidth)
+  return p === 0 ? 0 : -p * 360 * GATE_GEAR_TURNS
+}
+
+// Покадровая запись угла шестерни (кэш writeOnce: стоячие ворота не пишутся).
+export const paintGateGear = (node: HTMLElement | null, s: RawEl | undefined | null, gateWidth: number): void => {
+  if (node) writeOnce(node, node, 'transform', `rotate(${gateGearRotationDeg(s, gateWidth)}deg)`)
 }
 
 // Покадровая запись линии «команда» (актор -> цель) в SVG.

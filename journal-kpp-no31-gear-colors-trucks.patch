@@ -1,0 +1,1124 @@
+--- a/app/utils/simulatorPaint.ts
++++ b/app/utils/simulatorPaint.ts
+@@ -42,19 +42,18 @@
+   el.isPaused ?? ((el.velocity || 0) < 0.1)
+ 
+ // transform агента: семантика идентична getElementStyle в useSimulatorCore
+-// (translate3d + зеркало машины по _facingLeft/направлению + опциональный
+-// поворот человека при enableVisualRotation).
++// (translate3d + зеркало машины по _facingLeft/направлению).
++// [№31-БЕЗ-ПОВОРОТА] кнопка «Поворот спрайтов» удалена: агенты никогда не
++// вращаются по курсу (el.rotation остаётся только внутренней математикой
++// расхождения в физике — на отображение она не влияет).
+ // [№15] alpha — доля физического шага для интерполяции (см. paintCoord);
+ // по умолчанию 1 (текущая позиция) — прежние вызовы/тесты не меняются.
+-export const agentTransform = (el: RawEl, enableRotation: boolean, alpha = 1): string => {
++export const agentTransform = (el: RawEl, alpha = 1): string => {
+   const t = `translate3d(${paintCoord(el, 'x', alpha)}px, ${paintCoord(el, 'y', alpha)}px, 0)`
+   if (el.category === 'car') {
+     const facingLeft = el.settings?._facingLeft ?? el.direction === 'enter'
+     return `${t} scaleX(${facingLeft ? -1 : 1})`
+   }
+-  if (enableRotation && el.rotation) {
+-    return `${t} rotate(${(el.rotation * 180) / Math.PI}deg)`
+-  }
+   return t
+ }
+ 
+@@ -111,9 +110,9 @@
+ // Покадровая запись агента: позиция+слой на корневом узле, пауза конечностей
+ // и фаза шага (--walk-hold) на обёртке аватара (только у людей).
+ // [№16] каждая запись проходит через кэш: unchanged-значения не пишутся.
+-export const paintAgent = (t: AgentPaintTargets, el: RawEl, enableRotation: boolean, alpha = 1): void => {
++export const paintAgent = (t: AgentPaintTargets, el: RawEl, alpha = 1): void => {
+   if (t.node) {
+-    writeOnce(t.node, t.node, 'transform', agentTransform(el, enableRotation, alpha))
++    writeOnce(t.node, t.node, 'transform', agentTransform(el, alpha))
+     writeOnce(t.node, t.node, 'zIndex', String(el.zIndex || 1))
+     // [№16-КОМПОЗИТИНГ] ОТКЛОНЕНО экспериментом (Xvfb CPU×6: j25 408 vs 242 у
+     // бейзлайна): собственные слои на ПОЛНОМ экране агентов дороже, чем
+@@ -142,6 +141,38 @@
+   if (node) writeOnce(node, node, 'transform', gateTransform(s))
+ }
+ 
++// ---------------------------------------------------------------------------
++// [№31-ШЕСТЕРНЯ] приводная шестерня откатных ворот: открываются — крутится
++// ПРОТИВ часовой, закрываются — ПО часовой. Направление обратимо само собой:
++// угол выводится из прогресса сдвига полотна (_animX: 0 закрыто .. -width
++// открыто), поэтому закрытие просто отматывает угол назад.
++// ---------------------------------------------------------------------------
++// Полных оборотов за полный ход полотна (openDuration ~2-8с: 1 оборот выглядит
++// вяло, 3+ — мельтешение).
++export const GATE_GEAR_TURNS = 2
++
++// Прогресс открытия сдвижных ворот 0..1 по _animX (масштабный режим калитки
++// _animScaleX шестерню не получает — она ставится только на ворота/шлагбаум).
++export const gateOpenProgress = (s: RawEl | undefined | null, gateWidth: number): number => {
++  const w = Number(gateWidth)
++  if (!Number.isFinite(w) || w <= 0 || !s) return 0
++  const x = typeof s._animX === 'number' && Number.isFinite(s._animX) ? s._animX : 0
++  return Math.max(0, Math.min(1, -x / w))
++}
++
++// Угол шестерни в градусах: минус = против часовой (CSS-поворот по часовой
++// положителен). Открытие: 0 -> -360*GEAR_GEAR_TURNS; закрытие отматывает обратно.
++// p=0 -> явный 0 (без -0: «rotate(-0deg)» в style никому не нужен).
++export const gateGearRotationDeg = (s: RawEl | undefined | null, gateWidth: number): number => {
++  const p = gateOpenProgress(s, gateWidth)
++  return p === 0 ? 0 : -p * 360 * GATE_GEAR_TURNS
++}
++
++// Покадровая запись угла шестерни (кэш writeOnce: стоячие ворота не пишутся).
++export const paintGateGear = (node: HTMLElement | null, s: RawEl | undefined | null, gateWidth: number): void => {
++  if (node) writeOnce(node, node, 'transform', `rotate(${gateGearRotationDeg(s, gateWidth)}deg)`)
++}
++
+ // Покадровая запись линии «команда» (актор -> цель) в SVG.
+ export const paintCommandLine = (
+   line: { setAttribute: (n: string, v: string) => void } | null,
+
+--- a/app/composables/simulator/useSimulatorCore.ts
++++ b/app/composables/simulator/useSimulatorCore.ts
+@@ -211,7 +211,9 @@
+   // курса (флаг _facingLeft ставит физика): едет влево — зеркало scaleX(-1),
+   // вправо/стоят — нос вправо. Вертикальные участки (проход, убыль) сохраняют
+   // последнюю горизонтальную ориентацию, как в прежней схеме.
+-  // Люди никогда не вращаются — только по флагу enableRotation.
++  // Люди никогда не вращаются: [№31-БЕЗ-ПОВОРОТА] кнопка «Поворот спрайтов»
++  // и её флаг удалены — el.rotation остаётся только внутренней математикой
++  // расхождения в физике, на отображение она не влияет.
+   // [ФИКС-РЫВОК-ДОТЯГИВАНИЯ] позиционирование ПЕРЕВЕДЕНО с left/top на
+   // translate3d. left/top обновляются каждый кадр физики и заставляют браузер
+   // пересчитывать layout всей сцены; хуже того — SVG-растр внутри
+@@ -224,7 +226,7 @@
+   // [№17-ПРЫЖОК] alpha — доля подшага для интерполяции (см. paintCoord):
+   // по умолчанию 1 = прежнее поведение (текущая позиция); виджет передаёт
+   // lastPaintAlpha, чтобы шаблонный патч совпадал с покадровой записью paint.
+-  const getElementStyle = (el: SceneElement, enableRotation: boolean, alpha = 1) => {
++  const getElementStyle = (el: SceneElement, alpha = 1) => {
+     const moving = el.category === 'car' || el.category === 'human'
+     const base: Record<string, string | number> = {
+       position: 'absolute' as const,
+@@ -241,9 +243,6 @@
+       base.transform = `${base.transform} scaleX(${facingLeft ? -1 : 1})`
+       return base
+     }
+-    if (enableRotation) {
+-      base.transform = `${base.transform} rotate(${((el.rotation || 0) * 180) / Math.PI}deg)`
+-    }
+     return base
+   }
+ 
+
+--- a/app/composables/simulator/useSimulatorRendering.ts
++++ b/app/composables/simulator/useSimulatorRendering.ts
+@@ -1,11 +1,11 @@
+ // composables/simulator/useSimulatorRendering.ts
+-// Масштабирование, поворот спрайтов, стилизация.
++// Масштабирование холста под контейнер.
++// [№31-БЕЗ-ПОВОРОТА] флаг enableVisualRotation и функции поворота спрайтов
++// удалены вместе с кнопкой «Поворот спрайтов» в окне симулятора.
+ import { ref, type Ref } from 'vue'
+-import type { SceneElement } from '~/types/simulator'
+ 
+ export function useSimulatorRendering(containerRef: Ref<HTMLElement | null>, sceneSize: Ref<{ width: number; height: number }>) {
+   const scale = ref(1)
+-  const enableVisualRotation = ref(false)
+ 
+   // Подгон масштаба холста под контейнер: вся сцена (её КОНФИГ-размер)
+   // уменьшается, чтобы поместиться целиком — без обрезки краёв
+@@ -30,42 +30,10 @@
+     // Удаляем обработчик, если он был добавлен (но обычно возвращаем из initScaling)
+   }
+ 
+-  // Получение стиля элемента (позиция, размер, поворот)
+-  const getElementStyle = (el: SceneElement) => ({
+-    position: 'absolute',
+-    left: `${el.x}px`,
+-    top: `${el.y}px`,
+-    width: `${el.width}px`,
+-    height: `${el.height}px`,
+-    transform: enableVisualRotation.value && el.rotation ? `rotate(${el.rotation}deg)` : 'none',
+-    zIndex: el.zIndex || 10,
+-  })
+-
+-  const getLabelStyle = (el: SceneElement) => {
+-    // Стиль для текстовой метки над агентом
+-    return {
+-      position: 'absolute',
+-      left: `${el.x + el.width / 2}px`,
+-      top: `${el.y - 20}px`,
+-      transform: 'translateX(-50%)',
+-      backgroundColor: 'rgba(0,0,0,0.7)',
+-      color: 'white',
+-      fontSize: '12px',
+-      padding: '2px 6px',
+-      borderRadius: '4px',
+-      whiteSpace: 'nowrap',
+-      pointerEvents: 'none',
+-      zIndex: 200,
+-    }
+-  }
+-
+   return {
+     scale,
+     updateScale,
+-    enableVisualRotation,
+     initScaling,
+     cleanupScaling,
+-    getElementStyle,
+-    getLabelStyle,
+   }
+ }
+\ No newline at end of file
+
+--- a/app/utils/simulatorConstants.ts
++++ b/app/utils/simulatorConstants.ts
+@@ -33,6 +33,63 @@
+   '#ef4444', '#3b82f6', '#22c55e', '#eab308', '#f8fafc', '#1e293b'
+ ]
+ 
++// ---------------------------------------------------------------------------
++// [№31-ЦВЕТ] Цвета машин: у записей БД цвет хранится РУССКИМ СЛОВОМ
++// (сидер: 'Черный'/'Белый'/...), а SVG-генератор вставляет значение в fill —
++// невалидный CSS-цвет рендерился чёрным («все машины чёрные»). Теперь цвет
++// записи приводится к CSS-цвету справочником; hex/css-имена проходят как есть.
++// ---------------------------------------------------------------------------
++export const VEHICLE_COLOR_NAMES: Record<string, string> = {
++  'Черный': '#1f2937',
++  'Чёрный': '#1f2937',
++  'Белый': '#e2e8f0',
++  'Серебро': '#94a3b8',
++  'Серебристый': '#94a3b8',
++  'Синий': '#2563eb',
++  'Голубой': '#38bdf8',
++  'Красный': '#dc2626',
++  'Зелёный': '#16a34a',
++  'Зеленый': '#16a34a',
++  'Жёлтый': '#eab308',
++  'Желтый': '#eab308',
++  'Оранжевый': '#ea580c',
++  'Фиолетовый': '#7c3aed',
++  'Серый': '#9ca3af',
++  'Коричневый': '#854d0e',
++  'Бежевый': '#d6c7a1',
++}
++
++// Палитра для диалога редактирования машины и стабильного подбора «по номеру»
++export const VEHICLE_PALETTE = [
++  '#1f2937', '#e2e8f0', '#94a3b8', '#2563eb', '#dc2626',
++  '#16a34a', '#eab308', '#ea580c', '#7c3aed', '#854d0e',
++]
++
++// Русское название/имя CSS/hex -> CSS-цвет; неизвестное значение -> null
++// (назначается стабильный цвет по госномеру — машина не перекрашивается
++// между поездками, как в жизни)
++export const resolveVehicleColor = (color: unknown): string | null => {
++  const c = String(color ?? '').trim()
++  if (!c) return null
++  const named = VEHICLE_COLOR_NAMES[c]
++  if (named) return named
++  if (/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(c)) return c
++  if (/^[a-z]+$/i.test(c)) return c
++  return null
++}
++
++// Детерминированный цвет по госномеру (fallback для записей без цвета)
++export const stableVehicleColor = (plate: unknown): string => {
++  const p = String(plate ?? '')
++  let h = 0
++  for (let i = 0; i < p.length; i++) h = (h * 31 + p.charCodeAt(i)) >>> 0
++  return VEHICLE_PALETTE[h % VEHICLE_PALETTE.length] ?? '#1f2937'
++}
++
++// [№31-ГРУЗОВИКИ] грузовые автомобили крупнее легковых (тип 'Грузовой' в БД)
++export const TRUCK_WIDTH_SCALE = 1.2   // 80 -> 96px
++export const TRUCK_HEIGHT_SCALE = 1.3  // 40 -> 52px
++
+ // Константы анимации (смещение спрайта по умолчанию)
+ export const SPRITE_ORIENTATION_OFFSET = 0
+ 
+
+--- a/app/composables/useSimulatorIntegration.ts
++++ b/app/composables/useSimulatorIntegration.ts
+@@ -11,6 +11,8 @@
+ import type { Direction, TravelMode, PersonInfo } from '~/types/simulator'
+ // [№21-РАНДОМ] выбор с «охлаждением»: недавно появлявшиеся — в конец очереди
+ import { pickRecentAware } from '~/utils/simTuning'
++// [№31-ЦВЕТ] приведение цвета машины из БД к CSS-цвету + стабильный fallback
++import { resolveVehicleColor, stableVehicleColor } from '~/utils/simulatorConstants'
+ 
+ // Временные статусы, при которых человек не может участвовать в симуляции
+ const EXCLUDED_STATUSES = ['Командировка', 'Отпуск', 'Болен']
+@@ -337,13 +339,11 @@
+     return null
+   }
+ 
+-  const getVehicleColor = (vehicle: any): string => {
+-    if (vehicle?.color) return vehicle.color
+-    const CAR_COLORS = ['forestgreen', 'brown', 'blueviolet', 'darkkhaki', '#ef4444', '#3b82f6', '#22c55e', '#eab308', '#f8fafc', '#1e293b']
+-    // [ИСПРАВЛЕНО] обращение по индексу массива даёт string | undefined —
+-    // fallback (та же правка, что в TrafficRoad и simulatorSvg)
+-    return CAR_COLORS[Math.floor(Math.random() * CAR_COLORS.length)] ?? '#808080'
+-  }
++  // [№31-ЦВЕТ] цвет машины из БД: русские названия сидера ('Черный' и т.п.)
++  // раньше вставлялись в SVG fill как есть — невалидный CSS-цвет рендерился
++  // чёрным. Теперь справочник -> CSS-цвет; без цвета — стабильный по номеру.
++  const getVehicleColor = (vehicle: any): string =>
++    resolveVehicleColor(vehicle?.color) ?? stableVehicleColor(vehicle?.plate)
+ 
+   // Логирование события (оптимистичное обновление статуса)
+   const logAgentEvent = async (
+
+--- a/app/utils/simulatorSvg.ts
++++ b/app/utils/simulatorSvg.ts
+@@ -18,6 +18,25 @@
+   </svg>
+ `
+ 
++// [№31-ГРУЗОВИКИ] грузовой автомобиль: цветной будка-кузов + тёмная кабина.
++// viewBox 120x65 (пропорция 1.85) — элемент 96x52 (TRUCK_*_SCALE от легковой).
++export const getTruckSvg = (color: string): string => `
++  <svg viewBox="0 0 120 65" xmlns="http://www.w3.org/2000/svg">
++    <rect x="4" y="46" width="112" height="7" rx="2" fill="#4b5563"/>
++    <rect x="6" y="5" width="72" height="41" rx="3" fill="${color}" stroke="#111827" stroke-width="1.5"/>
++    <rect x="6" y="5" width="72" height="9" rx="3" fill="#ffffff" opacity="0.18"/>
++    <rect x="26" y="9" width="2" height="33" fill="#ffffff" opacity="0.12"/>
++    <rect x="46" y="9" width="2" height="33" fill="#ffffff" opacity="0.12"/>
++    <rect x="66" y="9" width="2" height="33" fill="#ffffff" opacity="0.12"/>
++    <path d="M78,46 L78,24 Q78,15 86,15 L100,15 Q108,15 110,23 L114,37 L114,46 Z" fill="#374151" stroke="#111827" stroke-width="1.5"/>
++    <path d="M82,26 Q82,20 88,20 L98,20 Q104,20 106,26 L108,32 L82,32 Z" fill="#87CEEB"/>
++    <rect x="110" y="27" width="4" height="3" rx="1" fill="#fbbf24"/>
++    <circle cx="20" cy="53" r="7" fill="#1f2937"/><circle cx="20" cy="53" r="3" fill="#9ca3af"/>
++    <circle cx="42" cy="53" r="7" fill="#1f2937"/><circle cx="42" cy="53" r="3" fill="#9ca3af"/>
++    <circle cx="94" cy="53" r="7" fill="#1f2937"/><circle cx="94" cy="53" r="3" fill="#9ca3af"/>
++  </svg>
++`
++
+ export const getRandomCarColor = (): string => {
+   // [ИСПРАВЛЕНО] noUncheckedIndexedAccess: fallback на случай пустого справочника
+   return CAR_COLORS[Math.floor(Math.random() * CAR_COLORS.length)] ?? '#808080'
+
+--- a/app/composables/simulator/useSimulatorSpawn.ts
++++ b/app/composables/simulator/useSimulatorSpawn.ts
+@@ -10,10 +10,13 @@
+   EXIT_VERTICAL_DISTANCE,
+   PERSON_STOP_OFFSET,
+   CAR_STOP_OFFSET,
++  TRUCK_WIDTH_SCALE,
++  TRUCK_HEIGHT_SCALE,
+ } from '~/utils/simulatorConstants'
+ // [СХЕМА-ТРАЕКТОРИЙ] единый вывод точек спавна/остановки/прохода/ухода из геометрии ворот
+ import { trafficPointsFor, FOOT_PAD_PERSON, type TrafficPoints } from '~/utils/simulatorTraffic'
+-import { getCarSvg, generateRealPersonSvg } from '~/utils/simulatorSvg'
++// [№31-ГРУЗОВИКИ] getTruckSvg — отдельный спрайт грузового автомобиля
++import { getCarSvg, getTruckSvg, generateRealPersonSvg } from '~/utils/simulatorSvg'
+ // [П7] индивидуальный темп людей 0.85..1.15 (у группы — общий)
+ import { randomPersonPace, initialSpawnDelay } from '~/utils/simTuning'
+ import type { SceneElement, Direction, TravelMode, TrafficConfig, AiAgent, PersonInfo } from '~/types/simulator'
+@@ -414,6 +417,10 @@
+     return true
+   }
+ 
++  // [№31-ГРУЗОВИКИ] грузовой автомобиль — БД-тип 'Грузовой'
++  const isTruckVehicle = (vehicle: any): boolean =>
++    String(vehicle?.type || '').trim() === 'Грузовой'
++
+   // ----- Автомобиль с пассажирами -----
+   const createCarWithOccupants = (
+     driverPerson: any,
+@@ -430,8 +437,16 @@
+     }
+     const color = getVehicleColor(car)
+     const plate = car.plate
+-    const width = simOpts.value.carWidth
+-    const height = simOpts.value.carHeight
++    // [№31-ГРУЗОВИКИ] грузовик крупнее легковой и везёт ТОЛЬКО водителя
++    // (страхуемся, даже если пассажиры каким-то образом переданы)
++    const isTruck = isTruckVehicle(car)
++    const occupantsFinal = isTruck ? [] : occupants
++    const width = isTruck
++      ? Math.round(simOpts.value.carWidth * TRUCK_WIDTH_SCALE)
++      : simOpts.value.carWidth
++    const height = isTruck
++      ? Math.round(simOpts.value.carHeight * TRUCK_HEIGHT_SCALE)
++      : simOpts.value.carHeight
+     const speed = cfg.carSpeed
+     const stopOffset = CAR_STOP_OFFSET
+     const fixedX = fixedXCar.value
+@@ -474,14 +489,18 @@
+       // [БАГ-РЕПОРТ-4] начальная ориентация по стороне появления/уезда, до
+       // первого тика физики: вход справа едет влево (зеркало), слева — вправо;
+       // выход уезжает в выбранную сторону. Дальше флаг ведёт физика.
+-      settings: { _facingLeft: direction === 'enter' ? side === 'right' : side === 'left' },
+-      asset: { type: 'car', plate, color, svg: getCarSvg(color) }
++      settings: {
++        _facingLeft: direction === 'enter' ? side === 'right' : side === 'left',
++        // [№31-ГРУЗОВИКИ] отладочная метка типа кузова
++        _isTruck: isTruck,
++      },
++      asset: { type: 'car', plate, color, svg: isTruck ? getTruckSvg(color) : getCarSvg(color) }
+     }
+ 
+     simElements.value.push(carElement)
+ 
+     const occupantsInfo: PersonInfo[] = [createPersonInfo(driverPerson)]
+-    for (const occ of occupants) occupantsInfo.push(createPersonInfo(occ))
++    for (const occ of occupantsFinal) occupantsInfo.push(createPersonInfo(occ))
+ 
+     const carAgent: AiAgent = {
+       // [ИСПРАВЛЕНО] SceneElement.id: string | number -> AiAgent.id: string
+@@ -509,7 +528,7 @@
+     audio.createPool(`car-${carAgent.id}`, 'engine', 2)
+ 
+     usedPeopleIds.value.add(driverPerson.id)
+-    for (const occ of occupants) usedPeopleIds.value.add(occ.id)
++    for (const occ of occupantsFinal) usedPeopleIds.value.add(occ.id)
+     // [ФИКС-ЛИМИТ] машина = один слот лимита (пассажиры внутри, не отдельные агенты)
+     lastSpawnAdded = 1
+     return true
+@@ -574,7 +593,11 @@
+     } else {
+       // [ФИКС-флуд-4] пассажиры реже и мельче: машина с 3-4 пассажирами
+       // = 4-5 журнальных записей разом, при ручном журнале не успевать
+-      const hasPassengers = Math.random() < 0.3
++      // [№31-ГРУЗОВИКИ] в грузовую машину садится только водитель:
++      // пассажиров не подбираем вовсе («их не должно быть много»)
++      const vehicle = integration.getAvailableVehicleForPerson(person.id, direction)
++      const isTruck = isTruckVehicle(vehicle)
++      const hasPassengers = !isTruck && Math.random() < 0.3
+       let passengers: any[] = []
+       if (hasPassengers) {
+         const count = Math.floor(Math.random() * 2) + 1
+
+--- a/app/utils/familyMath.ts
++++ b/app/utils/familyMath.ts
+@@ -32,10 +32,16 @@
+ export const BASE_LAST_NAMES = ['Иванов', 'Петров', 'Сидоров', 'Козлов', 'Новиков', 'Морозов', 'Волков', 'Соколов', 'Лебедев', 'Кузнецов', 'Попов', 'Смирнов', 'Орлов', 'Крылов'];
+ export const STREETS = ['Ленина', 'Советская', 'Мира', 'Садовая', 'Пушкина', 'Гагарина', 'Кирова', 'Заводская'];
+ export const CAR_BRANDS = ['Toyota Camry', 'BMW X5', 'Kia Rio', 'Hyundai Solaris', 'VAZ 2110', 'Ford Focus', 'Chevrolet Cruze', 'Renault Logan'];
++// [№31-ГРУЗОВИКИ] марки грузовиков для БД-типа 'Грузовой'
++export const TRUCK_BRANDS = ['ГАЗ Валдай', 'КАМАЗ Компас', 'ГАЗель NEXT', 'МАЗ Middle'];
+ // [ФИКС-DUPLICATED-IMPORTS] имя CAR_COLORS уже экспортирует
+ // utils/simulatorConstants.ts — Nuxt auto-import игнорировал второй экспорт
+ // с WARN «Duplicated imports». Справочник цветов БД переименован.
+-export const FAMILY_CAR_COLORS = ['Черный', 'Белый', 'Серебро', 'Синий', 'Красный'];
++// [№31-ЦВЕТ] палитра расширена: названия входят в VEHICLE_COLOR_NAMES
++// (simulatorConstants.ts) и корректно рендерятся в симуляторе
++export const FAMILY_CAR_COLORS = ['Черный', 'Белый', 'Серебро', 'Синий', 'Красный', 'Зелёный', 'Серый', 'Голубой', 'Коричневый'];
++// [№31-ГРУЗОВИКИ] доля грузовиков среди генерируемых машин — их не должно быть много
++export const TRUCK_TYPE_SHARE = 0.1;
+ 
+ export const BASE_LOCATIONS = ['На территории', 'В городе'];
+ 
+@@ -508,7 +514,9 @@
+ 
+   let vehicle: IVehicleRecord | null = null
+   if (plan.withVehicle) {
+-    const brand = pickItem(CAR_BRANDS, rand)
++    // [№31-ГРУЗОВИКИ] небольшая доля машин — грузовые (везут только водителя)
++    const isTruck = rand() < TRUCK_TYPE_SHARE
++    const brand = isTruck ? pickItem(TRUCK_BRANDS, rand) : pickItem(CAR_BRANDS, rand)
+     vehicle = {
+       plate: generatePlate(rand, region),
+       brand,
+@@ -517,7 +525,7 @@
+       owner_id: id,
+       owner_name: fio,
+       is_primary: true,
+-      type: 'Личный'
++      type: isTruck ? 'Грузовой' : 'Личный'
+     }
+   }
+ 
+
+--- a/app/constants/library.ts
++++ b/app/constants/library.ts
+@@ -91,6 +91,27 @@
+   </svg>`
+ }
+ 
++// [№31-ШЕСТЕРНЯ] приводная шестерня ворот: маленькая, у нижне-левого угла.
++// Вращение (открытие — против часовой, закрытие — по часовой) пишет paint
++// (paintGateGear): угол = прогресс сдвига полотна * 360 * GATE_GEAR_TURNS.
++export const GATE_GEAR_TEETH = 8
++
++export const getGateGearSvg = (): string => {
++  const C = 20 // центр в viewBox 40x40
++  const teeth: string[] = []
++  for (let i = 0; i < GATE_GEAR_TEETH; i++) {
++    const a = (i * 360) / GATE_GEAR_TEETH
++    teeth.push(`<rect x="${C - 2.5}" y="1.5" width="5" height="7" rx="1.5" fill="#6b7280" transform="rotate(${a} ${C} ${C})"/>`)
++  }
++  return `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" class="gate-gear-svg">
++    <g class="gate-gear">${teeth.join('')}
++      <circle cx="${C}" cy="${C}" r="13.5" fill="#4b5563" stroke="#1f2937" stroke-width="1.5"/>
++      <circle cx="${C}" cy="${C}" r="8" fill="#6b7280"/>
++      <circle cx="${C}" cy="${C}" r="3.5" fill="#111827"/>
++    </g>
++  </svg>`
++}
++
+ // === ГЕНЕРАТОРЫ ГЕОМЕТРИЧЕСКИХ ФИГУР ===
+ 
+ type ShapeSettings = {
+
+--- a/app/components/SimulatorWidget.vue
++++ b/app/components/SimulatorWidget.vue
+@@ -24,12 +24,7 @@
+ 
+     .flex.items-center.gap-1
+       //- [Фаза 5] Lucide-кнопки вместо эмодзи; активное состояние — через bg-primary/20
+-      button.btn.btn-xs.btn-ghost.btn-square(
+-        @click="enableVisualRotation = !enableVisualRotation"
+-        :class="enableVisualRotation ? 'text-primary bg-primary/20' : 'text-base-content/40'"
+-        title="Поворот спрайтов"
+-      )
+-        CarFront.w-4.h-4
++      //- [№31-БЕЗ-ПОВОРОТА] кнопка «Поворот спрайтов» и её флаг удалены
+       button.btn.btn-xs.btn-ghost.btn-square(
+         @click="showDebug = !showDebug"
+         :class="showDebug ? 'text-warning bg-warning/20' : 'text-base-content/40'"
+@@ -196,7 +191,7 @@
+         //- монтирующие стили читают RAW-объект (см. getElementStyle), поэтому рендер
+         //- не подписывается на x/y/zIndex — покадровые записи делает paintScene
+         .absolute.cursor-pointer(
+-          :style="getElementStyle(el, enableVisualRotation)"
++          :style="getElementStyle(el)"
+           :ref="n => setAgentNode(el, n)"
+           class="hover:z-50"
+           @click="onElementClick(el)"
+@@ -234,6 +229,15 @@
+             div(v-html="getDynamicSvg(el)")
+           .w-full.h-full(v-else :style="{ backgroundColor: el.asset?.content || '#888' }")
+ 
++      //- [№31-ШЕСТЕРНЯ] приводная шестерня у нижне-левого угла ворот: крутится
++      //- при открытии (против часовой) и закрытии (по часовой); угол пишет paint
++      template(v-for="el in gearGates" :key="'gear_' + el.id")
++        .gate-gear-overlay.absolute.pointer-events-none(
++          :style="gearStyle(el)"
++          :ref="n => setGearNode(el, n)"
++          v-html="gearMarkup"
++        )
++
+       template(v-for="panel in config?.panels" :key="'panel_'+panel.id")
+         .absolute(
+           :style="getPanelStyle(panel)"
+@@ -377,7 +381,8 @@
+ // [PAYROLL] шина событий оплаты и реестр проходов (ground truth)
+ import { publishGateOpened, publishGateNoEntry } from '~/utils/payrollBus'
+ import { markPayrollPass, peekPayrollPass } from '~/utils/payrollPass'
+-import { generateSlidingGateSVG, generateWicketSVG } from '../constants/library'
++// [№31-ШЕСТЕРНЯ] генератор SVG шестерни ворот
++import { generateSlidingGateSVG, generateWicketSVG, getGateGearSvg } from '../constants/library'
+ import { useAudioEngine } from '../composables/useAudioEngine'
+ // [ФИКС-НАСТРОЙКИ] сохранение настроек поповера симулятора между запусками
+ import { loadWidgetSettings, saveWidgetSettings } from '~/utils/widgetSettings'
+@@ -400,12 +405,12 @@
+ // [№14-ПЛАВНОСТЬ-DEV] императивный мост физика -> DOM: покадровые стили пишутся
+ // напрямую (paintScene из gameLoop), Vue перерисовывает только структурные события
+ import {
+-  paintAgent, paintLabel, paintGate, paintCommandLine,
++  paintAgent, paintLabel, paintGate, paintGateGear, paintCommandLine,
+   isAgentPaused, labelTransform, snapshotPrevPositions,
+ } from '~/utils/simulatorPaint'
+ // [Фаза 5] Lucide: хедер и empty state
+ import {
+-  CarFront, Activity, SlidersHorizontal, X, Gauge,
++  Activity, SlidersHorizontal, X, Gauge,
+   MonitorX, PencilRuler, ShieldAlert, Volume2, VolumeX, PersonStanding
+ } from '@lucide/vue'
+ 
+@@ -538,8 +543,8 @@
+ // [№14-ПЛАВНОСТЬ-DEV] монтирующие стили читают СЫРЫЙ объект (toRaw): чтение прокси
+ // в рендере подписывало бы виджет на x/y/zIndex/settings — пересборка каждый кадр.
+ // Реактивными остаются только структурные поля (id, name, occupants, asset).
+-const getElementStyle = (el: any, enableRotation: boolean): CSSProperties =>
+-  _getElementStyle(toRaw(el), enableRotation, lastPaintAlpha) as CSSProperties
++const getElementStyle = (el: any): CSSProperties =>
++  _getElementStyle(toRaw(el), lastPaintAlpha) as CSSProperties
+ const getGateStyle = (el: any): CSSProperties => _getGateStyle(toRaw(el)) as CSSProperties
+ 
+ // [№24-РУЧКА] разблокированная калитка (ручка зелёная/повёрнута) — CSS-класс
+@@ -767,7 +772,7 @@
+ )
+ 
+ const rendering = useSimulatorRendering(containerRef, sceneSize)
+-const { scale, updateScale, enableVisualRotation, initScaling, cleanupScaling } = rendering
++const { scale, updateScale, initScaling, cleanupScaling } = rendering
+ 
+ // [СХЕМА-ТРАЕКТОРИЙ] размер сцены задают настройки конфига — при их смене
+ // пересчитываем масштаб подгонки
+@@ -901,6 +906,28 @@
+   return el.asset?.content || ''
+ }
+ 
++// [№31-ШЕСТЕРНЯ] шестерня ставится на откатные ворота/шлагбаум (не на калитку).
++// Центр — нижне-левый угол полотна (точка привода), размер пропорционален высоте.
++const gearGates = computed(() =>
++  simElements.value.filter((el: any) => {
++    const r = toRaw(el) as any
++    return (r.category === 'gate' || r.category === 'barrier') &&
++      r.asset?.type === 'svg' && r.settings?.gateType !== 'wicket'
++  })
++)
++const GATE_GEAR_Z = 320 // над полотном ворот (300), под людьми базы (400+)
++const gearStyle = (el: any): Record<string, string | number> => {
++  const r = toRaw(el) as any
++  const size = Math.round(Math.min(40, Math.max(18, (r.height || 120) * 0.28)))
++  return {
++    left: `${(r.x || 0) - size / 2}px`,
++    top: `${(r.y || 0) + (r.height || 0) - size / 2}px`,
++    width: `${size}px`,
++    height: `${size}px`,
++    zIndex: GATE_GEAR_Z,
++  }
++}
++
+ // ---------------------------------------------------------------------------
+ // [№14-ПЛАВНОСТЬ-DEV] императивный paint-мост: реестры DOM-узлов + покадровая
+ // запись стилей из gameLoop, минуя ререндер Vue. Шаблон регистрирует узлы (:ref),
+@@ -929,6 +956,12 @@
+ const setGateNode = (el: any, n: any) => {
+   gateNodes.set(String(el.id), (n as HTMLElement) || null)
+ }
++// [№31-ШЕСТЕРНЯ] DOM-узлы шестерён (ключ — id ворот) + их SVG-разметка
++const gearNodes = new Map<string, HTMLElement | null>()
++const gearMarkup = getGateGearSvg()
++const setGearNode = (el: any, n: any) => {
++  gearNodes.set(String(el.id), (n as HTMLElement) || null)
++}
+ const setLineNode = (cmd: any, n: any) => {
+   lineNodes.set(String(cmd.id), (n as SVGLineElement) || null)
+ }
+@@ -949,6 +982,7 @@
+   for (const k of Array.from(agentNodes.keys())) if (!ids.has(k)) agentNodes.delete(k)
+   for (const k of Array.from(labelNodes.keys())) if (!ids.has(k)) labelNodes.delete(k)
+   for (const k of Array.from(gateNodes.keys())) if (!ids.has(k)) gateNodes.delete(k)
++  for (const k of Array.from(gearNodes.keys())) if (!ids.has(k)) gearNodes.delete(k)
+   for (const k of Array.from(lineNodes.keys())) if (!ids.has(k)) lineNodes.delete(k)
+ }
+ watch(() => simElements.value.length, prunePaintMaps)
+@@ -956,17 +990,19 @@
+ // Покадровая запись: агенты (позиция/слой/пауза ног/фаза шага), лейблы,
+ // стрелы ворот, линии команд. Чтение через toRaw — без прокси и без отслеживания.
+ const paintScene = (alpha = 1) => {
+-  const rot = enableVisualRotation.value
++  // [№31-БЕЗ-ПОВОРОТА] флаг enableVisualRotation удалён — агенты не вращаются
+   const els = simElements.value
+   for (let i = 0; i < els.length; i++) {
+     const el = toRaw(els[i]) as any
+     const id = String(el.id)
+     const rec = agentNodes.get(id)
+-    if (rec) paintAgent(rec, el, rot, alpha)
++    if (rec) paintAgent(rec, el, alpha)
+     const ln = labelNodes.get(id)
+     if (ln) paintLabel(ln, el, alpha)
+     const gn = gateNodes.get(id)
+     if (gn) paintGate(gn, el.settings)
++    const gr = gearNodes.get(id)
++    if (gr) paintGateGear(gr, el.settings, el.width)
+   }
+   const cmds = activeCommands.value
+   for (let i = 0; i < cmds.length; i++) {
+@@ -1217,7 +1253,7 @@
+   resetAllAudioTimers()
+   stopAllCarEngines()
+   for (const agent of aiAgents.value) cleanupAgentSounds(agent.id)
+-  agentNodes.clear(); labelNodes.clear(); gateNodes.clear(); lineNodes.clear()
++  agentNodes.clear(); labelNodes.clear(); gateNodes.clear(); gearNodes.clear(); lineNodes.clear()
+   if ((window as any).__cleanupScale) (window as any).__cleanupScale()
+ })
+ </script>
+
+--- a/app/components/database/VehicleFormModal.vue
++++ b/app/components/database/VehicleFormModal.vue
+@@ -61,6 +61,16 @@
+             option(value="Служебный") Служебный
+             option(value="Грузовой") Грузовой
+ 
++      //- [№31-ЦВЕТ] цвет машины: палитра + произвольный (пипетка)
++      .form-control
++        label.label
++          span.label-text.font-semibold Цвет
++        UiColorPicker(
++          v-model="form.color"
++          :palette="VEHICLE_PALETTE"
++          default-color="#1f2937"
++        )
++
+       .grid.grid-cols-2.gap-4
+         .form-control
+           label.label
+@@ -167,6 +177,8 @@
+ import { ref, computed, watch } from 'vue'
+ import { Car, X, Save, Trash2, UserRound } from '@lucide/vue'
+ import { useToast } from '~/composables/useToast'
++// [№31-ЦВЕТ] палитра машин + приведение цвета записи БД к CSS-цвету
++import { VEHICLE_PALETTE, resolveVehicleColor } from '~/utils/simulatorConstants'
+ 
+ // --- Props ---
+ const props = withDefaults(defineProps<{
+@@ -191,10 +203,11 @@
+ const toast = useToast()
+ 
+ // --- State ---
+-const form = ref<{ id?: number | null; plate: string; model: string; type: string; owner_id: number | null; allowed_driver_ids: number[] }>({
++const form = ref<{ id?: number | null; plate: string; model: string; type: string; color: string; owner_id: number | null; allowed_driver_ids: number[] }>({
+   plate: '',
+   model: '',
+   type: 'Личный',
++  color: '',
+   owner_id: null,
+   allowed_driver_ids: []
+ })
+@@ -210,8 +223,11 @@
+   if (val) {
+     form.value = { ...val }
+     if (!form.value.allowed_driver_ids) form.value.allowed_driver_ids = []
++    // [№31-ЦВЕТ] русские названия ('Черный') показываем приведённым hex:
++    // палитра подсвечивает текущий цвет, пипетка получает валидное значение
++    form.value.color = resolveVehicleColor(val.color) ?? ''
+   } else {
+-    form.value = { plate: '', model: '', type: 'Личный', owner_id: null, allowed_driver_ids: [] }
++    form.value = { plate: '', model: '', type: 'Личный', color: '', owner_id: null, allowed_driver_ids: [] }
+   }
+   prevOwnerId = form.value.owner_id
+ }, { immediate: true })
+
+--- a/tests/simulator-paint.test.ts
++++ b/tests/simulator-paint.test.ts
+@@ -6,6 +6,7 @@
+   agentTransform, labelTransform, gateTransform, isAgentPaused,
+   paintAgent, paintLabel, paintGate, paintCommandLine,
+   paintCoord, snapshotPrevPositions, quantizeWalkHold,
++  gateOpenProgress, gateGearRotationDeg, paintGateGear, GATE_GEAR_TURNS,
+ } from '~/utils/simulatorPaint'
+ 
+ const fakeNode = () => {
+@@ -56,18 +57,17 @@
+ describe('agentTransform (семантика getElementStyle)', () => {
+   it('машина: _facingLeft=true -> зеркало scaleX(-1)', () => {
+     const el = { x: 10.5, y: 20, category: 'car', settings: { _facingLeft: true } }
+-    expect(agentTransform(el, false)).toBe('translate3d(10.5px, 20px, 0) scaleX(-1)')
++    expect(agentTransform(el)).toBe('translate3d(10.5px, 20px, 0) scaleX(-1)')
+   })
+   it('машина: без _facingLeft зеркалим по направлению enter', () => {
+     const el = { x: 0, y: 0, category: 'car', direction: 'enter', settings: {} }
+-    expect(agentTransform(el, false)).toContain('scaleX(-1)')
++    expect(agentTransform(el)).toContain('scaleX(-1)')
+     const el2 = { x: 0, y: 0, category: 'car', direction: 'exit', settings: {} }
+-    expect(agentTransform(el2, false)).toContain('scaleX(1)')
++    expect(agentTransform(el2)).toContain('scaleX(1)')
+   })
+-  it('человек: rotate только при enableRotation', () => {
++  it('[№31-БЕЗ-ПОВОРОТА] человек никогда не вращается, даже с заданным rotation', () => {
+     const el = { x: 1, y: 2, category: 'human', rotation: Math.PI, settings: {} }
+-    expect(agentTransform(el, true)).toBe('translate3d(1px, 2px, 0) rotate(180deg)')
+-    expect(agentTransform(el, false)).toBe('translate3d(1px, 2px, 0)')
++    expect(agentTransform(el)).toBe('translate3d(1px, 2px, 0)')
+   })
+ })
+ 
+@@ -96,20 +96,20 @@
+       x: 5, y: 6, category: 'human', zIndex: 180, velocity: 0,
+       settings: { _walkHold: 1.25 },
+     }
+-    paintAgent({ node, avatar }, el as any, false)
++    paintAgent({ node, avatar }, el as any)
+     expect(node.style.transform).toBe('translate3d(5px, 6px, 0)')
+     expect(node.style.zIndex).toBe('180')
+     expect(avatar.classes.has('is-paused')).toBe(true)
+     expect(avatar.style._props['--walk-hold']).toBe('1.25')
+ 
+     el.velocity = 3
+-    paintAgent({ node, avatar }, el as any, false)
++    paintAgent({ node, avatar }, el as any)
+     expect(avatar.classes.has('is-paused')).toBe(false)
+   })
+   it('без аватара (машина) — не падает, is-paused не трогается', () => {
+     const node: any = fakeNode()
+     const el = { x: 1, y: 2, category: 'car', zIndex: 0, settings: { _facingLeft: false } }
+-    paintAgent({ node, avatar: null }, el as any, false)
++    paintAgent({ node, avatar: null }, el as any)
+     expect(node.style.transform).toBe('translate3d(1px, 2px, 0) scaleX(1)')
+     expect(node.style.zIndex).toBe('1')
+   })
+@@ -127,6 +127,14 @@
+     expect(n.style.transform).toBe('translateX(-100px) scaleX(1)')
+     paintGate(null, { _animX: -100 } as any) // не падает
+   })
++  it('paintGateGear: стоячие ворота пишут 0deg, открытие крутит против часовой', () => {
++    const n: any = fakeNode()
++    paintGateGear(n, { _animX: 0 }, 320)
++    expect(n.style.transform).toBe('rotate(0deg)')
++    paintGateGear(n, { _animX: -160 }, 320)
++    expect(n.style.transform).toBe(`rotate(${-360 * GATE_GEAR_TURNS / 2}deg)`)
++    paintGateGear(null, { _animX: -160 }, 320) // не падает
++  })
+   it('линия команды — 4 координаты; без актора — тихий выход', () => {
+     const line: any = fakeNode()
+     paintCommandLine(line, { x: 0, y: 0, width: 40, height: 80 } as any, { x: 100, y: 200, width: 20, height: 10 } as any)
+@@ -175,9 +183,9 @@
+ 
+   it('agentTransform с alpha интерполирует translate3d, зеркало не ломается', () => {
+     const car: any = { x: 10, y: 20, _px: 0, _py: 0, category: 'car', direction: 'enter' }
+-    expect(agentTransform(car, false, 0.5)).toBe('translate3d(5px, 10px, 0) scaleX(-1)')
++    expect(agentTransform(car, 0.5)).toBe('translate3d(5px, 10px, 0) scaleX(-1)')
+     const person: any = { x: 10, y: 20, _px: 0, _py: 0 }
+-    expect(agentTransform(person, false, 0.5)).toBe('translate3d(5px, 10px, 0)')
++    expect(agentTransform(person, 0.5)).toBe('translate3d(5px, 10px, 0)')
+   })
+ 
+   it('labelTransform с alpha следует за агентом', () => {
+@@ -195,12 +203,12 @@
+   it('повтор с тем же состоянием не меняет transform; изменение — пишет', () => {
+     const node: any = fakeNode()
+     const el: any = { x: 5, y: 6, category: 'human', zIndex: 10, velocity: 0 }
+-    paintAgent({ node, avatar: null }, el, false)
++    paintAgent({ node, avatar: null }, el)
+     const t1 = node.style.transform
+-    paintAgent({ node, avatar: null }, el, false)
++    paintAgent({ node, avatar: null }, el)
+     expect(node.style.transform).toBe(t1)
+     el.x = 7
+-    paintAgent({ node, avatar: null }, el, false)
++    paintAgent({ node, avatar: null }, el)
+     expect(node.style.transform).toBe('translate3d(7px, 6px, 0)')
+   })
+ 
+@@ -208,12 +216,12 @@
+     const node: any = fakeNode()
+     const avatar = mkAvatar()
+     const el: any = { x: 0, y: 0, velocity: 0 } // стоит -> пауза
+-    paintAgent({ node, avatar }, el, false)
++    paintAgent({ node, avatar }, el)
+     expect(avatar.classes.has('is-paused')).toBe(true)
+-    paintAgent({ node, avatar }, el, false)
++    paintAgent({ node, avatar }, el)
+     expect(avatar.classes.has('is-paused')).toBe(true)
+     el.velocity = 2
+-    paintAgent({ node, avatar }, el, false)
++    paintAgent({ node, avatar }, el)
+     expect(avatar.classes.has('is-paused')).toBe(false)
+   })
+ 
+@@ -228,7 +236,7 @@
+     const node: any = fakeNode()
+     const avatar = mkAvatar()
+     const el: any = { x: 0, y: 0, velocity: 1, settings: { _walkHold: 1.234 } }
+-    paintAgent({ node, avatar }, el, false)
++    paintAgent({ node, avatar }, el)
+     // 1.234*60 = 74.04 -> 74 -> 74/60
+     expect(avatar.style._props['--walk-hold']).toBe(String(74 / 60))
+   })
+@@ -237,8 +245,45 @@
+     const a: any = fakeNode()
+     const b: any = fakeNode()
+     const el: any = { x: 1, y: 1, category: 'human', velocity: 0 }
+-    paintAgent({ node: a, avatar: null }, el, false)
+-    paintAgent({ node: b, avatar: null }, el, false)
++    paintAgent({ node: a, avatar: null }, el)
++    paintAgent({ node: b, avatar: null }, el)
+     expect(a.style.transform).toBe(b.style.transform)
+   })
+ })
++
++// ---------------------------------------------------------------------------
++// [№31-ШЕСТЕРНЯ] угол приводной шестерни выводится из прогресса сдвига полотна:
++// открытие (_animX 0 -> -width) — против часовой (отрицательный угол), закрытие
++// отматывает угол назад (по часовой). Кламп 0..1 защищает от мусорных _animX.
++// ---------------------------------------------------------------------------
++describe('№31: шестерня ворот (gateOpenProgress / gateGearRotationDeg)', () => {
++  it('прогресс: закрыто 0, открыто 1, середина 0.5; мусор — 0', () => {
++    expect(gateOpenProgress(undefined, 320)).toBe(0)
++    expect(gateOpenProgress({ _animX: 0 }, 320)).toBe(0)
++    expect(gateOpenProgress({ _animX: -320 }, 320)).toBe(1)
++    expect(gateOpenProgress({ _animX: -160 }, 320)).toBe(0.5)
++    expect(gateOpenProgress({ _animX: -1000 }, 320)).toBe(1) // кламп сверху
++    expect(gateOpenProgress({ _animX: 50 }, 320)).toBe(0)    // кламп снизу
++    expect(gateOpenProgress({ _animX: NaN }, 320)).toBe(0)
++    expect(gateOpenProgress({ _animScaleX: 0.5 }, 320)).toBe(0) // масштабный режим не про _animX
++    expect(gateOpenProgress({ _animX: -160 }, 0)).toBe(0)      // вырожденная ширина
++  })
++
++  it('угол: открытие — против часовой (минус), GATE_GEAR_TURNS полных оборотов', () => {
++    expect(gateGearRotationDeg({ _animX: 0 }, 320)).toBe(0)
++    expect(gateGearRotationDeg({ _animX: -320 }, 320)).toBe(-360 * GATE_GEAR_TURNS)
++    expect(gateGearRotationDeg({ _animX: -160 }, 320)).toBe(-360 * GATE_GEAR_TURNS / 2)
++    // закрытие: полотно вернулось на четверть — угол отмотался (по часовой)
++    expect(gateGearRotationDeg({ _animX: -240 }, 320)).toBe(-360 * GATE_GEAR_TURNS * 0.75)
++  })
++
++  it('paintGateGear пишет угол через кэш: повтор без изменения — без записи', () => {
++    const n: any = fakeNode()
++    paintGateGear(n, { _animX: -80 }, 320)
++    const t1 = n.style.transform
++    paintGateGear(n, { _animX: -80 }, 320)
++    expect(n.style.transform).toBe(t1)
++    paintGateGear(n, { _animX: -160 }, 320)
++    expect(n.style.transform).toBe(`rotate(${-360 * GATE_GEAR_TURNS / 2}deg)`)
++  })
++})
+
+--- a/tests/interpolated-styles.test.ts
++++ b/tests/interpolated-styles.test.ts
+@@ -25,27 +25,27 @@
+ describe('getElementStyle — интерполяция (№17)', () => {
+   it('alpha=1 (дефолт) — текущая позиция, прежнее поведение', () => {
+     const core = makeCore()
+-    const st: any = core.getElementStyle(makePerson() as any, false)
++    const st: any = core.getElementStyle(makePerson() as any)
+     expect(st.transform).toBe('translate3d(100px, 200px, 0)')
+   })
+ 
+   it('alpha=0.5 с _px/_py — середина между prev и текущей', () => {
+     const core = makeCore()
+     const el = makePerson({ _px: 90, _py: 180 })
+-    const st: any = core.getElementStyle(el as any, false, 0.5)
++    const st: any = core.getElementStyle(el as any, 0.5)
+     expect(st.transform).toBe('translate3d(95px, 190px, 0)')
+   })
+ 
+   it('alpha=0 — paintCoord возвращает текущую позицию (семантика №15: сброс аккумулятора = снап к физике)', () => {
+     const core = makeCore()
+     const el = makePerson({ _px: 90, _py: 180 })
+-    const st: any = core.getElementStyle(el as any, false, 0)
++    const st: any = core.getElementStyle(el as any, 0)
+     expect(st.transform).toBe('translate3d(100px, 200px, 0)')
+   })
+ 
+   it('без prev-снимка (новый агент) — fallback на текущую позицию', () => {
+     const core = makeCore()
+-    const st: any = core.getElementStyle(makePerson() as any, false, 0.3)
++    const st: any = core.getElementStyle(makePerson() as any, 0.3)
+     expect(st.transform).toBe('translate3d(100px, 200px, 0)')
+   })
+ 
+@@ -55,7 +55,14 @@
+       category: 'car', width: 80, height: 40,
+       settings: { _facingLeft: true }, _px: 90, _py: 180,
+     })
+-    const st: any = core.getElementStyle(el as any, false, 0.5)
++    const st: any = core.getElementStyle(el as any, 0.5)
+     expect(st.transform).toBe('translate3d(95px, 190px, 0) scaleX(-1)')
+   })
++
++  it('[№31-БЕЗ-ПОВОРОТА] rotation агента никогда не отображается', () => {
++    const core = makeCore()
++    const el = makePerson({ rotation: Math.PI })
++    const st: any = core.getElementStyle(el as any)
++    expect(st.transform).not.toContain('rotate')
++  })
+ })
+
+--- a/README.md
++++ b/README.md
+@@ -673,6 +673,50 @@
+   wicket-life. Тесты: 288 passed | 1 skipped (38 файлов), vue-tsc без
+   ошибок, nuxi generate OK.
+ 
++Фикс №31 (шестерня ворот, цвета машин из БД, грузовики, без кнопки
++поворота):
++
++- Шестерня у ворот: маленькая приводная шестерня у нижне-левого угла
++  откатных ворот/шлагбаума. Ворота открываются — крутится ПРОТИВ часовой,
++  закрываются — ПО часовой (направление обратимо само собой: угол
++  выводится из прогресса сдвига полотна, 2 оборота за полный ход).
++  Угол пишет paint-мост покадрово (стоячие ворота не пишутся — кэш).
++  Примечание: в репорте оба направления были «против часовой» — принято,
++  что одно из них опечатка; физически мотор реверсирует. Если нужно
++  одинаковое направление — константа в paintGateGear.
++- Цвета машин из БД: сидер писал цвет русским словом ('Черный'),
++  SVG-генератор вставлял его в fill — невалидный CSS-цвет рендерил ВСЕ
++  машины чёрными. Теперь справочник VEHICLE_COLOR_NAMES приводит
++  названия к цвету; hex/css-имена проходят как есть; машина без цвета
++  получает СТАБИЛЬНЫЙ цвет по госномеру (раньше — случайный при каждом
++  спавне: «перекрашивалась» между поездками). Палитра сидера расширена
++  (9 цветов).
++- Цвет редактируется в диалоге машины (База данных -> ТС): палитра из
++  10 цветов + произвольный через пипетку; старые русские названия
++  показываются приведённым hex.
++- Грузовые автомобили: БД-тип «Грузовой» (уже был в диалоге, теперь
++  используется симулятором). Крупнее легкового (96x52 вместо 80x40),
++  отдельный спрайт (кабина + кузов), везёт ТОЛЬКО водителя — пассажиров
++  не подбирает вовсе. Сидер помечает ~10% сгенерированных машин как
++  грузовые (марки ГАЗ/КАМАЗ/ГАЗель/МАЗ). Чтобы сделать грузовик из
++  существующей машины — смените тип в диалоге редактирования ТС.
++- Убрана кнопка «Поворот спрайтов» из окна симулятора и все её функции:
++  агенты больше никогда не вращаются по курсу (el.rotation остался
++  только внутренней математикой расхождения в физике).
++- Файлы: utils/simulatorPaint.ts (+gateOpenProgress/gateGearRotationDeg/
++  paintGateGear, −enableRotation), utils/simulatorConstants.ts
++  (+VEHICLE_COLOR_NAMES/VEHICLE_PALETTE/resolveVehicleColor/
++  stableVehicleColor, TRUCK_*_SCALE), composables/useSimulatorIntegration.ts
++  (getVehicleColor), utils/simulatorSvg.ts (+getTruckSvg), composables/
++  simulator/useSimulatorSpawn.ts (грузовики), utils/familyMath.ts
++  (TRUCK_TYPE_SHARE/TRUCK_BRANDS, палитра), constants/library.ts
++  (+getGateGearSvg), simulator/useSimulatorCore.ts и
++  useSimulatorRendering.ts (−поворот), SimulatorWidget.vue (−кнопка,
++  +шестерня), database/VehicleFormModal.vue (+цвет), обновлены
++  simulator-paint/interpolated-styles, +tests/no31-gear-colors-trucks.
++  test.ts. Тесты: 300 passed | 1 skipped (39 файлов), vue-tsc без
++  ошибок, nuxi generate OK.
++
+ ### Журнал и смены
+ 
+ `useJournal` — записи въезда/выезда; симулятор сам предлагает запись по
+
+--- a/Логика-движения-агентов.txt
++++ b/Логика-движения-агентов.txt
+@@ -1283,3 +1283,43 @@
+   (robust-ожидания вместо фиксированных окон — проход быстрее без
+   торможений). Итог: 288 passed | 1 skipped (38 файлов), vue-tsc 0,
+   nuxi generate OK.
++
++14.20. Репорт №31 (26.10.26): шестерня ворот, цвета машин из БД,
++  грузовики, кнопка «Поворот спрайтов» удалена.
++
++  [№31-БЕЗ-ПОВОРОТА] Кнопка «Поворот спрайтов» (enableVisualRotation) и
++  все её функции удалены из окна симулятора: агенты больше НИКОГДА не
++  вращаются по курсу (branch rotate в getElementStyle/agentTransform
++  убран; el.rotation в физике остался только для математики расхождения
++  — OBB-корпуса, на отображение не влияет). Люди по-прежнему имеют вид
++  «спереди/со спины» по направлению прохода, машины — профиль с зеркалом
++  по стороне дороги.
++
++  [№31-ШЕСТЕРНЯ] У нижне-левого угла откатных ворот/шлагбаума — приводная
++  шестерня (getGateGearSvg, 8 зубьев). Открытие — ПРОТИВ часовой,
++  закрытие — ПО часовой: угол = прогресс сдвига полотна (_animX/-width,
++  кламп 0..1) * 360 * GATE_GEAR_TURNS (2 оборота), знак минус даёт
++  направление. Пишется paint-мостом покадрово (paintGateGear), стоячие
++  ворота из покадровой записи выпадают (кэш writeOnce). Оверлей
++  pointer-events-none, z=320 (над полотном 300, под людьми базы).
++
++  [№31-ЦВЕТ] Цвет машины из БД теперь рендерится: сидер хранит цвет
++  русским словом ('Черный'...), старый код вставлял его в SVG fill как
++  есть — невалидный CSS-цвет давал ЧЁРНЫЙ кузов у всех машин. Справочник
++  VEHICLE_COLOR_NAMES приводит названия к hex (resolveVehicleColor);
++  hex/css-имена проходят как есть; запись без цвета получает стабильный
++  цвет по госномеру (stableVehicleColor — раньше случайный на каждый
++  спавн: машина «перекрашивалась» между поездками). Цвет редактируется
++  в диалоге ТС (палитра VEHICLE_PALETTE + пипетка).
++
++  [№31-ГРУЗОВИКИ] БД-тип «Грузовой» стал видимым в симуляции: грузовик
++  крупнее легковой (TRUCK_WIDTH_SCALE 1.2 / TRUCK_HEIGHT_SCALE 1.3 =
++  96x52), спрайт getTruckSvg (кабина + кузов), везёт ТОЛЬКО водителя —
++  пассажиры не подбираются вовсе (spawnEntity). Сидер: ~10% машин
++  (TRUCK_TYPE_SHARE) — грузовые, марки TRUCK_BRANDS. Существующие
++  записи переводятся в грузовики сменой типа в диалоге ТС.
++
++  Тесты: +tests/no31-gear-colors-trucks.test.ts (6), обновлены
++  simulator-paint (новые сигнатуры без enableRotation + блок шестерни),
++  interpolated-styles (+тест «rotation не отображается»). Итог:
++  300 passed | 1 skipped (39 файлов), vue-tsc 0, nuxi generate OK.
+
+--- /dev/null
++++ b/tests/no31-gear-colors-trucks.test.ts
+@@ -0,0 +1,106 @@
++// tests/no31-gear-colors-trucks.test.ts
++// [№31] Шестерня ворот, цвета машин из БД, грузовые автомобили:
++//  - getGateGearSvg: разметка шестерни с классом gate-gear (paint крутит её);
++//  - resolveVehicleColor: русские названия сидера -> CSS-цвет (раньше
++//    невалидный fill рендерил все машины чёрными);
++//  - stableVehicleColor: машины без цвета не «перекрашиваются» между поездками;
++//  - getTruckSvg: отдельный спрайт грузового автомобиля;
++//  - personFromPlan: доля грузовиков ~10%, марки грузовиков, цвета из справочника.
++
++import { describe, it, expect } from 'vitest'
++import { getGateGearSvg, GATE_GEAR_TEETH } from '~/constants/library'
++import {
++  VEHICLE_COLOR_NAMES,
++  VEHICLE_PALETTE,
++  resolveVehicleColor,
++  stableVehicleColor,
++  TRUCK_WIDTH_SCALE,
++  TRUCK_HEIGHT_SCALE,
++} from '~/utils/simulatorConstants'
++import { getTruckSvg } from '~/utils/simulatorSvg'
++import {
++  FAMILY_CAR_COLORS,
++  TRUCK_BRANDS,
++  TRUCK_TYPE_SHARE,
++  personFromPlan,
++  type IFamilyMemberPlan,
++} from '~/utils/familyMath'
++
++describe('№31: шестерня ворот', () => {
++  it('SVG шестерни содержит класс gate-gear и 8 зубьев', () => {
++    const svg = getGateGearSvg()
++    expect(svg).toContain('<svg')
++    expect(svg).toContain('gate-gear')
++    expect(svg).toContain(`rotate(${(360 / GATE_GEAR_TEETH) * (GATE_GEAR_TEETH - 1)}`)
++    const teeth = (svg.match(/class="gate-gear"/g) || []).length
++    expect(teeth).toBe(1)
++    expect(GATE_GEAR_TEETH).toBe(8)
++  })
++})
++
++describe('№31: цвета машин из БД', () => {
++  it('справочник покрывает палитру сидера FAMILY_CAR_COLORS', () => {
++    for (const name of FAMILY_CAR_COLORS) {
++      expect(VEHICLE_COLOR_NAMES[name], `нет цвета «${name}»`).toBeTruthy()
++      // каждое имя сидера приводится к валидному CSS hex
++      expect(resolveVehicleColor(name)).toMatch(/^#[0-9a-f]{6}$/i)
++    }
++  })
++
++  it('resolveVehicleColor: hex и css-имена проходят, мусор -> null', () => {
++    expect(resolveVehicleColor('Черный')).toBe('#1f2937')
++    expect(resolveVehicleColor('Чёрный')).toBe('#1f2937')
++    expect(resolveVehicleColor('#ff8800')).toBe('#ff8800')
++    expect(resolveVehicleColor('#f80')).toBe('#f80')
++    expect(resolveVehicleColor('forestgreen')).toBe('forestgreen')
++    expect(resolveVehicleColor('неизвестный-цвет')).toBeNull()
++    expect(resolveVehicleColor('')).toBeNull()
++    expect(resolveVehicleColor(null)).toBeNull()
++    expect(resolveVehicleColor(undefined)).toBeNull()
++  })
++
++  it('stableVehicleColor: детерминирован по номеру и из палитры', () => {
++    const a = stableVehicleColor('А 123 ВС 77')
++    const b = stableVehicleColor('А 123 ВС 77')
++    expect(a).toBe(b)
++    expect(VEHICLE_PALETTE).toContain(a)
++    // пустой номер — тоже валидный цвет
++    expect(VEHICLE_PALETTE).toContain(stableVehicleColor(''))
++  })
++})
++
++describe('№31: грузовики', () => {
++  it('масштабы дают грузовик крупнее легковой (80x40)', () => {
++    const w = Math.round(80 * TRUCK_WIDTH_SCALE)
++    const h = Math.round(40 * TRUCK_HEIGHT_SCALE)
++    expect(w).toBeGreaterThan(80)
++    expect(h).toBeGreaterThan(40)
++    expect(w).toBe(96)
++    expect(h).toBe(52)
++  })
++
++  it('getTruckSvg: viewBox и подстановка цвета; доля и марки объявлены', () => {
++    const svg = getTruckSvg('#dc2626')
++    expect(svg).toContain('viewBox="0 0 120 65"')
++    expect(svg).toContain('#dc2626')
++    expect(svg).toContain('#87CEEB') // остекление кабины
++    expect(TRUCK_TYPE_SHARE).toBeLessThan(0.25) // «их не должно быть много»
++    expect(TRUCK_TYPE_SHARE).toBeGreaterThan(0)
++    expect(TRUCK_BRANDS.length).toBeGreaterThan(0)
++  })
++
++  it('personFromPlan: rand<доли -> Грузовой с грузовой маркой, иначе Личный', () => {
++    const plan: IFamilyMemberPlan = {
++      lastName: 'Иванов', firstName: 'Иван', patronymic: 'Иванович',
++      gender: 'male', role: 'Отец', ageGroup: 'adult', age: 40,
++      birthDate: '1985-01-01', address: 'ул. Ленина 1', location: 'В городе',
++      status: '', withVehicle: true,
++    } as any
++    const truck = personFromPlan(plan, 1, '777', () => 0.05).vehicle!
++    expect(truck.type).toBe('Грузовой')
++    expect(TRUCK_BRANDS).toContain(truck.brand)
++    const car = personFromPlan(plan, 2, '777', () => 0.5).vehicle!
++    expect(car.type).toBe('Личный')
++    expect(TRUCK_BRANDS).not.toContain(car.brand)
++  })
++})

@@ -32,10 +32,16 @@ export const FEMALE_NAMES = ['Анастасия', 'Мария', 'Анна', 'В
 export const BASE_LAST_NAMES = ['Иванов', 'Петров', 'Сидоров', 'Козлов', 'Новиков', 'Морозов', 'Волков', 'Соколов', 'Лебедев', 'Кузнецов', 'Попов', 'Смирнов', 'Орлов', 'Крылов'];
 export const STREETS = ['Ленина', 'Советская', 'Мира', 'Садовая', 'Пушкина', 'Гагарина', 'Кирова', 'Заводская'];
 export const CAR_BRANDS = ['Toyota Camry', 'BMW X5', 'Kia Rio', 'Hyundai Solaris', 'VAZ 2110', 'Ford Focus', 'Chevrolet Cruze', 'Renault Logan'];
+// [№31-ГРУЗОВИКИ] марки грузовиков для БД-типа 'Грузовой'
+export const TRUCK_BRANDS = ['ГАЗ Валдай', 'КАМАЗ Компас', 'ГАЗель NEXT', 'МАЗ Middle'];
 // [ФИКС-DUPLICATED-IMPORTS] имя CAR_COLORS уже экспортирует
 // utils/simulatorConstants.ts — Nuxt auto-import игнорировал второй экспорт
 // с WARN «Duplicated imports». Справочник цветов БД переименован.
-export const FAMILY_CAR_COLORS = ['Черный', 'Белый', 'Серебро', 'Синий', 'Красный'];
+// [№31-ЦВЕТ] палитра расширена: названия входят в VEHICLE_COLOR_NAMES
+// (simulatorConstants.ts) и корректно рендерятся в симуляторе
+export const FAMILY_CAR_COLORS = ['Черный', 'Белый', 'Серебро', 'Синий', 'Красный', 'Зелёный', 'Серый', 'Голубой', 'Коричневый'];
+// [№31-ГРУЗОВИКИ] доля грузовиков среди генерируемых машин — их не должно быть много
+export const TRUCK_TYPE_SHARE = 0.1;
 
 export const BASE_LOCATIONS = ['На территории', 'В городе'];
 
@@ -508,7 +514,9 @@ export const personFromPlan = (
 
   let vehicle: IVehicleRecord | null = null
   if (plan.withVehicle) {
-    const brand = pickItem(CAR_BRANDS, rand)
+    // [№31-ГРУЗОВИКИ] небольшая доля машин — грузовые (везут только водителя)
+    const isTruck = rand() < TRUCK_TYPE_SHARE
+    const brand = isTruck ? pickItem(TRUCK_BRANDS, rand) : pickItem(CAR_BRANDS, rand)
     vehicle = {
       plate: generatePlate(rand, region),
       brand,
@@ -517,7 +525,7 @@ export const personFromPlan = (
       owner_id: id,
       owner_name: fio,
       is_primary: true,
-      type: 'Личный'
+      type: isTruck ? 'Грузовой' : 'Личный'
     }
   }
 

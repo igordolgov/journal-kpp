@@ -10,10 +10,13 @@ import {
   EXIT_VERTICAL_DISTANCE,
   PERSON_STOP_OFFSET,
   CAR_STOP_OFFSET,
+  TRUCK_WIDTH_SCALE,
+  TRUCK_HEIGHT_SCALE,
 } from '~/utils/simulatorConstants'
 // [СХЕМА-ТРАЕКТОРИЙ] единый вывод точек спавна/остановки/прохода/ухода из геометрии ворот
 import { trafficPointsFor, FOOT_PAD_PERSON, type TrafficPoints } from '~/utils/simulatorTraffic'
-import { getCarSvg, generateRealPersonSvg } from '~/utils/simulatorSvg'
+// [№31-ГРУЗОВИКИ] getTruckSvg — отдельный спрайт грузового автомобиля
+import { getCarSvg, getTruckSvg, generateRealPersonSvg } from '~/utils/simulatorSvg'
 // [П7] индивидуальный темп людей 0.85..1.15 (у группы — общий)
 import { randomPersonPace, initialSpawnDelay } from '~/utils/simTuning'
 import type { SceneElement, Direction, TravelMode, TrafficConfig, AiAgent, PersonInfo } from '~/types/simulator'
@@ -414,6 +417,10 @@ export function useSimulatorSpawn(
     return true
   }
 
+  // [№31-ГРУЗОВИКИ] грузовой автомобиль — БД-тип 'Грузовой'
+  const isTruckVehicle = (vehicle: any): boolean =>
+    String(vehicle?.type || '').trim() === 'Грузовой'
+
   // ----- Автомобиль с пассажирами -----
   const createCarWithOccupants = (
     driverPerson: any,
@@ -430,8 +437,16 @@ export function useSimulatorSpawn(
     }
     const color = getVehicleColor(car)
     const plate = car.plate
-    const width = simOpts.value.carWidth
-    const height = simOpts.value.carHeight
+    // [№31-ГРУЗОВИКИ] грузовик крупнее легковой и везёт ТОЛЬКО водителя
+    // (страхуемся, даже если пассажиры каким-то образом переданы)
+    const isTruck = isTruckVehicle(car)
+    const occupantsFinal = isTruck ? [] : occupants
+    const width = isTruck
+      ? Math.round(simOpts.value.carWidth * TRUCK_WIDTH_SCALE)
+      : simOpts.value.carWidth
+    const height = isTruck
+      ? Math.round(simOpts.value.carHeight * TRUCK_HEIGHT_SCALE)
+      : simOpts.value.carHeight
     const speed = cfg.carSpeed
     const stopOffset = CAR_STOP_OFFSET
     const fixedX = fixedXCar.value
@@ -474,14 +489,18 @@ export function useSimulatorSpawn(
       // [БАГ-РЕПОРТ-4] начальная ориентация по стороне появления/уезда, до
       // первого тика физики: вход справа едет влево (зеркало), слева — вправо;
       // выход уезжает в выбранную сторону. Дальше флаг ведёт физика.
-      settings: { _facingLeft: direction === 'enter' ? side === 'right' : side === 'left' },
-      asset: { type: 'car', plate, color, svg: getCarSvg(color) }
+      settings: {
+        _facingLeft: direction === 'enter' ? side === 'right' : side === 'left',
+        // [№31-ГРУЗОВИКИ] отладочная метка типа кузова
+        _isTruck: isTruck,
+      },
+      asset: { type: 'car', plate, color, svg: isTruck ? getTruckSvg(color) : getCarSvg(color) }
     }
 
     simElements.value.push(carElement)
 
     const occupantsInfo: PersonInfo[] = [createPersonInfo(driverPerson)]
-    for (const occ of occupants) occupantsInfo.push(createPersonInfo(occ))
+    for (const occ of occupantsFinal) occupantsInfo.push(createPersonInfo(occ))
 
     const carAgent: AiAgent = {
       // [ИСПРАВЛЕНО] SceneElement.id: string | number -> AiAgent.id: string
@@ -509,7 +528,7 @@ export function useSimulatorSpawn(
     audio.createPool(`car-${carAgent.id}`, 'engine', 2)
 
     usedPeopleIds.value.add(driverPerson.id)
-    for (const occ of occupants) usedPeopleIds.value.add(occ.id)
+    for (const occ of occupantsFinal) usedPeopleIds.value.add(occ.id)
     // [ФИКС-ЛИМИТ] машина = один слот лимита (пассажиры внутри, не отдельные агенты)
     lastSpawnAdded = 1
     return true
@@ -574,7 +593,11 @@ export function useSimulatorSpawn(
     } else {
       // [ФИКС-флуд-4] пассажиры реже и мельче: машина с 3-4 пассажирами
       // = 4-5 журнальных записей разом, при ручном журнале не успевать
-      const hasPassengers = Math.random() < 0.3
+      // [№31-ГРУЗОВИКИ] в грузовую машину садится только водитель:
+      // пассажиров не подбираем вовсе («их не должно быть много»)
+      const vehicle = integration.getAvailableVehicleForPerson(person.id, direction)
+      const isTruck = isTruckVehicle(vehicle)
+      const hasPassengers = !isTruck && Math.random() < 0.3
       let passengers: any[] = []
       if (hasPassengers) {
         const count = Math.floor(Math.random() * 2) + 1
