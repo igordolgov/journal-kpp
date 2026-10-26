@@ -8,7 +8,7 @@
     description="Жители, гости и их транспорт. Здесь заводятся карточки, из которых работает журнал и симулятор."
   )
     template(#actions)
-      button.btn.btn-primary(@click="openCreatePerson") + Человек
+      button.btn.btn-primary.mr-3.mt-3(@click="openCreatePerson") + Человек
 
   //- Панель управления: поиск
   .flex.flex-none.gap-2.pr-3
