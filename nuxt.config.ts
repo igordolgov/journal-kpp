@@ -28,8 +28,13 @@ export default defineNuxtConfig({
   },
 
   app: {
-    // [ELECTRON] относительный base — ассеты резолвятся рядом с index.html (file://)
-    baseURL: './',
+    // [ELECTRON] base "/" — ОБЯЗАТЕЛЕН: при относительном "./" nitro-server 4.6.3+
+    // не находит обработчик для prerender-запроса "/" (404), и в index.html /
+    // 200.html / 404.html записывается 16-байтовая заглушка "Redirecting..." —
+    // exe показывает только её (поставка №38). file://-совместимость это не ломает:
+    // чанки ссылаются друг на друга относительно, а абсолютные ссылки в HTML
+    // переводит в относительные scripts/fix-electron-paths.mjs после generate.
+    baseURL: '/',
 
     head: {
       charset: 'utf-8',

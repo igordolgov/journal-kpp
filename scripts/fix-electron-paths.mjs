@@ -1,11 +1,20 @@
-// scripts/fix-electron-paths.mjs
-// Назначение: после nuxt generate заменяет в .output/public/*.html абсолютные
-// пути на относительные. exe грузит index.html через file://, где абсолютный
-// путь "/_nuxt/..." указывает в корень ДИСКА и даёт белый экран.
-// Почему скрипт, если baseURL './' уже относительный: двойная страховка —
-// даже если base слетит в конфиге или Nuxt сгенерирует абсолютные ссылки в
-// modulepreload/manifest, сборка останется работоспособной. Если пути уже
-// относительные, замены равны нулю и файлы не перезаписываются.
+// scripts/fix-electron-paths.mjs  (v2 — поставка №38)
+// Назначение: подготовка .output/public к загрузке в Electron через file://.
+//
+// Фазы:
+//  1. REWRITE — абсолютные ссылки "/_nuxt/...", "/favicon.*" в *.html заменяет
+//     на относительные "./_nuxt/...", "./favicon.*" (как и раньше).
+//  2. STUB-DETECT — если index.html/200.html/404.html это заглушка
+//     "Redirecting..." (регрессия nitro-server 4.6.3+ при app.baseURL "./"),
+//     вместо падения ВОССТАНАВЛИВАЕТ полноценный SPA-шелл (фаза 3).
+//  3. REPAIR — собирает шелл: entry-чанк ищется по сигнатурам сборки
+//     (__vite__mapDeps + NUXT_DATA — уникальны, проверено на 4.6.2 и 4.6.3),
+//     entry-CSS — по имени entry.*.css, buildId — из _nuxt/builds/latest.json.
+//     Ссылки сразу пишутся относительными — file:// работает.
+//  4. VERIFY — каждая локальная ссылка (href/src/importmap) финального
+//     index.html обязана существовать на диске; иначе exit 1 (в exe уйдёт
+//     нерабочая сборка — лучше упасть при сборке).
+//
 // Идемпотентен: можно запускать многократно.
 // Запуск: node scripts/fix-electron-paths.mjs (из корня проекта)
 
@@ -13,6 +22,7 @@ import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from '
 import { join } from 'node:path'
 
 const PUBLIC_DIR = join(process.cwd(), '.output', 'public')
+const NUXT_DIR = join(PUBLIC_DIR, '_nuxt')
 
 // Кавычки в шаблонах обязательны: меняем только целиком закавыченные значения
 // атрибутов и строк, чтобы не задеть чужие пути вида "/_nuxt-extra/..."
@@ -22,27 +32,129 @@ const REPLACEMENTS = [
   ['"/favicon.ico"', '"./favicon.ico"'],
 ]
 
+// Заглушка: нет полноценного SPA-шелла (см. отчёт №37/№38)
+const isStub = (html) =>
+  html.includes('Redirecting...') || html.length < 200 ||
+  !html.includes('<title') || !html.includes('"#entry"')
+
 function* walk(dir) {
   for (const name of readdirSync(dir)) {
     const full = join(dir, name)
-    if (statSync(full).isDirectory()) {
-      yield* walk(full)
-    } else if (name.endsWith('.html')) {
-      yield full
-    }
+    if (statSync(full).isDirectory()) yield* walk(full)
+    else if (name.endsWith('.html')) yield full
   }
 }
 
+// --- поиск entry-чанка: сигнатуры сборки + граф импортов -------------------
+function findEntryChunk() {
+  if (!existsSync(NUXT_DIR)) return { error: 'нет каталога ' + NUXT_DIR }
+  const js = readdirSync(NUXT_DIR).filter((n) => n.endsWith('.js'))
+  if (js.length === 0) return { error: 'в _nuxt нет *.js — фронт не собран' }
+  const importedBy = new Map()
+  const REF = /(?:from|import)\s*"?\.\/([A-Za-z0-9_-]+\.js)"?/g
+  for (const name of js) {
+    const src = readFileSync(join(NUXT_DIR, name), 'utf8')
+    let m
+    REF.lastIndex = 0
+    while ((m = REF.exec(src)) !== null) {
+      if (!importedBy.has(m[1])) importedBy.set(m[1], new Set())
+      importedBy.get(m[1]).add(name)
+    }
+  }
+  const candidates = js.filter((n) => {
+    const src = readFileSync(join(NUXT_DIR, n), 'utf8')
+    return src.includes('__vite__mapDeps') &&
+      (src.includes('data-nuxt-data') || src.includes('NUXT_DATA'))
+  })
+  if (candidates.length === 0) {
+    return { error: 'не найден entry-чанк по сигнатурам (__vite__mapDeps + NUXT_DATA)' }
+  }
+  if (candidates.length > 1) {
+    const roots = candidates.filter((n) => !importedBy.has(n))
+    if (roots.length !== 1) {
+      return { error: 'неоднозначный entry-чанк: ' + candidates.join(', ') }
+    }
+    return { entry: roots[0], deps: staticImportsOf(roots[0]) }
+  }
+  return { entry: candidates[0], deps: staticImportsOf(candidates[0]) }
+}
+
+function staticImportsOf(entryName) {
+  const src = readFileSync(join(NUXT_DIR, entryName), 'utf8')
+  const out = new Set()
+  const REF = /(?:from|import)\s*"\.\/([A-Za-z0-9_-]+\.js)"/g
+  let m
+  while ((m = REF.exec(src)) !== null) out.add(m[1])
+  return [...out].filter((n) => existsSync(join(NUXT_DIR, n))).slice(0, 40)
+}
+
+function findEntryCss() {
+  const css = readdirSync(NUXT_DIR).filter((n) => /^entry\..+\.css$/.test(n))
+  return css.length === 1 ? css[0] : null
+}
+
+function readBuildId() {
+  try {
+    const latest = JSON.parse(readFileSync(join(NUXT_DIR, 'builds', 'latest.json'), 'utf8'))
+    if (typeof latest.id === 'string' && latest.id) return latest.id
+  } catch { /* нет latest.json — не критично */ }
+  return null
+}
+
+// --- сборка SPA-шелла (зеркало рендера Nuxt для ssr:false, пути относительные)
+function buildShell(entry, deps, entryCss, buildId) {
+  const pre = deps
+    .map((d) => `<link rel="modulepreload" as="script" crossorigin href="./_nuxt/${d}">`)
+    .join('')
+  const ts = Date.now()
+  const bid = buildId ?? '00000000-0000-0000-0000-000000000000'
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Журнал КПП</title><script type="importmap">{"imports":{"#entry":"./_nuxt/${entry}"}}</script>` +
+    (entryCss ? `<link rel="stylesheet" href="./_nuxt/${entryCss}" crossorigin>` : '') +
+    `<link rel="modulepreload" as="script" crossorigin href="./_nuxt/${entry}">${pre}` +
+    `<script type="module" src="./_nuxt/${entry}" crossorigin></script>` +
+    `<meta name="description" content="Система контроля пропускного пункта"><meta name="robots" content="noindex, nofollow"><link rel="icon" type="image/svg+xml" href="./favicon.svg"><link rel="icon" type="image/x-icon" href="./favicon.ico"></head>` +
+    `<body><div id="__nuxt"></div><div id="teleports"></div><script>window.__NUXT__={};window.__NUXT__.config={public:{},app:{baseURL:"/",buildId:"${bid}",buildAssetsDir:"/_nuxt/",cdnURL:""}}</script><script type="application/json" data-nuxt-data="nuxt-app" data-ssr="false" id="__NUXT_DATA__">[{"prerenderedAt":1,"serverRendered":2},${ts},false]</script></body></html>`
+}
+
+// --- VERIFY: локальные ссылки index.html обязаны существовать ---------------
+// Строго — функциональные (js/css/importmap): их отсутствие ломает приложение.
+// favicon.* — только предупреждение: их отсутствие в .output/public наблюдалось
+// и в рабочих сборках ранее (безвредный 404, на file:// не мешает запуску).
+function verifyIndex() {
+  const html = readFileSync(join(PUBLIC_DIR, 'index.html'), 'utf8')
+  const problems = []
+  const warnings = []
+  const REF = /(?:href|src)="([^"]+)"/g
+  let m
+  while ((m = REF.exec(html)) !== null) {
+    const ref = m[1]
+    if (!ref.startsWith('./') && !ref.startsWith('/')) continue // внешние/якоря
+    const rel = ref.replace(/^\.\//, '').replace(/^\//, '').split('?')[0].split('#')[0]
+    if (!rel || existsSync(join(PUBLIC_DIR, rel))) continue
+    if (/^favicon\./.test(rel)) warnings.push(ref)
+    else problems.push(ref)
+  }
+  const im = html.match(/"#entry":"([^"]+)"/)
+  if (!im) problems.push('нет importmap #entry')
+  else if (!existsSync(join(PUBLIC_DIR, im[1].replace(/^\.\//, '')))) {
+    problems.push('importmap #entry → не существует: ' + im[1])
+  }
+  return { problems, warnings }
+}
+
+// ============================ main ==========================================
 if (!existsSync(join(PUBLIC_DIR, 'index.html'))) {
   console.error(
     '[fix-electron-paths] Не найден ' + join(PUBLIC_DIR, 'index.html') +
-    ' — сначала выполните сборку фронта: pnpm build',
+    ' — сначала выполните сборку фронта: pnpm generate',
   )
   process.exit(1)
 }
 
+// Фаза 1: REWRITE
 let checked = 0
 let changed = 0
+const stubs = []
 for (const file of walk(PUBLIC_DIR)) {
   checked++
   const original = readFileSync(file, 'utf8')
@@ -55,13 +167,50 @@ for (const file of walk(PUBLIC_DIR)) {
       applied.push(from + ' → ' + to + ' (' + count + ')')
     }
   }
+  if (isStub(text)) stubs.push(file)
   if (text !== original) {
     writeFileSync(file, text, 'utf8')
     changed++
     console.log('[fix-electron-paths] ' + file + ': ' + applied.join(', '))
   }
 }
-console.log(
-  '[fix-electron-paths] Проверено HTML: ' + checked +
-  ', изменено: ' + changed + '. Пути относительные — file:// не сломается.',
-)
+console.log('[fix-electron-paths] Проверено HTML: ' + checked + ', изменено: ' + changed + '.')
+
+// Фазы 2-3: REPAIR заглушек
+if (stubs.length > 0) {
+  console.log('[fix-electron-paths] ВНИМАНИЕ: заглушка вместо SPA-шелла: ' +
+    stubs.map((f) => f.replace(PUBLIC_DIR + '/', '')).join(', '))
+  console.log('[fix-electron-paths] Причина: nitro-server 4.6.3+ при app.baseURL "./" — ' +
+    'см. ОТЧЁТ-№38. Пытаюсь восстановить шелл из собранных чанков…')
+  const found = findEntryChunk()
+  if (found.error) {
+    console.error('[fix-electron-paths] НЕ УДАЛОСЬ восстановить index.html: ' + found.error)
+    console.error('[fix-electron-paths] Лечение: в nuxt.config.ts поставьте app.baseURL: \'/\' ' +
+      '(см. поставку №38) и пересоберите: pnpm generate.')
+    process.exit(1)
+  }
+  const entryCss = findEntryCss()
+  if (!entryCss) {
+    console.error('[fix-electron-paths] НЕ УДАЛОСЬ найти entry.*.css в _nuxt — стили не подключить.')
+    process.exit(1)
+  }
+  const shell = buildShell(found.entry, found.deps, entryCss, readBuildId())
+  for (const file of stubs) {
+    writeFileSync(file, shell, 'utf8')
+    console.log('[fix-electron-paths] Восстановлен SPA-шелл: ' + file.replace(PUBLIC_DIR + '/', '') +
+      ' (entry: ' + found.entry + ', css: ' + entryCss + ', модулей modulepreload: ' + found.deps.length + ')')
+  }
+}
+
+// Фаза 4: VERIFY
+const { problems, warnings } = verifyIndex()
+for (const w of warnings) {
+  console.warn('[fix-electron-paths] Предупреждение (не критично): в .output/public нет ' + w)
+}
+if (problems.length > 0) {
+  console.error('[fix-electron-paths] ВЕРИФИКАЦИЯ ПРОВАЛЕНА — битые ссылки в index.html:')
+  for (const p of problems) console.error('  - ' + p)
+  process.exit(1)
+}
+console.log('[fix-electron-paths] Верификация: все ссылки index.html существуют на диске. ' +
+  'Пути относительные — file:// не сломается.')
