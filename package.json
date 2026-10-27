@@ -1,6 +1,6 @@
 {
   "name": "journal-kpp",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Журнал КПП",
   "author": "Igor",
   "main": "main.cjs",
