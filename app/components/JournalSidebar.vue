@@ -22,7 +22,7 @@
         ref="globalSearchInput"
         v-model="globalSearch"
         placeholder="ФИО или гос. номер..."
-        class="bg-base-100 pl-9 input-bordered input-sm"
+        class="bg-base-100 pl-9 input-bordered input-sm max-lg:h-11"
         :class="dropdownResults.length > 0 && isSearchFocused ? 'rounded-b-none border-primary border-b-0 shadow-none z-40 relative' : ''"
         @focus="onSearchFocus"
         @blur="onSearchBlur"
@@ -436,7 +436,7 @@
               template(v-if="selectedVehicle")
                 button.btn.btn-block.btn-sm.text-base.font-normal.rounded-xl.shadow-lg(
                   :disabled="!isTripValid"
-                  class="bg-green-700 disabled:bg-gray-400 text-white"
+                  class="bg-green-700 disabled:bg-gray-400 text-white max-lg:h-12"
                   @click="handleGroupTrip"
                 )
                   Car.w-4.h-4.mr-1
@@ -447,6 +447,7 @@
                 button.btn.btn-block.btn-sm.text-base.rounded-xl.shadow-lg(
                   :class="(isResidentInside || isGuestInside) ? 'btn-success' : 'btn-info'"
                   :disabled="!isTripValid"
+                  class="max-lg:h-12"
                   @click="handleWalkingTrip"
                 )
                   Footprints.w-4.h-4.mr-1

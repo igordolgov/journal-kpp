@@ -4,13 +4,32 @@
 <template lang="pug">
 //- Основной контейнер страницы.
 .dashboard-page.flex.h-full.min-h-0.gap-4(
-  class="lg:flex-row"
+  class="flex-col lg:flex-row"
   :style="isSimulatorOpen ? { paddingBottom: simulatorDockStyle.height } : {}"
 )
 
+  //- [№39-МОБИЛЬНОЕ] переключатель панелей — только на экранах <lg
+  .flex.flex-none.gap-1.p-1.rounded-box.bg-base-200.shadow-sm(
+    class="lg:hidden"
+  )
+    button.btn.btn-sm.flex-1.gap-2(
+      :class="mobilePane === 'compose' ? 'btn-primary' : 'btn-ghost'"
+      @click="mobilePane = 'compose'"
+    )
+      ClipboardList.h-4.w-4
+      | Оформление
+    button.btn.btn-sm.flex-1.gap-2(
+      :class="mobilePane === 'log' ? 'btn-primary' : 'btn-ghost'"
+      @click="mobilePane = 'log'"
+    )
+      BookOpen.h-4.w-4
+      | Журнал
+
   //- 1. БОКОВАЯ ПАНЕЛЬ
+  //- [№39] на телефоне — вкладка «Оформление»: высота ограничена, скроллится
   ClientOnly
-    JournalSidebar.h-full.min-h-0(
+    JournalSidebar.min-h-0(
+      :class="mobilePane === 'compose' ? 'max-lg:max-h-[60dvh] max-lg:overflow-y-auto max-lg:flex-none' : 'max-lg:hidden'"
       v-model:selectedItem="selectedItem"
       :people-list="peopleList"
       :vehicles-list="vehiclesList"
@@ -20,7 +39,10 @@
     )
 
   //- 2. ОСНОВНАЯ ОБЛАСТЬ
-  .flex-1.min-h-0.flex.flex-col
+  //- [№39] на телефоне — вкладка «Журнал»
+  .flex-1.min-h-0.flex.flex-col(
+    :class="mobilePane === 'log' ? '' : 'max-lg:hidden'"
+  )
     .card.flex-1.min-h-0.flex.flex-col.overflow-hidden.shadow-xl(
       class="bg-base-100"
     )
@@ -34,7 +56,7 @@
             div
               h3.card-title Журнал событий
               p.mt-1.text-xs(class="text-base-content/50")
-                | Все въезды и выезды. Оформите поездку слева: выберите человека или автомобиль.
+                | Все въезды и выезды. Оформите поездку в конструкторе: выберите человека или автомобиль.
             .tabs.tabs-boxed.p-1(
               class="bg-base-200"
             )
@@ -462,7 +484,7 @@ import { onMounted, ref, computed, useState } from '#imports'
 // [UI/UX] Lucide: модалки журнала
 import {
   X, ArrowLeftRight, Phone, Car, Footprints, Check,
-  Trash2, Save, LogOut, LogIn, Pencil
+  Trash2, Save, LogOut, LogIn, Pencil, ClipboardList, BookOpen
 } from '@lucide/vue'
 
 // Компоненты
@@ -503,6 +525,8 @@ const visibleColumns = computed(() => getVisibleColumns())
 // --- Связь с Layout (Симулятор) ---
 const isSimulatorOpen = useState<boolean>('simulator-is-open')
 const simulatorDockStyle = ref({ height: '0px' }) // Заглушка для стиля докера
+// [№39-МОБИЛЬНОЕ] активная панель на телефоне: конструктор поездки или журнал
+const mobilePane = ref<'compose' | 'log'>('compose')
 
 // --- Загрузка данных ---
 onMounted(async () => {

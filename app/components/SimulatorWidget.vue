@@ -15,8 +15,9 @@
         span.relative.inline-flex.rounded-full.h-2.w-2.bg-success
       span.text-xs.font-bold.text-success СИМУЛЯЦИЯ
 
+    //- [№39] на узких экранах текст прячем: освобождает место кнопкам хедера
     .text-xxs(
-      class="text-base-content/50"
+      class="text-base-content/50 max-lg:hidden"
     )
       | Режим: {{ isRunning ? 'Запущен' : 'Пауза' }}
       span.ml-2.text-info(v-if="aiAgents.length > 0") (Агентов: {{ aiAgents.length }})
@@ -58,6 +59,15 @@
       )
         VolumeX.w-4.h-4(v-if="userMuted")
         Volume2.w-4.h-4(v-else)
+      //- [№39-МОБИЛЬНОЕ] развернуть док на весь экран (телефон/планшет)
+      button.btn.btn-xs.btn-ghost.btn-square(
+        v-if="props.expandable"
+        :class="props.fullscreen ? 'text-info bg-info/20' : 'text-base-content/40'"
+        :title="props.fullscreen ? 'Свернуть в окно' : 'Во весь экран'"
+        @click="$emit('toggle-fullscreen')"
+      )
+        Minimize2.w-4.h-4(v-if="props.fullscreen")
+        Maximize2.w-4.h-4(v-else)
       button.btn.btn-xs.btn-ghost.btn-square(
         class="hover:text-error text-base-content/40"
         @click="$emit('close')"
@@ -68,7 +78,7 @@
     //- Панель настроек (поп-овер)
     .absolute.top-11.right-2.z-50.w-56.rounded-lg.p-3.shadow-xl(
       v-if="showSettings"
-      class="bg-gray-900 border border-white/10"
+      class="bg-gray-900 border border-white/10 max-w-[calc(100vw-1rem)]"
     )
       .text-xs.font-bold.mb-2(
         class="text-base-content/70"
@@ -120,7 +130,7 @@
     //- Физика перечитывает настройки на каждом тике — изменения действуют сразу
     .absolute.top-11.right-2.z-50.w-72.flex.flex-col.rounded-lg.p-2.shadow-xl(
       v-if="showPeopleTuning"
-      class="bg-gray-900 border border-white/10 max-h-[calc(100%-3.5rem)]"
+      class="bg-gray-900 border border-white/10 max-h-[calc(100%-3.5rem)] max-w-[calc(100vw-1rem)]"
     )
       .flex.items-center.justify-between.mb-1.flex-none
         span(class="text-[10px] font-bold text-base-content/70") ДВИЖЕНИЕ И ЛОГИКА ЛЮДЕЙ
@@ -411,7 +421,8 @@ import {
 // [Фаза 5] Lucide: хедер и empty state
 import {
   Activity, SlidersHorizontal, X, Gauge,
-  MonitorX, PencilRuler, ShieldAlert, Volume2, VolumeX, PersonStanding
+  MonitorX, PencilRuler, ShieldAlert, Volume2, VolumeX, PersonStanding,
+  Maximize2, Minimize2
 } from '@lucide/vue'
 
 const audio = useAudioEngine()
@@ -421,8 +432,12 @@ const props = defineProps<{
   scripts?: any[]
   isRunning: boolean
   simSettings?: any
+  /** [№39-МОБИЛЬНОЕ] показывать кнопку «во весь экран» (только док лейаута) */
+  expandable?: boolean
+  /** [№39-МОБИЛЬНОЕ] состояние «во весь экран» (владеет им лейаут) */
+  fullscreen?: boolean
 }>()
-const emit = defineEmits(['close'])
+const emit = defineEmits(['close', 'toggle-fullscreen'])
 
 // [СМЕНА] симуляция запущена без принятой смены — всплывающее напоминание.
 // loadCurrentShift() перечитывает store 'shifts': активная смена могла ещё
