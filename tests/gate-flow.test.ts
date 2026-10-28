@@ -19,7 +19,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { ref } from 'vue'
 import { useSimulatorPhysics } from '~/composables/simulator/useSimulatorPhysics'
 import { CAR_EXIT_PULL_PAST, STOP_STANDOFF_ENTER, FOOT_PAD_PERSON } from '~/utils/simulatorTraffic'
-import { clampPersonToFence } from '~/utils/gateFlow'
+import { clampPersonToFence, exitPullPastFor } from '~/utils/gateFlow'
 
 const DT = 0.1
 const SCENE = { width: 1280, height: 720 }
@@ -168,11 +168,13 @@ describe('[№23-ВЫЕЗД/№20-КОРРЕКТОР] точка ожидани�
     expect(exit.afterTarget.x).toBeGreaterThan(1280)
   })
 
-  it('у ворот машина (цель в коридоре), обе стороны дороги заняты — корректор поднимает на посадку, уезд после закрытия', () => {
+  it('у ворот машина (цель в коридоре), обе стороны дороги заняты — корректор поднимает на адаптивную посадку, уезд после закрытия', () => {
     const h = buildHarness([makeCarGate()])
     // слева встречная на дороге (сторона занята), справа — машина, чья ЦЕЛЬ
     // на линии ожидания (претендует на ось): уезд некуда, линию надо
-    // освободить — корректор поднимает выезжающую на глубокую посадку
+    // освободить — корректор поднимает выезжающую на посадку.
+    // [№48-КОМФОРТНЫЙ-РАЗЪЕЗД] посадка — АДАПТИВНАЯ (нос самого высокого
+    // претендента + стендофф): против легковой F − 46, а не F − 71.
     const enterL = mkCar('car-l', 'enter', 'to_gate', 200, ENTER_STOP_Y, { x: CX, y: ENTER_STOP_Y }, { x: CX, y: 900 })
     const enterR = mkCar('car-r', 'enter', 'to_gate', 640, ENTER_STOP_Y, { x: CX, y: ENTER_STOP_Y }, { x: CX, y: 900 })
     const exit = mkCar('car-x', 'exit', 'waiting_after', CX, ENTER_STOP_Y, { x: CX, y: ENTER_STOP_Y }, { x: 1300, y: ENTER_STOP_Y })
@@ -180,7 +182,8 @@ describe('[№23-ВЫЕЗД/№20-КОРРЕКТОР] точка ожидани�
 
     tick(h, 25) // 2.5с — корректор поднимает выезжающую на посадку (раннего уезда нет: стороны дороги заняты)
     expect(exit.state).toBe('waiting_after')
-    expect(Math.abs(centerOf(exit).y - EXIT_CROSS_Y)).toBeLessThanOrEqual(3)
+    // [№48] против легковой посадка F − 46 (ниже прежней F − 71)
+    expect(Math.abs(centerOf(exit).y - (F - CAR.height / 2 - exitPullPastFor(CAR.height)))).toBeLessThanOrEqual(3)
   })
 })
 

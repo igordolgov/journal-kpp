@@ -83,27 +83,53 @@ export interface GateAgentView {
 // (въезжающая) машина стоит на линии ожидания или ПОДЪЕЗЖАЕТ к ней — её
 // корпус ИЛИ ЦЕЛЬ (стоп-точка) в коридоре оси ворот. Пока занята —
 // выезжающая ждёт «вверху» (на глубокой посадке), освобождая полосу.
-export const exitLaneBusy = (
+// [№48-КОМФОРТНЫЙ-РАЗЪЕЗД] раньше занятость была булевой, и посадка всегда
+// была «под грузовик» (F − 71) — даже против легковой выезжающая лезла на
+// максимальную высоту («останавливается слишком высоко, выходит за рамки
+// дороги» — репорт №48). Теперь ищем НОС САМОГО ВЫСОКОГО встречного,
+// реально стоящего/претендующего на линию, и глубина посадки считается
+// от него (exitPullPastFor): против легковой — на 15px ниже, против
+// грузовика — как раньше (разъезд «сверху ворот» не ломается).
+export const enterLaneOpponentHeight = (
   agents: GateAgentView[],
   me: GateAgentView,
   gate: { x: number; y: number; width: number; height: number },
-): boolean => {
+): number => {
   const gcx = gate.x + gate.width / 2
   const lineY = gate.y + gate.height - 20 - STOP_STANDOFF_ENTER // окна не зависят от высоты корпуса
+  let maxH = 0
   for (const o of agents) {
     if (o.id === me.id || o.type !== 'car' || o.direction === me.direction || o.state === 'done') continue
     const ocx = o.element.x + o.element.width / 2
     const ocy = o.element.y + o.element.height / 2
     // корпус в коридоре линии...
-    if (Math.abs(ocx - gcx) < GATE_AXIS_WINDOW && Math.abs(ocy - lineY) < LANE_WINDOW) return true
+    if (Math.abs(ocx - gcx) < GATE_AXIS_WINDOW && Math.abs(ocy - lineY) < LANE_WINDOW) {
+      maxH = Math.max(maxH, o.element.height)
+      continue
+    }
     // ...или ЦЕЛЬ на линии (въезжающая на подходе легально претендует
     // на стоп-точку и вернётся на неё)
     const t = o.target
     if (t && Number.isFinite(t.x) && Number.isFinite(t.y) &&
-        Math.abs((t.x ?? 0) - gcx) < GATE_AXIS_WINDOW && Math.abs((t.y ?? 0) - lineY) < LANE_WINDOW) return true
+        Math.abs((t.x ?? 0) - gcx) < GATE_AXIS_WINDOW && Math.abs((t.y ?? 0) - lineY) < LANE_WINDOW) {
+      maxH = Math.max(maxH, o.element.height)
+    }
   }
-  return false
+  return maxH
 }
+
+export const exitLaneBusy = (
+  agents: GateAgentView[],
+  me: GateAgentView,
+  gate: { x: number; y: number; width: number; height: number },
+): boolean => enterLaneOpponentHeight(agents, me, gate) > 0
+
+// [№48-КОМФОРТНЫЙ-РАЗЪЕЗД] глубина посадки выезда под ВЫСОТУ КОНКРЕТНОГО
+// встречного: нос самого высокого претендента на линию + стендофф въезда
+// (E4 «касание без пересечения»: низ корпуса выезжающей РОВНО над носом
+// встречной). 0 — встречных нет (посадка не нужна, ждём на линии).
+export const exitPullPastFor = (oppBodyH: number): number =>
+  oppBodyH > 0 ? oppBodyH + STOP_STANDOFF_ENTER : 0
 
 // [№20-2] Хочет ли ВЫЕЗЖАЮЩАЯ машина выехать «прямо сейчас»: стоит у створа
 // с базовой стороны (to_gate/waiting_before), идёт к нему, или уже проходит

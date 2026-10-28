@@ -8,8 +8,9 @@ import type { SceneElement, AiAgent } from '~/types/simulator'
 import { DESPAWN_MARGIN } from '~/utils/simulatorConstants'
 import { dot, cross, normalizeAngle } from '~/utils/simulatorMath'
 // [СХЕМА-ТРАЕКТОРИЙ] единый с спавном пересчёт цели остановки из геометрии ворот
-// [№34-УЕЗД-СРАЗУ] CAR_EXIT_PULL_PAST — глубина посадки выезда (верх полосы въезда)
-import { CAR_EXIT_PULL_PAST, trafficPointsFor } from '~/utils/simulatorTraffic'
+// [№34-УЕЗД-СРАЗУ] глубина посадки выезда — адаптивная (gateFlow.exitPullPastFor),
+// гарантийный коридор маршрута — CAR_EXIT_PULL_PAST в simulatorTraffic.ts
+import { trafficPointsFor } from '~/utils/simulatorTraffic'
 // [П1] темп шага: накопление «паузы анимации» для CSS-фазы ног
 import { walkHoldStep } from '~/utils/simTuning'
 // [№20-ВОРОТА-ИДЕАЛ] общая логика зоны ворот: точка ожидания выезда,
@@ -18,7 +19,7 @@ import { walkHoldStep } from '~/utils/simTuning'
 // [№24-БЕЗ-ОСТАНОВКИ] GATE_AXIS_WINDOW — коридор оси ворот для проверки
 // «у ворот есть другая машина»
 // [№26-РУЧКА] wicketHandlePending — пуш полотна ждёт конца анимации ручки
-import { clampPersonToFence, exitLaneBusy, exitPendingFor, exitWaitCenterY, GATE_AXIS_WINDOW, limitPersonPushY, roadSideBusyForDeparture, wicketAlignX, wicketHandlePending } from '../../utils/gateFlow'
+import { clampPersonToFence, enterLaneOpponentHeight, exitLaneBusy, exitPendingFor, exitPullPastFor, exitWaitCenterY, GATE_AXIS_WINDOW, limitPersonPushY, roadSideBusyForDeparture, wicketAlignX, wicketHandlePending } from '../../utils/gateFlow'
 // [№27-НАСТРОЙКИ-ЛЮДЕЙ] реестр настроек движения/логики людей (тумблеры +
 // плавные ползунки в Настройки -> Симулятор); читается на каждом тике
 import { tuneBool, tuneNumber } from '../../utils/personTuning'
@@ -1392,30 +1393,67 @@ export function useSimulatorPhysics(
           // поднимает машину на посадку, уезд после закрытия. Инвариант
           // [№13] держит свип [G2].
           // [№34-БЕЗОПАСНОСТЬ] уезд только корпусом ВЫШЕ полосы въезда:
-          // нижняя кромка на посадке F - CAR_EXIT_PULL_PAST; если машина
-          // ещё на линии ожидания или в середине подъёма — сначала
-          // корректор поднимет корпус, уезд следующим кадром.
-          if (agent.type === 'car' && agent.direction === 'exit' && gate?.settings &&
-              el.y + el.height <= gate.y + gate.height - CAR_EXIT_PULL_PAST + 2 &&
-              exitLaneBusy(aiAgents.value, agent, gate)) {
-            const curCy0 = el.y + el.height / 2
-            const origSide0: 'left' | 'right' = agent.afterTarget.x < el.x ? 'left' : 'right'
-            const otherSide0: 'left' | 'right' = origSide0 === 'left' ? 'right' : 'left'
-            const busyOrig0 = roadSideBusyForDeparture(aiAgents.value, agent, gate, sceneSize.value.width, origSide0)
-            const busyOther0 = roadSideBusyForDeparture(aiAgents.value, agent, gate, sceneSize.value.width, otherSide0)
-            if (!busyOrig0 || !busyOther0) {
-              const side0 = busyOrig0 ? otherSide0 : origSide0
-              const depX0 = side0 === 'left' ? -60 - el.width / 2 : sceneSize.value.width + 60 + el.width / 2
-              agent.afterTarget = { x: depX0, y: curCy0, width: 0, height: 0 }
-              agent.state = 'moving_away'
-              agent.target = { x: agent.afterTarget.x, y: agent.afterTarget.y, width: 0, height: 0 }
-              waitAfterByAgentId.delete(agent.id)
-              gateCloseWaitByAgentId.delete(agent.id)
-              continue
+          // нижняя кромка на посадке; если машина ещё на линии ожидания или
+          // в середине подъёма — сначала корректор поднимет корпус, уезд
+          // следующим кадром.
+          // [№48-КОМФОРТНЫЙ-РАЗЪЕЗД] «полоса въезда» — нос САМОГО ВЫСОКОГО
+          // встречного, претендующего на линию (exitPullPastFor): против
+          // легковой уезд разрешён уже с F − 56 (посадка ниже — репорт
+          // №48 «слишком высоко»), против грузовика — с F − 71 как раньше.
+          if (agent.type === 'car' && agent.direction === 'exit' && gate?.settings) {
+            const oppH0 = enterLaneOpponentHeight(aiAgents.value, agent, gate)
+            if (oppH0 > 0 &&
+                el.y + el.height <= gate.y + gate.height - exitPullPastFor(oppH0) + 2) {
+              const curCy0 = el.y + el.height / 2
+              const origSide0: 'left' | 'right' = agent.afterTarget.x < el.x ? 'left' : 'right'
+              const otherSide0: 'left' | 'right' = origSide0 === 'left' ? 'right' : 'left'
+              const busyOrig0 = roadSideBusyForDeparture(aiAgents.value, agent, gate, sceneSize.value.width, origSide0)
+              const busyOther0 = roadSideBusyForDeparture(aiAgents.value, agent, gate, sceneSize.value.width, otherSide0)
+              if (!busyOrig0 || !busyOther0) {
+                const side0 = busyOrig0 ? otherSide0 : origSide0
+                const depX0 = side0 === 'left' ? -60 - el.width / 2 : sceneSize.value.width + 60 + el.width / 2
+                agent.afterTarget = { x: depX0, y: curCy0, width: 0, height: 0 }
+                agent.state = 'moving_away'
+                agent.target = { x: agent.afterTarget.x, y: agent.afterTarget.y, width: 0, height: 0 }
+                waitAfterByAgentId.delete(agent.id)
+                gateCloseWaitByAgentId.delete(agent.id)
+                continue
+              }
+              // у ворот машина, но корпус ещё не поднялся выше полосы въезда
+              // или обе стороны дороги заняты встречными — прежний сценарий:
+              // корректор + ожидание закрытия (блок ниже)
             }
-            // у ворот машина, но корпус ещё не поднялся выше полосы въезда
-            // или обе стороны дороги заняты встречными — прежний сценарий:
-            // корректор + ожидание закрытия (блок ниже)
+          }
+          // [№48-КОМФОРТНЫЙ-РАЗЪЕЗД] спуск с гарантийного коридора (F − 71)
+          // на АДАПТИВНУЮ посадку даже при очереди на линии (queueHoldsGate —
+          // корректор ниже пропущен): встречная уже ждёт на линии, выезжающая
+          // занимает ровно столько высоты, сколько нужно (нос встречного +
+          // стендофф), а не F − 71 «на всякий случай» (репорт №48 «слишком
+          // высоко»). Только СПУСК к дороге: подъём при очереди по-прежнему
+          // не делаем (уступает подъезжающая — CAR_YIELD_ON_MY_SPOT).
+          if (!gateGone && !fullyClosed && queueHoldsGate &&
+              agent.type === 'car' && agent.direction === 'exit' && gate) {
+            const oppHq = enterLaneOpponentHeight(aiAgents.value, agent, gate)
+            if (oppHq > 0) {
+              const spotQ = gate.y + gate.height - el.height / 2 - exitPullPastFor(oppHq)
+              const curQ = el.y + el.height / 2
+              const remainQ = spotQ - curQ
+              if (remainQ > 2) {
+                const pathBusyQ = aiAgents.value.some(o => {
+                  if (o.id === agent.id || o.type !== 'car' || o.state === 'done') return false
+                  const rxc = (o.element.x + o.element.width / 2) - (el.x + el.width / 2)
+                  const ryc = (o.element.y + o.element.height / 2) - curQ
+                  return ryc > 10 && ryc < remainQ + 30 && Math.abs(rxc) < 50
+                })
+                if (!pathBusyQ) {
+                  const stepQ = Math.min(CAR_YIELD_SPEED * dt, remainQ)
+                  el.y += stepQ
+                  el.velocity = Math.min(CAR_YIELD_SPEED, (el.velocity || 0) + CAR_YIELD_SPEED * 2.2 * dt)
+                  continue
+                }
+                // путь спуска занят — ждём закрытия на текущей высоте
+              }
+            }
           }
           if (!gateGone && !fullyClosed && !queueHoldsGate) {
             // [№20-КОРРЕКТОР-ТОЧКИ] выезжающая машина ждёт закрытия там, где
@@ -1434,8 +1472,15 @@ export function useSimulatorPhysics(
             // по фактической полосе ([№19-СТОП-ЛИНИЯ], тесты сохранены).
             if (agent.type === 'car' && agent.direction === 'exit' && gate) {
               const lineY = exitWaitCenterY(gate, el.height)
-              const spotY = exitLaneBusy(aiAgents.value, agent, gate)
-                ? (Number.isFinite(agent.exitPoint?.y) ? agent.exitPoint!.y : lineY)
+              // [№48-КОМФОРТНЫЙ-РАЗЪЕЗД] глубина посадки — по носу САМОГО
+              // ВЫСОКОГО встречного, стоящего/претендующего на линию:
+              // против легковой F − 56 (не «слишком высоко», репорт №48),
+              // против грузовика F − 71 (разъезд двух грузовик как раньше).
+              // exitPoint (маршрутный коридор F − 71) больше не точка
+              // ожидания — ждём НА МИНИМАЛЬНО ДОСТАТОЧНОЙ высоте.
+              const oppH = enterLaneOpponentHeight(aiAgents.value, agent, gate)
+              const spotY = oppH > 0
+                ? gate.y + gate.height - el.height / 2 - exitPullPastFor(oppH)
                 : lineY
               const curCy = el.y + el.height / 2
               const remain = spotY - curCy

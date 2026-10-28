@@ -90,6 +90,12 @@ export const crossingOffset = (isPerson: boolean): number =>
 // Полоса разъезда: визуальный низ выезжающей на F - 71, верх грузовика на
 // F - 136 (было F - 86): асфальт дороги в редакторе может понадобиться
 // растянуть вверх.
+// [№48-КОМФОРТНЫЙ-РАЗЪЕЗД] 71 — это МАКСИМАЛЬНАЯ (гарантийная) глубина для
+// маршрута прохода и валидации точек. ФАКТИЧЕСКАЯ глубина ожидания на
+// посадке — адаптивная (gateFlow.exitPullPastFor): по носу самого высокого
+// встречного, реально стоящего/претендующего на линию. Против легковой
+// выезжающая останавливается на F - 56 (не «слишком высоко»), против
+// грузовика — на F - 71 (разъезд двух грузовиков работает как раньше).
 export const CAR_EXIT_PULL_PAST = 71
 
 // [СПЕЦ-Z5/Z7] стоящий у прохода агент НЕ прижат к линии забора: визуальный
@@ -169,8 +175,20 @@ export const isValidPoint = (
   switch (role) {
     case 'spawn': return offBottom
     case 'stop':  return nearGateX && spriteTop >= gateTop - 20
-    case 'cross': return nearGateX && spriteBottom <= gateBottom + 10
-    case 'after': return offSideX
+    case 'cross': {
+      // [№48-КОМФОРТНЫЙ-РАЗЪЕЗД] полоса выезда МАШИНЫ обязана очищать нос
+      // САМОГО ВЫСОКОГО встречного (грузовик: F − 71): точка НИЖЕ коридора
+      // означала бы «два грузовика не могут разъехаться сверху ворот» —
+      // такой оффсет молча заменяется геометрией. Допуск 2px — на легальное
+      // касание. Людей инвариант не касается (их проход — линия дороги F).
+      const corridorOk = isPerson || spriteBottom <= gateBottom - CAR_EXIT_PULL_PAST + 2
+      return nearGateX && spriteBottom <= gateBottom + 10 && corridorOk
+    }
+    case 'after': {
+      // [№48] уезд машины — по той же полосе разъезда: заниженный after рвал
+      // инвариант разъезда на всём горизонтальном ходу до края сцены.
+      return offSideX && (isPerson || spriteBottom <= gateBottom - CAR_EXIT_PULL_PAST + 2)
+    }
     default: return false
   }
 }

@@ -22,6 +22,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { ref } from 'vue'
 import { useSimulatorPhysics } from '~/composables/simulator/useSimulatorPhysics'
 import { CAR_EXIT_PULL_PAST } from '~/utils/simulatorTraffic'
+import { exitPullPastFor } from '~/utils/gateFlow'
 
 const DT = 0.05
 const SCENE = { width: 1280, height: 720 }
@@ -174,18 +175,22 @@ describe('[№34-БЕЗОПАСНОСТЬ] уезд только корпусо�
 
     let departBottom = NaN
     let movedSidewaysInLane = false
+    // [№48-КОМФОРТНЫЙ-РАЗЪЕЗД] «полоса въезда» — нос САМОГО ВЫСОКОГО
+    // претендента на линию: тут встречная легковая (CAR), значит F − 46.
+    const enterLaneTop = F - exitPullPastFor(CAR.height)
     for (let i = 0; i < 240; i++) { // 12 c
       h.physics.updateAiMovement(DT, { carGateId: 'gate-1', personGateId: '' })
       if (b.state === 'moving_away') {
         if (!Number.isFinite(departBottom)) departBottom = bottomOf(b)
-      } else if (Math.abs(centerOf(b).x - CX) > 3 && bottomOf(b) > F - CAR_EXIT_PULL_PAST + 2) {
+      } else if (Math.abs(centerOf(b).x - CX) > 3 && bottomOf(b) > enterLaneTop + 2) {
         movedSidewaysInLane = true
       }
       expect(hasOverlap([a, b])).toBe(false)
     }
-    // уезд случился, но только с посадки (низ корпуса выше полосы въезда)
+    // уезд случился, но только с посадки (низ корпуса выше полосы въезда —
+    // [№48] адаптивной: нос встречной легковой F − 46)
     expect(Number.isFinite(departBottom)).toBe(true)
-    expect(departBottom).toBeLessThanOrEqual(F - CAR_EXIT_PULL_PAST + 2.5)
+    expect(departBottom).toBeLessThanOrEqual(enterLaneTop + 2.5)
     expect(movedSidewaysInLane).toBe(false)
     expect(h.warns.filter(w => w.includes('[watchdog]') || w.includes('[crossing-cap]'))).toEqual([])
   })
