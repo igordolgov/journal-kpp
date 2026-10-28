@@ -20,6 +20,11 @@
 import { shallowRef, onUnmounted, watch, nextTick } from 'vue'
 import gsap from 'gsap'
 import { useAudioEngine } from '~/composables/useAudioEngine'
+// [№44-ФОНОВЫЙ-ТРАФИК] машины фоновой дороги = ТЕ ЖЕ спрайты, что у машин
+// основного симулятора (simulatorSvg): легковой профиль и грузовик с будкой,
+// те же пропорции и палитра. Локальный упрощённый генератор удалён.
+import { getCarSvg, getTruckSvg } from '~/utils/simulatorSvg'
+import { CAR_COLORS, TRUCK_WIDTH_SCALE, TRUCK_HEIGHT_SCALE } from '~/utils/simulatorConstants'
 
 const audio = useAudioEngine()
 
@@ -51,6 +56,7 @@ interface Car {
   targetSpeed: number
   lane: Lane
   color: string
+  isTruck: boolean
   svg: string
   el: HTMLElement | null
 }
@@ -64,16 +70,21 @@ type Lane = 'top' | 'bottom'
 const CAR_W = 80
 const CAR_H = 40
 
+// [№44-ФОНОВЫЙ-ТРАФИК] грузовик крупнее легковой ровно как в основном
+// симуляторе: TRUCK_WIDTH_SCALE/TRUCK_HEIGHT_SCALE от 80x40 -> 96x52
+// (viewBox 120x65 спрайта совпадает по пропорции с 96x52).
+const TRUCK_W = Math.round(CAR_W * TRUCK_WIDTH_SCALE)
+const TRUCK_H = Math.round(CAR_H * TRUCK_HEIGHT_SCALE)
+// доля грузовиков в потоке — как у машин в БД (TRUCK_TYPE_SHARE = 0.1)
+const TRUCK_SHARE = 0.1
+// край экрана с запасом под самый крупный транспорт (спавн/деспавн за кадром)
+const SPAWN_MARGIN = TRUCK_W
+
 const MIN_GAP = 50
 const DETECTION_RADIUS = 300
 const REACTION_SPEED = 8
 
 const SPAWN_BUFFER = CAR_W * 2.5
-
-const CAR_COLORS = [
-  'forestgreen', 'brown', 'blueviolet', 'darkkhaki',
-  '#ef4444', '#3b82f6', '#22c55e', '#eab308', '#f8fafc', '#1e293b',
-]
 
 const AUDIO_POOL_ID = 'traffic-road-tyres'
 const EMIT_INTERVAL = 0.25
@@ -82,38 +93,16 @@ const EMIT_INTERVAL = 0.25
 // Стиль машины
 // ---------------------------------------------------------------------------
 
+// [№44-ФОНОВЫЙ-ТРАФИК] размер — по машине: у грузовика свой w/h (96x52)
 const carStyle = (car: Car): Record<string, string> => ({
-  width: CAR_W + 'px',
-  height: CAR_H + 'px',
+  width: car.w + 'px',
+  height: car.h + 'px',
   top: car.y + 'px',
   left: '0px',
   willChange: 'transform',
   backfaceVisibility: 'hidden',
   transform: 'translateZ(0)',
 })
-
-// ---------------------------------------------------------------------------
-// SVG-генератор
-// ---------------------------------------------------------------------------
-
-const CAR_SVG = {
-  vw: 120, vh: 60, bodyX: 10, bodyY: 20, bodyW: 100, bodyH: 30, bodyR: 5,
-  wheelR: 8, hubR: 4, wFX: 90, wRX: 30, wY: 50,
-  roofL: 25, roofR: 95, roofTop: 5, roofCurveW: 30,
-  lightX: 70, lightY: 12, lightW: 6, lightH: 4,
-} as const
-
-const buildCarSvg = (color: string, c = CAR_SVG): string => {
-  const { vw, vh, bodyX, bodyY, bodyW, bodyH, bodyR, wheelR, hubR, wFX, wRX, wY, roofL, roofR, roofTop, roofCurveW, lightX, lightY, lightW, lightH } = c
-  return `<svg viewBox="0 0 ${vw} ${vh}" xmlns="http://www.w3.org/2000/svg">
-    <path d="M${bodyX},${bodyY + bodyH} Q${bodyX - 5},${bodyY + bodyH} ${bodyX - 5},${bodyY + bodyH - 5} L${bodyX - 5},${vh - 5} Q${bodyX - 5},${vh} ${bodyX},${vh} L${bodyX + bodyW},${vh} Q${bodyX + bodyW + 5},${vh} ${bodyX + bodyW + 5},${vh - 5} L${bodyX + bodyW + 5},${bodyY + bodyH - 5} Q${bodyX + bodyW + 5},${bodyY + bodyH} ${bodyX + bodyW},${bodyY + bodyH} Z" fill="#374151"/>
-    <rect x="${bodyX}" y="${bodyY}" width="${bodyW}" height="${bodyH}" rx="${bodyR}" fill="${color}"/>
-    <path d="M${roofL},${bodyY} Q${roofL + roofCurveW - roofL},${roofTop} ${roofL + roofCurveW},${roofTop} L${roofR - roofCurveW},${roofTop} Q${roofR},${roofTop} ${roofR},${bodyY} Z" fill="#87CEEB" stroke="${color}" stroke-width="2"/>
-    <circle cx="${wRX}" cy="${wY}" r="${wheelR}" fill="#1f2937"/><circle cx="${wRX}" cy="${wY}" r="${hubR}" fill="#9ca3af"/>
-    <circle cx="${wFX}" cy="${wY}" r="${wheelR}" fill="#1f2937"/><circle cx="${wFX}" cy="${wY}" r="${hubR}" fill="#9ca3af"/>
-    <rect x="${lightX}" y="${lightY}" width="${lightW}" height="${lightH}" rx="1" fill="#fbbf24"/>
-  </svg>`
-}
 
 // ---------------------------------------------------------------------------
 // Состояние
@@ -189,22 +178,28 @@ const createCar = (lane: Lane, onScreen: boolean): Car | undefined => {
   // [ИСПРАВЛЕНО] индекс массива даёт string | undefined — fallback
   const color = CAR_COLORS[Math.floor(Math.random() * CAR_COLORS.length)] ?? '#808080'
 
+  // [№44-ФОНОВЫЙ-ТРАФИК] тип транспорта случайно: ~10% грузовиков, как в
+  // основном симуляторе. Спрайт и размер берутся от типа.
+  const isTruck = Math.random() < TRUCK_SHARE
+  const w = isTruck ? TRUCK_W : CAR_W
+  const h = isTruck ? TRUCK_H : CAR_H
+
   const laneH = props.height / 2
-  const y = lane === 'top' ? laneH / 2 - CAR_H / 2 : laneH + laneH / 2 - CAR_H / 2
+  const y = lane === 'top' ? laneH / 2 - h / 2 : laneH + laneH / 2 - h / 2
 
   let x: number
   if (lane === 'top') {
-    x = onScreen ? props.width * (0.3 + Math.random() * 0.5) : props.width + CAR_W
+    x = onScreen ? props.width * (0.3 + Math.random() * 0.5) : props.width + SPAWN_MARGIN
   } else {
-    x = onScreen ? props.width * (0.1 + Math.random() * 0.4) : -CAR_W
+    x = onScreen ? props.width * (0.1 + Math.random() * 0.4) : -SPAWN_MARGIN
   }
 
   return {
     id: ++carIdCounter,
-    x, y, w: CAR_W, h: CAR_H,
+    x, y, w, h,
     speed, maxSpeed: maxSpd, targetSpeed: speed,
-    lane, color,
-    svg: buildCarSvg(color),
+    lane, color, isTruck,
+    svg: isTruck ? getTruckSvg(color) : getCarSvg(color),
     el: null,
   }
 }
@@ -214,7 +209,7 @@ const createCar = (lane: Lane, onScreen: boolean): Car | undefined => {
 // ---------------------------------------------------------------------------
 
 const canSpawnInLane = (lane: Lane): boolean => {
-  const spawnX = lane === 'top' ? props.width + CAR_W : -CAR_W
+  const spawnX = lane === 'top' ? props.width + SPAWN_MARGIN : -SPAWN_MARGIN
   const list = cars.value
   for (let i = 0; i < list.length; i++) {
     const c = list[i]
@@ -331,14 +326,14 @@ const updateLoop = (time: number) => {
     const c = list[i]
     // [ИСПРАВЛЕНО] guard элемента массива
     if (!c) continue
-    const off = c.lane === 'bottom' ? c.x > props.width + CAR_W * 2 : c.x < -CAR_W * 2
+    const off = c.lane === 'bottom' ? c.x > props.width + c.w * 2 : c.x < -c.w * 2
     if (off) { needsFilter = true; break }
   }
 
   if (needsFilter) {
     cars.value = list.filter(c => {
-      if (c.lane === 'bottom') return c.x <= props.width + CAR_W * 2
-      return c.x >= -CAR_W * 2
+      if (c.lane === 'bottom') return c.x <= props.width + c.w * 2
+      return c.x >= -c.w * 2
     })
   }
 
