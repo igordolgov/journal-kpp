@@ -5,9 +5,12 @@
 //     нет сохранённой сцены;
 //   • док-симулятор (layouts/default.vue) играет её, если в БД (IndexedDB)
 //     нет ни одной сохранённой сцены — вместо «Сцена не загружена».
-// Геометрия соответствует сцене заказчика: фон 1280x350 (#152129), фоновая
-// дорога 1286x101.4 (пользовательские размеры —TrafficRoad рендерит строго
-// по ним), откатные ворота 222x103 с пользовательскими оффсетами, калитка.
+// [№53-РЕЛИЗ-1.0.5] обновлена до сцены заказчика от 28.10.2026: фон
+// 1280x350 #374151, фоновая дорога 1286x57, откатные ворота 222x103
+// (оффсеты stopExit 94 / crossExit -27 / crossEnter 94 / stopEnter 24,
+// barColor #798393), калитка 69x103, два пульта (прозрачность 0.3, blur 5,
+// у кнопок калитки прописан targetGateId), трафик сцены: maxAgents 60,
+// carHeight 65, спавн машин 10-20 c, spawnIntervalMin 17.
 // Файл генерировался скриптом из сцены заказчика; правки вносить аккуратно:
 // это обычный SceneConfig.
 
@@ -19,8 +22,17 @@ export const builtinScene: SceneConfig = {
   "settings": {
     "width": 1280,
     "height": 350,
-    "bgColor": "#152129",
+    "bgColor": "#374151",
     "borderColor": "#94a3b8",
+    "posX": null,
+    "posY": null,
+    "traffic": {
+      "carSpawnIntervalMin": 10,
+      "carSpawnIntervalMax": 20,
+      "maxAgents": 60,
+      "spawnIntervalMin": 17,
+      "carHeight": 65
+    },
     "showGrid": false
   },
   "elements": [
@@ -28,10 +40,10 @@ export const builtinScene: SceneConfig = {
       "id": "el_7nei6wz4t",
       "name": "Дорога с трафиком",
       "type": "actor",
-      "x": -7,
-      "y": 1.5999755859375,
+      "x": -7.79998779296875,
+      "y": 4.800018310546875,
       "width": 1286,
-      "height": 101.4000244140625,
+      "height": 57,
       "zIndex": 1,
       "asset": {
         "type": "traffic_road",
@@ -43,7 +55,7 @@ export const builtinScene: SceneConfig = {
       "id": "el_258xlm322",
       "name": "Ворота откатные",
       "type": "actor",
-      "x": 528,
+      "x": 529.5999755859375,
       "y": 125,
       "width": 222,
       "height": 103,
@@ -60,20 +72,20 @@ export const builtinScene: SceneConfig = {
         "closeDuration": 8,
         "barOpacity": 1,
         "barWidth": 2,
+        "barColor": "#798393",
         "barSpacing": 10,
-        "barColor": "#636974",
-        "crossExitCarY": -29,
-        "stopExitCarY": 88,
-        "stopEnterCarY": 23,
-        "crossEnterCarY": 23
+        "stopExitCarY": 94,
+        "crossExitCarY": -27,
+        "crossEnterCarY": 94,
+        "stopEnterCarY": 24
       }
     },
     {
       "id": "el_degcss4x3",
       "name": "Калитка",
       "type": "actor",
-      "x": 758,
-      "y": 124,
+      "x": 755.7999877929688,
+      "y": 125,
       "width": 69,
       "height": 103,
       "zIndex": 3,
@@ -88,16 +100,29 @@ export const builtinScene: SceneConfig = {
         "barSpacing": 9,
         "barOpacity": 1,
         "barWidth": 2,
-        "barColor": "#636974"
+        "barColor": "#798393"
       }
     }
   ],
+  "scripts": [],
+  "variables": [
+    {
+      "key": "var_cq",
+      "value": "0"
+    },
+    {
+      "key": "var_Lr",
+      "value": "0"
+    }
+  ],
+  "trafficConfig": {},
+  "lifeConfig": {},
   "panels": [
     {
       "id": "p_u2mfb5f0d",
       "title": "Панель",
-      "x": 22.79998779296875,
-      "y": 131,
+      "x": 24.400009155273438,
+      "y": 132.59991455078125,
       "width": 472,
       "height": 177,
       "dock": "none",
@@ -115,11 +140,11 @@ export const builtinScene: SceneConfig = {
             "textColor": "#000000",
             "borderRadius": 50,
             "actionType": "gate-open",
-            "hotkey": "1",
             "labelPosition": "bottom",
             "fontSize": 14,
             "labelBg": "white",
-            "labelMarginTop": 9
+            "labelMarginTop": 9,
+            "hotkey": "1"
           }
         },
         {
@@ -175,11 +200,12 @@ export const builtinScene: SceneConfig = {
             "textColor": "#000000",
             "borderRadius": 50,
             "actionType": "wicket-open",
-            "hotkey": "4",
             "labelPosition": "bottom",
             "labelBg": "white",
             "fontSize": 14,
-            "labelMarginTop": 9
+            "labelMarginTop": 9,
+            "hotkey": "4",
+            "targetGateId": "el_degcss4x3"
           }
         },
         {
@@ -199,16 +225,19 @@ export const builtinScene: SceneConfig = {
             "labelPosition": "bottom",
             "labelBg": "white",
             "fontSize": 14,
-            "labelMarginTop": 9
+            "labelMarginTop": 9,
+            "targetGateId": "el_degcss4x3"
           }
         }
-      ]
+      ],
+      "bgOpacity": 0.3,
+      "blur": 5
     },
     {
       "id": "p_1emh7cnav",
       "title": "Панель",
-      "x": 914,
-      "y": 130.79998779296875,
+      "x": 915,
+      "y": 129.20001220703125,
       "width": 297,
       "height": 167,
       "dock": "none",
@@ -294,20 +323,11 @@ export const builtinScene: SceneConfig = {
             "labelMarginTop": 9
           }
         }
-      ]
+      ],
+      "bgOpacity": 0.3,
+      "blur": 5
     }
   ],
-  "scripts": [],
-  "variables": [
-    {
-      "key": "var_cq",
-      "value": "0"
-    },
-    {
-      "key": "var_Lr",
-      "value": "0"
-    }
-  ],
-  "trafficConfig": {},
-  "lifeConfig": {}
+  "createdAt": 1773183925080,
+  "updatedAt": 1782840005621
 }
