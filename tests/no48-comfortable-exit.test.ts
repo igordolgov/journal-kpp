@@ -20,7 +20,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { ref } from 'vue'
 import { enterLaneOpponentHeight, exitLaneBusy, exitPullPastFor } from '~/utils/gateFlow'
-import { isValidPoint, CAR_EXIT_PULL_PAST, STOP_STANDOFF_ENTER } from '~/utils/simulatorTraffic'
+import { isValidPoint, CAR_EXIT_PULL_PAST, STOP_STANDOFF_ENTER, exitLaneBottomFor } from '~/utils/simulatorTraffic'
 import { useSimulatorPhysics } from '~/composables/simulator/useSimulatorPhysics'
 
 // ─── Геометрия сценария (как в exit-pullback.test.ts) ──────────────────────
@@ -90,9 +90,37 @@ describe('[№48] адаптивная глубина посадки exitPullPas
     expect(exitPullPastFor(TRUCK.height)).toBe(TRUCK.height + STOP_STANDOFF_ENTER) // 71
   })
 
-  it('гарантийный коридор не изменился: CAR_EXIT_PULL_PAST = 71 (грузовик + 6)', () => {
-    expect(CAR_EXIT_PULL_PAST).toBe(TRUCK.height + STOP_STANDOFF_ENTER)
-    expect(CAR_EXIT_PULL_PAST).toBe(71)
+  it('[№51] гарантийный коридор = нос легковой встречной: CAR_EXIT_PULL_PAST = 56', () => {
+    // [№51-КОМФОРТНЫЙ-РАЗЪЕЗД] репорт: «выезжающая проезжает слишком высоко
+    // за ворота» — прежняя глубина 71 (грузовик + 6) заставляла машину
+    // подниматься выше кромки фоновой дороги. Теперь коридор = нос легковой
+    // (F - 6 - 50), полоса выезда дополнительно ограничена кромкой дороги
+    // (exitLaneBottomFor). Разъезд «грузовик под грузовиком» идёт
+    // последовательно: въезжающий грузовик держится до коридора.
+    expect(CAR_EXIT_PULL_PAST).toBe(50 + STOP_STANDOFF_ENTER)
+    expect(CAR_EXIT_PULL_PAST).toBe(56)
+  })
+})
+
+describe('[№51] полоса выезда ограничена кромкой фоновой дороги', () => {
+  // Сцена заказчика: ворота y=125 h=103 (F=228), дорога y=1.6 h=101.4,
+  // полотно дорисовывается до MIN 116 -> кромка = 117.6.
+  const F51 = 228
+  const ROAD_BOTTOM = 1.6 + 116 // 117.6
+  it('легковая (50): низ корпуса РОВНО на кромке дороги (167.6), не выше', () => {
+    expect(exitLaneBottomFor(F51, 50, ROAD_BOTTOM)).toBeCloseTo(ROAD_BOTTOM + 50, 5)
+    expect(exitLaneBottomFor(F51, 50, ROAD_BOTTOM)).toBeLessThan(F51 - 56)
+  })
+  it('грузовик (65): коридор сильнее капа — F - 56 (172), выше кромки не поднимается', () => {
+    expect(exitLaneBottomFor(F51, 65, ROAD_BOTTOM)).toBe(F51 - 56)
+    expect(exitLaneBottomFor(F51, 65, ROAD_BOTTOM)).toBeLessThan(117.6 + 65)
+  })
+  it('дороги нет — полоса = гарантийный коридор F - 56', () => {
+    expect(exitLaneBottomFor(F51, 50, null)).toBe(F51 - 56)
+    expect(exitLaneBottomFor(F51, 65, undefined)).toBe(F51 - 56)
+  })
+  it('дорога ниже ворот (наезжает на них) — кап не применяется', () => {
+    expect(exitLaneBottomFor(F51, 50, 200)).toBe(F51 - 56)
   })
 })
 
@@ -169,7 +197,7 @@ describe('[№48] корректор: посадка по носу встреч�
     vi.restoreAllMocks()
   })
 
-  it('против легковой спуск с коридора на F − 46 и уезд по АДАПТИВНОЙ полосе (было F − 71)', () => {
+  it('против легковой уезд по полосе выезда F − 46 (кап коридором F − 56), без «слишком высоко»', () => {
     const h = buildHarness()
     // встречная (легковая) претендует на линию; по бокам тоже встречные —
     // ранний уезд [№34] недоступен, работает спуск/корректор
@@ -180,18 +208,19 @@ describe('[№48] корректор: посадка по носу встреч�
     h.aiAgents.value = [opp, farL, farR, exit as any]
 
     // встречная у оси быстро становится очередью (waiting_before) — выезжающая
-    // спускается с F − 71 на адаптивную посадку F − 46 и уезжает по ней
-    const adaptedLaneY = F - CAR.height / 2 - exitPullPastFor(CAR.height) // 154
+    // встаёт на полосу выезда (№51): min(F - 56, кромка дороги + корпус).
+    // В харнессе дороги нет — кап не применяется, полоса = F - 56.
+    const adaptedLaneY = F - CAR.height / 2 - CAR_EXIT_PULL_PAST // 134
     for (let i = 0; i < 60; i++) {
       h.physics.updateAiMovement(0.1, { carGateId: 'car-gate-1', personGateId: '' })
       if (exit.state === 'moving_away') break
     }
     expect(['moving_away', 'done']).toContain(exit.state)
-    // уезд — по фактической (адаптивной) полосе, а не по коридору F − 71
+    // уезд — по полосе выезда (№51), а не по старому коридору F − 71
     expect(exit.afterTarget.y).toBeCloseTo(adaptedLaneY, 0)
   })
 
-  it('против грузовика полоса уезда прежняя F − 71 — разъезд двух грузовиков не сломан', () => {
+  it('против грузовика выезжающая не поднимается выше коридора F − 56 (разъезд последовательный)', () => {
     const h = buildHarness()
     const opp = mkAgent('opp', 'enter', 'to_gate', TRUCK, 580, LINE_Y, { x: 580, y: LINE_Y })
     const farL = mkAgent('far-l', 'enter', 'to_gate', CAR, 200, LINE_Y, { x: 580, y: LINE_Y })
@@ -204,7 +233,8 @@ describe('[№48] корректор: посадка по носу встреч�
       if (exit.state === 'moving_away') break
     }
     expect(['moving_away', 'done']).toContain(exit.state)
-    // против грузовика адаптивная посадка = гарантийный коридор F − 71
+    // [№51] против грузовика полоса = та же F − 56 (EXIT_CROSS_Y):
+    // въезжающий грузовик держится до коридора, пока выезжающая не уедет
     expect(exit.afterTarget.y).toBeCloseTo(EXIT_CROSS_Y, 0)
   })
 

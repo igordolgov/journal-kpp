@@ -33,7 +33,7 @@
 // краем, спавн выхода — за нижним краем, уход выхода — за боковым краем.
 // Устаревшие точки (например, spawnExit сверху) молча заменяются геометрией.
 
-import { PERSON_STOP_OFFSET, CAR_STOP_OFFSET } from './simulatorConstants'
+import { PERSON_STOP_OFFSET, CAR_STOP_OFFSET, TRAFFIC_ROAD_MIN_H } from './simulatorConstants'
 
 
 export interface TrafficPoint {
@@ -90,13 +90,18 @@ export const crossingOffset = (isPerson: boolean): number =>
 // Полоса разъезда: визуальный низ выезжающей на F - 71, верх грузовика на
 // F - 136 (было F - 86): асфальт дороги в редакторе может понадобиться
 // растянуть вверх.
-// [№48-КОМФОРТНЫЙ-РАЗЪЕЗД] 71 — это МАКСИМАЛЬНАЯ (гарантийная) глубина для
-// маршрута прохода и валидации точек. ФАКТИЧЕСКАЯ глубина ожидания на
-// посадке — адаптивная (gateFlow.exitPullPastFor): по носу самого высокого
-// встречного, реально стоящего/претендующего на линию. Против легковой
-// выезжающая останавливается на F - 56 (не «слишком высоко»), против
-// грузовика — на F - 71 (разъезд двух грузовиков работает как раньше).
-export const CAR_EXIT_PULL_PAST = 71
+// [№51-КОМФОРТНЫЙ-РАЗЪЕЗД] гарантийный коридор выезда = 56 (было 71):
+// нос ЛЕГКОВОЙ встречной (F - 6 - 50). Репорт №51: «выезжающая машина
+// проезжает слишком высоко за ворота, когда пропускает въезжающую» —
+// прежняя гарантийная глубина 71 (грузовик + стендофф) заставляла выезжающую
+// подниматься выше кромки дороги. Теперь полоса выезда — САМАЯ НИЗКАЯ, при
+// которой легковая-встречная ещё помещается под выезжающей (stack),
+// а сверху она ограничена НАРИСОВАННОЙ кромкой фоновой дороги
+// (exitLaneBottomFor). Грузовик-встречная под выезжающей больше НЕ
+// помещается (65 + 6 > 56 зазора) — такой разъезд идёт ПОСЛЕДОВАТЕЛЬНО:
+// въезжающий грузовик держится до коридора (см. окно LANE_WINDOW в
+// car-corridor), пока выезжающая не уедет, — как в жизни у тесных ворот.
+export const CAR_EXIT_PULL_PAST = 56
 
 // [СПЕЦ-Z5/Z7] стоящий у прохода агент НЕ прижат к линии забора: визуальный
 // низ спрайта (подошва/бампер) — на 6 px ВЫШЕ линии дороги F. По правке
@@ -106,6 +111,63 @@ export const STOP_STANDOFF_ENTER = 6
 // [СПЕЦ-Z8] остановка ВЫЕЗДА: бампер (верх спрайта) на 10 px НИЖЕ линии F
 // со стороны базы — не доезжая линии, зеркально «не впритык».
 export const STOP_STANDOFF_EXIT = 10
+
+// ---------------------------------------------------------------------------
+// [№51-КОМФОРТНЫЙ-РАЗЪЕЗД] полоса выезда, ограниченная дорогой.
+//
+// Репорт №51: «опять выезжающая машина проезжает слишком высоко за ворота,
+// когда пропускает въезжающую, хотя по виду им места хватило бы, даже для
+// двух грузовиков». На сцене заказчика над воротами лежит элемент фоновой
+// дороги («Дорога с трафиком»): посаженная выше кромки этой дороги машина
+// визуально ВЫЛЕЗАЕТ на асфальт. Раньше полоса выезда была гарантийной
+// F - 71 (под грузовик) независимо от того, что нарисовано выше ворот.
+//
+// Теперь полоса выезда машины — НИЖНЯЯ кромка фоновой дороги (низ корпуса
+// РОВНО на кромке асфальта, машина целиком ниже дороги), но не глубже
+// гарантийного коридора CAR_EXIT_PULL_PAST (нос легковой-встречной):
+//   laneBottom = min(F - 56, roadBottomEdge + height)
+// У грузовика (65 > 50 зазора до носа легковой) кромка дороги дала бы
+// 182 при лимите 172 — лимит коридора сильнее, грузовик встаёт на F - 56:
+// выше кромки дороги он больше НЕ поднимается (было F - 71), а легковая
+// встаёт вплотную к кромке. Разъезд «грузовик под грузовиком» идёт
+// последовательно: въезжающий грузовик держится до коридора (его корпус в
+// окне LANE_WINDOW от выезжающей — car-corridor тормозит подход).
+// ---------------------------------------------------------------------------
+
+// Нарисованная нижняя кромка фоновой дороги: элемент 'traffic_road' может
+// быть ниже MIN — полотно дорисовывается до TRAFFIC_ROAD_MIN_H (min-height
+// корня TrafficRoad.vue), поэтому берём max(высоты элемента, MIN).
+// Дороги нет / она не над воротами — null (кап не применяется).
+export const trafficRoadPaintedBottom = (
+  simElements: Array<Record<string, any>> | null | undefined,
+): number | null => {
+  if (!simElements) return null
+  for (const el of simElements) {
+    if (!el || el.asset?.type !== 'traffic_road') continue
+    const y = Number(el.y)
+    const h = Number(el.height)
+    if (!Number.isFinite(y) || !Number.isFinite(h)) continue
+    const bottom = y + Math.max(h, TRAFFIC_ROAD_MIN_H)
+    return Number.isFinite(bottom) ? bottom : null
+  }
+  return null
+}
+
+// Низ корпуса выезжающей машины на её полосе ожидания/уезда.
+// gateBottomF — линия дороги (низ ворот); roadBottom — кромка фоновой дороги
+// над воротами (null — дороги нет/она не участвует).
+export const exitLaneBottomFor = (
+  gateBottomF: number,
+  exitHeight: number,
+  roadBottom: number | null | undefined,
+): number => {
+  const stackLane = gateBottomF - CAR_EXIT_PULL_PAST
+  if (roadBottom == null || !Number.isFinite(roadBottom)) return stackLane
+  // дорога существенно выше линии ворот — кап имеет смысл; если кромка ниже
+  // (дорога наезжает на ворота/ниже их) — кап не применяется
+  if (roadBottom > gateBottomF - 40) return stackLane
+  return Math.min(stackLane, roadBottom + exitHeight)
+}
 
 interface RawPoint { x?: number; y?: number }
 
@@ -208,6 +270,7 @@ export const deriveTrafficPoints = (
   direction: 'enter' | 'exit',
   scene: { width: number; height: number },
   side: RoadSide = 'right',
+  roadBottom?: number | null,
 ): TrafficPoints => {
   const isPerson = size.height > size.width   // человек 40x55, машина 80x40
   const footPad = isPerson ? FOOT_PAD_PERSON : 0
@@ -234,7 +297,12 @@ export const deriveTrafficPoints = (
   // подняты выше дороги (CAR_EXIT_PULL_PAST): ждёт ЗА шлагбаумом, уезжает
   // строго вбок по своей полосе, не пересекая дорогу. У человека без
   // изменений: ноги на линии дороги.
-  const exitY = isPerson ? roadY : roadY - CAR_EXIT_PULL_PAST
+  // [№51-КОМФОРТНЫЙ-РАЗЪЕЗД] полоса выезда ограничена кромкой фоновой
+  // дороги (exitLaneBottomFor): легковая встаёт низом РОВНО на кромку
+  // асфальта, грузовик — не глубже коридора F - 56.
+  const exitY = isPerson
+    ? roadY
+    : exitLaneBottomFor(gate.y + gate.height, size.height, roadBottom ?? null) - size.height / 2
   return {
     vertical: true,
     spawn: { x: cx, y: scene.height + 60 + size.height / 2 },
@@ -269,8 +337,9 @@ export const trafficPointsFor = (
   direction: 'enter' | 'exit',
   scene: { width: number; height: number },
   side: RoadSide = 'right',
+  roadBottom?: number | null,
 ): TrafficPoints => {
-  const derived = deriveTrafficPoints(gate, size, direction, scene, side)
+  const derived = deriveTrafficPoints(gate, size, direction, scene, side, roadBottom)
   const ctx: ValidateCtx = { vertical: derived.vertical, gate, size, scene }
 
   const apply = (roleName: 'spawn' | 'stop' | 'cross' | 'after'): TrafficPoint => {

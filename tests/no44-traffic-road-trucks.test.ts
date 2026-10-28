@@ -36,7 +36,7 @@ describe('[№44-ФОНОВЫЙ-ТРАФИК] общие спрайты с ос�
   })
 
   it('палитра и размеры машин — общие константы из simulatorConstants', () => {
-    expect(src).toContain("import { CAR_COLORS, CAR_WIDTH, CAR_HEIGHT, TRUCK_WIDTH_SCALE, TRUCK_HEIGHT_SCALE } from '~/utils/simulatorConstants'")
+    expect(src).toContain("import { CAR_COLORS, CAR_WIDTH, CAR_HEIGHT, TRUCK_WIDTH_SCALE, TRUCK_HEIGHT_SCALE, TRAFFIC_ROAD_MIN_H } from '~/utils/simulatorConstants'")
     expect(src).not.toMatch(/const CAR_COLORS = \[/)
   })
 })

@@ -29,7 +29,7 @@ import { getCarSvg, getTruckSvg } from '~/utils/simulatorSvg'
 // [№46-КРУПНЕЕ] размеры машин фоновой дороги = ТЕ ЖЕ константы, что в
 // основном симуляторе (CAR_WIDTH/CAR_HEIGHT): 100x50, грузовик 120x65 —
 // «такие же по размеру на фоновой дороге» (репорт №46).
-import { CAR_COLORS, CAR_WIDTH, CAR_HEIGHT, TRUCK_WIDTH_SCALE, TRUCK_HEIGHT_SCALE } from '~/utils/simulatorConstants'
+import { CAR_COLORS, CAR_WIDTH, CAR_HEIGHT, TRUCK_WIDTH_SCALE, TRUCK_HEIGHT_SCALE, TRAFFIC_ROAD_MIN_H } from '~/utils/simulatorConstants'
 
 const audio = useAudioEngine()
 
@@ -85,8 +85,8 @@ const TRUCK_SHARE = 0.1
 // край экрана с запасом под самый крупный транспорт (спавн/деспавн за кадром)
 const SPAWN_MARGIN = TRUCK_W
 
-// [№49-ШИРЕ-ДОРОГА] минимальная высота ПОЛОТНА фоновой дороги
-const TRAFFIC_ROAD_MIN_H = 116
+// [№49-ШИРЕ-ДОРОГА][№51] TRAFFIC_ROAD_MIN_H переехала в simulatorConstants —
+// физика выезда считает по ней нарисованную нижнюю кромку дороги.
 // [№49-ШИРЕ-ДОРОГА] подъём нижнего края полосы движения: колёса не скребут
 // нижнюю кромку асфальта (у грузовика зазор был всего 0.5px)
 const BOTTOM_LANE_LIFT = 4

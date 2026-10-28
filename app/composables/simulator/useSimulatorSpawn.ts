@@ -15,7 +15,7 @@ import {
   CHILD_AVATAR_SCALE,
 } from '~/utils/simulatorConstants'
 // [СХЕМА-ТРАЕКТОРИЙ] единый вывод точек спавна/остановки/прохода/ухода из геометрии ворот
-import { trafficPointsFor, FOOT_PAD_PERSON, type TrafficPoints } from '~/utils/simulatorTraffic'
+import { trafficPointsFor, trafficRoadPaintedBottom, FOOT_PAD_PERSON, type TrafficPoints } from '~/utils/simulatorTraffic'
 // [№31-ГРУЗОВИКИ] getTruckSvg — отдельный спрайт грузового автомобиля
 // [№41-РАКУРСЫ] *Front/*Rear — виды спереди/сзади для имитации 3D
 import { getCarSvg, getTruckSvg, getCarSvgFront, getCarSvgRear, getTruckSvgFront, getTruckSvgRear, generateRealPersonSvg } from '~/utils/simulatorSvg'
@@ -266,7 +266,7 @@ export function useSimulatorSpawn(
     // оффсеты применяются только если лежат на правильной стороне ворот —
     // устаревшие точки больше не ломают сторону спавна/ухода.
     const pts: TrafficPoints = gate
-      ? trafficPointsFor(gate as any, { width, height }, direction, sceneSize.value)
+      ? trafficPointsFor(gate as any, { width, height }, direction, sceneSize.value, 'right', trafficRoadPaintedBottom(simElements.value))
       : fallbackPoints(direction, 'Person', { width, height }, stopOffset, fixedX, fixedY)
 
     // [ФИКС-НОГИ-НИЖЕ-КАЛИТКИ] страховочный клэмп для приходящих (ЦЕНТР):
@@ -400,7 +400,7 @@ export function useSimulatorSpawn(
     // [СХЕМА-ТРАЕКТОРИЙ] см. createGroup: точки из геометрии ворот,
     // настроенные оффсеты — только при правильной стороне
     const pts: TrafficPoints = gate
-      ? trafficPointsFor(gate as any, { width, height }, direction, sceneSize.value)
+      ? trafficPointsFor(gate as any, { width, height }, direction, sceneSize.value, 'right', trafficRoadPaintedBottom(simElements.value))
       : fallbackPoints(direction, 'Person', { width, height }, stopOffset, fixedX, fixedY)
 
     // [№33-ДЕТИ] индивидуальный размер: ребёнок — 72% взрослого роста
@@ -479,7 +479,7 @@ export function useSimulatorSpawn(
     // и справа, и слева (раньше — только справа).
     const side: 'right' | 'left' = Math.random() < 0.5 ? 'left' : 'right'
     const pts: TrafficPoints = gate
-      ? trafficPointsFor(gate as any, { width, height }, direction, sceneSize.value, side)
+      ? trafficPointsFor(gate as any, { width, height }, direction, sceneSize.value, side, trafficRoadPaintedBottom(simElements.value))
       : fallbackPoints(direction, 'Car', { width, height }, stopOffset, fixedX, fixedY, side)
 
     const carElement: SceneElement = {

@@ -182,8 +182,9 @@ describe('[№23-ВЫЕЗД/№20-КОРРЕКТОР] точка ожидани�
 
     tick(h, 25) // 2.5с — корректор поднимает выезжающую на посадку (раннего уезда нет: стороны дороги заняты)
     expect(exit.state).toBe('waiting_after')
-    // [№48] против легковой посадка F − 46 (ниже прежней F − 71)
-    expect(Math.abs(centerOf(exit).y - (F - CAR.height / 2 - exitPullPastFor(CAR.height)))).toBeLessThanOrEqual(3)
+    // [№51] посадка — на полосу выезда min(F - 56, кромка дороги + корпус):
+    // в харнессе дороги нет, полоса = гарантийный коридор F - 56
+    expect(Math.abs(centerOf(exit).y - (F - CAR.height / 2 - CAR_EXIT_PULL_PAST))).toBeLessThanOrEqual(3)
   })
 })
 

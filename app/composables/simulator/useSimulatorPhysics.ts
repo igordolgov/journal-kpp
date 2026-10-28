@@ -8,9 +8,10 @@ import type { SceneElement, AiAgent } from '~/types/simulator'
 import { DESPAWN_MARGIN } from '~/utils/simulatorConstants'
 import { dot, cross, normalizeAngle } from '~/utils/simulatorMath'
 // [СХЕМА-ТРАЕКТОРИЙ] единый с спавном пересчёт цели остановки из геометрии ворот
-// [№34-УЕЗД-СРАЗУ] глубина посадки выезда — адаптивная (gateFlow.exitPullPastFor),
-// гарантийный коридор маршрута — CAR_EXIT_PULL_PAST в simulatorTraffic.ts
-import { trafficPointsFor } from '~/utils/simulatorTraffic'
+// [№34-УЕЗД-СРАЗУ] глубина посадки выезда — полоса min(F - 56, кромка фоновой
+// дороги + корпус) (exitLaneBottomFor), ранний уезд по-прежнему проверяет нос
+// встречного (gateFlow.exitPullPastFor); коридор маршрута — CAR_EXIT_PULL_PAST.
+import { exitLaneBottomFor, trafficPointsFor, trafficRoadPaintedBottom } from '~/utils/simulatorTraffic'
 // [П1] темп шага: накопление «паузы анимации» для CSS-фазы ног
 import { walkHoldStep } from '~/utils/simTuning'
 // [№20-ВОРОТА-ИДЕАЛ] общая логика зоны ворот: точка ожидания выезда,
@@ -768,6 +769,10 @@ export function useSimulatorPhysics(
     // [№28-ЖИВАЯ-ПАНЕЛЬ] настройки людей — на каждый тик: ползунки панели
     // в окне симулятора действуют сразу, без перезапуска симуляции
     refreshPersonTuning()
+    // [№51-КОМФОРТНЫЙ-РАЗЪЕЗД] нарисованная кромка фоновой дороги над воротами
+    // (элемент 'traffic_road' — единственный в сцене): полоса выезда машин
+    // не поднимается выше неё. Дороги нет — null, кап не применяется.
+    const roadBottomEdge = trafficRoadPaintedBottom(simElements.value)
     const ACCEL = simOpts.ACCEL ?? 100
     const DECEL = simOpts.DECEL ?? 100
     const REACTION_TIME = simOpts.REACTION_TIME ?? 1.5
@@ -1435,7 +1440,8 @@ export function useSimulatorPhysics(
               agent.type === 'car' && agent.direction === 'exit' && gate) {
             const oppHq = enterLaneOpponentHeight(aiAgents.value, agent, gate)
             if (oppHq > 0) {
-              const spotQ = gate.y + gate.height - el.height / 2 - exitPullPastFor(oppHq)
+              // [№51] полоса = min(F - 56, кромка дороги + корпус)
+              const spotQ = exitLaneBottomFor(gate.y + gate.height, el.height, roadBottomEdge) - el.height / 2
               const curQ = el.y + el.height / 2
               const remainQ = spotQ - curQ
               if (remainQ > 2) {
@@ -1479,8 +1485,14 @@ export function useSimulatorPhysics(
               // exitPoint (маршрутный коридор F − 71) больше не точка
               // ожидания — ждём НА МИНИМАЛЬНО ДОСТАТОЧНОЙ высоте.
               const oppH = enterLaneOpponentHeight(aiAgents.value, agent, gate)
+              // [№51-КОМФОРТНЫЙ-РАЗЪЕЗД] посадка при встречной — на полосу
+              // min(F - 56, кромка дороги + корпус): машина больше не
+              // поднимается выше нарисованной дороги (репорт №51 «слишком
+              // высоко»). Встречный грузовик под ней больше не помещается —
+              // он держится до коридора (окно LANE_WINDOW), разъезд
+              // последовательный, как в жизни у тесных ворот.
               const spotY = oppH > 0
-                ? gate.y + gate.height - el.height / 2 - exitPullPastFor(oppH)
+                ? exitLaneBottomFor(gate.y + gate.height, el.height, roadBottomEdge) - el.height / 2
                 : lineY
               const curCy = el.y + el.height / 2
               const remain = spotY - curCy
