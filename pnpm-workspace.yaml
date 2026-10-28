@@ -10,8 +10,8 @@ minimumReleaseAgeExclude:
   - '@nuxt/vite-builder@4.6.0 || 4.6.3'
   - '@nuxt/vite-server@4.6.0 || 4.6.3'
   - nuxt@4.6.0 || 4.6.3
-  - '@lucide/vue@1.60.0 || 1.61.0 || 1.62.0'
-  - electron@44.9.1 || 45.0.0
+  - '@lucide/vue@1.60.0 || 1.61.0 || 1.62.0 || 1.63.0'
+  - electron@44.9.1 || 45.0.0 || 45.1.0
   - '@markuplint/html-parser@5.3.0'
   - '@markuplint/ml-ast@5.3.0'
   - '@markuplint/ml-spec@5.3.0'
