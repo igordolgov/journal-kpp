@@ -1,0 +1,53 @@
+КАК ПРИМЕНИТЬ БЕЗ ПАТЧА — копированием файлов
+==============================================
+
+Шаг 1. Выровнять историю (2 команды в D:\journal-kpp):
+   git branch backup-locmain
+   git reset --hard origin/main
+   (backup-locmain хранит ваш локальный коммит-черновик; после
+    успешного пуша её можно удалить: git branch -D backup-locmain)
+
+Шаг 2. Скопировать содержимое этой папки в D:\journal-kpp
+   с ЗАМЕНОЙ файлов (структура папок совпадает с репозиторием).
+   Три файла новые — их у вас просто не было, они добавятся:
+   app/constants/builtinScene.ts
+   tests/no51-exit-crossing-depth.test.ts
+   tests/no52-truck-height-wheels-sound.test.ts
+
+Шаг 3. Проверка:
+   npx vitest run        → 369 passed | 1 skipped (49 файлов)
+
+Шаг 4. Отправить:
+   git add -A
+   git commit -m "№51+№52: сцена по умолчанию; дорога по размерам; грузовики не выше дороги; колёса тыла; звук щелчка"
+   git push origin main
+
+СПИСОК ФАЙЛОВ И ЧТО В НИХ
+-------------------------
+app/components/editor/TrafficRoad.vue
+   Дорога строго по размерам элемента (константы TRAFFIC_ROAD_MIN_H
+   больше НЕТ — поэтому старый тест №49 и падал), полосы и транспорт
+   масштабируются, нижний край полосы приподнят на 4px.
+app/utils/gateFlow.ts
+   exitPullPastFor — глубина посадки по ВИДИМОЙ геометрии спрайтов
+   (для грузовика): колёса над крышей встречного, F-41 против
+   легковой, F-58 против грузовика. Легковая не тронута.
+app/composables/simulator/useSimulatorPhysics.ts
+   isTruckAgent (флаг спавна _isTruck или рост ≥ 1.15 легковой) +
+   4 места вызова exitPullPastFor с новой сигнатурой.
+app/utils/simulatorSvg.ts
+   Грузовик посажен на грунт y63 (было y60, «висел» над дорогой),
+   колёса на фасе и тыле опущены до земли и получили светлые диски
+   #9ca3af — теперь видны на тёмном фоне базы.
+app/composables/simulator/useSimulatorCore.ts
+   handleGateClick: клик мышью по воротам/калитке на сцене играет
+   UI-щелчок (audio.playUI), мотор/замок довключаются как раньше.
+app/composables/useEditorLogic.ts, app/layouts/default.vue,
+app/constants/builtinScene.ts
+   Ваша сцена встроена в код и грузится по умолчанию (редактор и
+   док-симулятор стартуют на ней).
+README.md
+   Журнал изменений (№51, №52, разбор ошибок консоли).
+tests/... (5 файлов)
+   Обновлённые gate-flow, no34, no49 (переписан под финал) и два
+   новых: no51 (глубина проезда выезда), no52 (грузовик/колёса/звук).

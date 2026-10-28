@@ -13,8 +13,9 @@
 //
 // Фикс: ранний уезд выезжающей разрешает и ПОДЪЕЗЖАЮЩАЯ въезжающая (корпус
 // или цель в коридоре оси — exitLaneBusy) и при ЛЮБОМ шлагбауме; предохранители:
-//  • уезд только корпусом выше полосы въезда (низ на посадке F-46): машина,
-//    ещё стоящая на линии/в середине подъёма, сначала поднимается корректором;
+//  • уезд только корпусом выше полосы въезда (низ на посадке; [№52] у
+//    грузовика — по видимой геометрии спрайтов): машина, ещё стоящая на
+//    линии/в середине подъёма, сначала поднимается корректором;
 //  • обе стороны дороги заняты встречными — уезда нет (репорт №27 сохранён);
 //  • пустые ворота — ожидание закрытия ([№23] сохранён).
 
@@ -175,22 +176,26 @@ describe('[№34-БЕЗОПАСНОСТЬ] уезд только корпусо�
 
     let departBottom = NaN
     let movedSidewaysInLane = false
-    // [№48-КОМФОРТНЫЙ-РАЗЪЕЗД] «полоса въезда» — нос САМОГО ВЫСОКОГО
-    // претендента на линию: тут встречная легковая (CAR), значит F − 46.
-    const enterLaneTop = F - exitPullPastFor(CAR.height)
+    // [№48→№52] «полоса въезда» у ЛЕГКОВОЙ и ГРУЗОВИКА разная. Легковая —
+    // элементная формула (нос встречной F − 46). Выезжающий ГРУЗОВИК —
+    // видимые колёса над видимой крышей встречной (репорт №52 «грузовые
+    // все-таки выше»): элементный низ его посадки перекрывает мёртвую зону
+    // спрайта встречной (крыша легковой на 11px ниже верха элемента при
+    // 80x40) — визуального наложения нет, касание как в E4.
+    const truckSpotBottom = F - exitPullPastFor(CAR.height, true, false, TRUCK.height) // 420 − 34 = 386
     for (let i = 0; i < 240; i++) { // 12 c
       h.physics.updateAiMovement(DT, { carGateId: 'gate-1', personGateId: '' })
       if (b.state === 'moving_away') {
         if (!Number.isFinite(departBottom)) departBottom = bottomOf(b)
-      } else if (Math.abs(centerOf(b).x - CX) > 3 && bottomOf(b) > enterLaneTop + 2) {
+      } else if (Math.abs(centerOf(b).x - CX) > 3 && bottomOf(b) > truckSpotBottom + 2) {
         movedSidewaysInLane = true
       }
       expect(hasOverlap([a, b])).toBe(false)
     }
-    // уезд случился, но только с посадки (низ корпуса выше полосы въезда —
-    // [№48] адаптивной: нос встречной легковой F − 46)
+    // уезд случился, но только с посадки ([№52] видимые колёса грузовика —
+    // над видимой крышей встречной легковой)
     expect(Number.isFinite(departBottom)).toBe(true)
-    expect(departBottom).toBeLessThanOrEqual(enterLaneTop + 2.5)
+    expect(departBottom).toBeLessThanOrEqual(truckSpotBottom + 2.5)
     expect(movedSidewaysInLane).toBe(false)
     expect(h.warns.filter(w => w.includes('[watchdog]') || w.includes('[crossing-cap]'))).toEqual([])
   })

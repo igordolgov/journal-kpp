@@ -31,8 +31,11 @@ export const getCarSvg = (color: string): string => `
 // [№31-ГРУЗОВИКИ] грузовой автомобиль: цветной будка-кузов + тёмная кабина.
 // viewBox 120x65 (пропорция 1.85) — элемент 96x52 (TRUCK_*_SCALE от легковой).
 // [№42-ПРОПОРЦИИ] канон линий ГРУЗОВИКА (единый для трёх ракурсов):
-//   кузов y12..44 | крыша кабины y24 | рама y46..52 | колёса r8 cy52
-//   (низ = грунт y60). Кабина ниже кузова — как в жизни.
+//   кузов y12..44 | крыша кабины y24 | рама y46..52 | колёса r8 cy55
+//   (низ = грунт y63). Кабина ниже кузова — как в жизни.
+// [№52-ГРУЗ-НИЖЕ] колёса посажены на грунт y63: мёртвый зазор под спрайтом
+// 2px — как у легковой (y58 из 60). Было y60 из 65 (зазор 5px): грузовик
+// «висел» над дорогой на 3px выше легковой, а на разъезде лез ещё и крышей.
 export const getTruckSvg = (color: string): string => `
   <svg viewBox="0 0 120 65" xmlns="http://www.w3.org/2000/svg">
     <rect x="4" y="46" width="112" height="6" rx="2" fill="#4b5563"/>
@@ -49,9 +52,9 @@ export const getTruckSvg = (color: string): string => `
     <rect x="84" y="21.5" width="3.5" height="2.5" rx="0.8" fill="#fbbf24"/>
     <rect x="90" y="21.5" width="3.5" height="2.5" rx="0.8" fill="#fbbf24"/>
     <rect x="96" y="21.5" width="3.5" height="2.5" rx="0.8" fill="#fbbf24"/>
-    <circle cx="20" cy="52" r="8" fill="#1f2937"/><circle cx="20" cy="52" r="3.5" fill="#9ca3af"/>
-    <circle cx="40" cy="52" r="8" fill="#1f2937"/><circle cx="40" cy="52" r="3.5" fill="#9ca3af"/>
-    <circle cx="96" cy="52" r="8" fill="#1f2937"/><circle cx="96" cy="52" r="3.5" fill="#9ca3af"/>
+    <circle cx="20" cy="55" r="8" fill="#1f2937"/><circle cx="20" cy="55" r="3.5" fill="#9ca3af"/>
+    <circle cx="40" cy="55" r="8" fill="#1f2937"/><circle cx="40" cy="55" r="3.5" fill="#9ca3af"/>
+    <circle cx="96" cy="55" r="8" fill="#1f2937"/><circle cx="96" cy="55" r="3.5" fill="#9ca3af"/>
   </svg>
 `
 
@@ -98,10 +101,14 @@ export const getCarSvgRear = (color: string): string => `
 // [№41-РАКУРСЫ] Грузовик спереди. [№42-ПРОПОРЦИИ] торец кузова ШИРЕ кабины
 // (x30..90 против x40..80) — кабина не занимает всю ширину; за ней видны
 // затемнённые боковины кузова и рама. Отметки высот = канон профиля.
+// [№52-ГРУЗ-НИЖЕ] колёса до грунта y63 + светлые диски: на тёмном фоне базы
+// тёмные шины сливались с асфальтом — колёс не было видно.
 export const getTruckSvgFront = (color: string): string => `
   <svg viewBox="0 0 120 65" xmlns="http://www.w3.org/2000/svg">
-    <rect x="43" y="52" width="10" height="8" rx="2" fill="#1f2937"/>
-    <rect x="67" y="52" width="10" height="8" rx="2" fill="#1f2937"/>
+    <rect x="43" y="55" width="10" height="8" rx="2" fill="#1f2937"/>
+    <rect x="45" y="57" width="6" height="4" rx="1.5" fill="#9ca3af"/>
+    <rect x="67" y="55" width="10" height="8" rx="2" fill="#1f2937"/>
+    <rect x="69" y="57" width="6" height="4" rx="1.5" fill="#9ca3af"/>
     <rect x="30" y="12" width="60" height="32" rx="2" fill="${color}" stroke="#111827" stroke-width="1.5"/>
     <rect x="30" y="12" width="60" height="6" rx="2" fill="#ffffff" opacity="0.18"/>
     <rect x="30" y="24" width="10" height="20" fill="rgba(0,0,0,0.18)"/>
@@ -122,11 +129,18 @@ export const getTruckSvgFront = (color: string): string => `
 
 // [№41-РАКУРСЫ] Грузовик сзади: полный торец кузова со швом грузовых дверей,
 // красные габариты, рама, бампер с номером. [№42-ПРОПОРЦИИ] кузов y12..44,
-// грунт y60 — те же линии, что у профиля и фаса.
+// грунт y63 — те же линии, что у профиля и фаса.
+// [№52-КОЛЁСА-ТЫЛ] репорт: «почему я не вижу колёс на грузовых автомобилях
+// на виде сзади?» — колёса были полоской 6px под светлым бампером, тёмные
+// #1f2937 на тёмном фоне базы #152129 не читались. Теперь шины опущены до
+// грунта (y55..63) и получили светлые диски — колёса видны и на базе, и на
+// асфальте; силуэт «бампер → колёса» читается как у профиля.
 export const getTruckSvgRear = (color: string): string => `
   <svg viewBox="0 0 120 65" xmlns="http://www.w3.org/2000/svg">
-    <rect x="35" y="52" width="10" height="8" rx="2" fill="#1f2937"/>
-    <rect x="75" y="52" width="10" height="8" rx="2" fill="#1f2937"/>
+    <rect x="35" y="55" width="10" height="8" rx="2" fill="#1f2937"/>
+    <rect x="37" y="57" width="6" height="4" rx="1.5" fill="#9ca3af"/>
+    <rect x="75" y="55" width="10" height="8" rx="2" fill="#1f2937"/>
+    <rect x="77" y="57" width="6" height="4" rx="1.5" fill="#9ca3af"/>
     <rect x="30" y="12" width="60" height="32" rx="2" fill="${color}" stroke="#111827" stroke-width="1.5"/>
     <rect x="30" y="12" width="60" height="6" rx="2" fill="#ffffff" opacity="0.18"/>
     <rect x="59" y="12" width="2" height="32" fill="#ffffff" opacity="0.3"/>

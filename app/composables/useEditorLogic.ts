@@ -7,12 +7,11 @@
 import { ref, computed, watch } from 'vue'
 import { useSceneBuilder } from './useSceneBuilder'
 import { useToast } from './useToast'
-// [№52-ДЕФОЛТНАЯ-СЦЕНА] сцена заказчика, зашитая в сборку: грузится, когда
-// journal_kpp_last_scene пуст (первый запуск). У существующих установок
-// сохранённая сцена имеет приоритет — дефолт их не затирает.
-import { DEFAULT_KPP_SCENE } from '~/utils/defaultSceneData'
 import type { SceneConfig, Panel, Script } from '../types/scene'
 import type { SceneElement } from '~/types/simulator'
+// [№51-СЦЕНА-ПО-УМОЛЧАНИЮ] сцена заказчика, вшитая в приложение: редактор
+// и симулятор стартуют на ней, пока пользователь не создал свою
+import { builtinScene } from '../constants/builtinScene'
 
 function debounce<T extends (...args: any[]) => void>(fn: T, delay: number) {
   let timer: ReturnType<typeof setTimeout>
@@ -40,6 +39,14 @@ const defaultScene: SceneConfig = {
   lifeConfig: {}
 }
 
+// [№51-СЦЕНА-ПО-УМОЛЧАНИЮ] стартовая сцена приложения. Раньше это был
+// defaultScene (пустой холст 1280x720): редактор выглядел «пустым», а док
+// симулятора — «Сцена не загружена». Теперь стартуем на сцене заказчика;
+// как только пользователь меняет/сохраняет что-то своё, автосейв в
+// localStorage или БД штатно перекрывает встроенную сцену.
+const startingScene = (): SceneConfig =>
+  JSON.parse(JSON.stringify(builtinScene)) as SceneConfig
+
 // Нормализация сырой сцены до полной структуры SceneConfig
 const normalizeScene = (raw: any): SceneConfig => {
   const base = JSON.parse(JSON.stringify(defaultScene)) as SceneConfig
@@ -61,7 +68,8 @@ export const useEditorLogic = () => {
   const { saveScene, listScenes, loadScene } = useSceneBuilder()
   const toast = useToast()
 
-  const sceneConfig = ref<SceneConfig>(JSON.parse(JSON.stringify(defaultScene)))
+  // [№51-СЦЕНА-ПО-УМОЛЧАНИЮ] стартуем на встроенной сцене заказчика
+  const sceneConfig = ref<SceneConfig>(startingScene())
 
   // --- State ---
   const selectedId = ref<string | null>(null)
@@ -139,10 +147,11 @@ export const useEditorLogic = () => {
         if (saved) {
           const parsed = JSON.parse(saved)
           if (parsed && parsed.settings) sceneConfig.value = normalizeScene(parsed)
-        } else {
-          // [№52] первый запуск — сразу сцена заказчика (ворота/калитка/
-          // дорога с трафиком/панели), а не пустой холст
-          sceneConfig.value = normalizeScene(JSON.parse(JSON.stringify(DEFAULT_KPP_SCENE)))
+        }
+        // [№51] сохранённой сцены нет — остаёмся на встроенной (startingScene),
+        // но прогоняем через normalizeScene на случай эволюции схемы
+        else {
+          sceneConfig.value = normalizeScene(startingScene())
         }
         const lastScript = localStorage.getItem(STORAGE_KEY_SCRIPT)
         if (lastScript) selectedScriptId.value = lastScript

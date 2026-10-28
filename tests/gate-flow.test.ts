@@ -2,7 +2,10 @@
 // [№20-ВОРОТА-ИДЕАЛ] пересмотр логики движения у ворот:
 //  1) выезжающая машина при свободной полосе заканчивает проход СРАЗУ на
 //     линии ожидания въезжающих — никакого «проехала вверх, вернулась»;
-//  2) полоса занята (встречная стоит/подъезжает) — ждёт вверху на посадке;
+//  2) полоса занята (встречная стоит/подъезжает) — проезд и стоянка на
+//     АДАПТИВНОЙ посадке: нос встречного + стендофф ([№48] стоянка,
+//     [№51] сам проезд); гарантийный коридор F − 71 остаётся только
+//     против грузовика (разъезд двух грузовиков);
 //  3) пока ворота не закрылись, точка ожидания пересчитывается в ОБЕ
 //     стороны (корректор): полоса освободилась — вниз на линию, встречная
 //     подъехала — вверх на посадку;
@@ -128,7 +131,7 @@ describe('[№20-БЕЗ-ВОЗВРАТА] цель прохода выезжаю
     expect(exit.target.y).toBeLessThanOrEqual(ENTER_STOP_Y + 2)
   })
 
-  it('полоса занята (встречная стоит на линии) — проход к глубокой посадке', () => {
+  it('полоса занята (встречная легковая на линии) — проезд на АДАПТИВНУЮ посадку [№51], а не на гарантийный коридор', () => {
     const h = buildHarness([makeCarGate()])
     const enter = mkCar('car-e', 'enter', 'waiting_before', CX, ENTER_STOP_Y, { x: CX, y: ENTER_STOP_Y }, { x: CX, y: 900 })
     const exit = mkCar('car-x', 'exit', 'waiting_before', CX, EXIT_STOP_Y, { x: CX, y: EXIT_STOP_Y }, { x: 1300, y: EXIT_CROSS_Y })
@@ -136,7 +139,29 @@ describe('[№20-БЕЗ-ВОЗВРАТА] цель прохода выезжаю
 
     tick(h, 1)
     expect(exit.state).toBe('crossing')
-    expect(Math.abs(exit.target.y - EXIT_CROSS_Y)).toBeLessThanOrEqual(2)
+    // [№51-ПРОЕЗД-БЕЗ-ВЫСОТЫ] цель прохода = нос встречного + стендофф:
+    // ROAD_Y − exitPullPastFor(40) = 200 − 46 = 154. Раньше проезд шёл на
+    // гарантийный коридор F − 71 = 129 — «опять проезжает слишком высоко
+    // за ворота, хотя по виду им места хватило бы» (репорт №51)
+    expect(exit.target.y).toBeCloseTo(ROAD_Y - exitPullPastFor(CAR.height), 0)
+  })
+
+  it('полоса занята ГРУЗОВИКОМ — проезд на гарантийный коридор F − 71 (разъезд двух грузовиков сохранён)', () => {
+    const h = buildHarness([makeCarGate()])
+    // грузовик 120x65 претендует на линию ЦЕЛЬЮ (корпус далеко, как у
+    // подъезжающей, которой уступают — иначе FCFS очереди направлений
+    // запирает выезд): enterLaneOpponentHeight вернёт 65 — посадка F − 71
+    const enter: any = mkCar('car-t', 'enter', 'to_gate', 640, 100, { x: CX, y: ENTER_STOP_Y }, { x: CX, y: 900 })
+    enter.element.width = 120
+    enter.element.height = 65
+    enter.element.x = 640 - 60
+    enter.element.y = 100 - 65 / 2
+    const exit = mkCar('car-x', 'exit', 'waiting_before', CX, EXIT_STOP_Y, { x: CX, y: EXIT_STOP_Y }, { x: 1300, y: EXIT_CROSS_Y })
+    h.aiAgents.value = [enter, exit as any]
+
+    tick(h, 1)
+    expect(exit.state).toBe('crossing')
+    expect(exit.target.y).toBeCloseTo(EXIT_CROSS_Y, 0)
   })
 })
 
@@ -182,9 +207,8 @@ describe('[№23-ВЫЕЗД/№20-КОРРЕКТОР] точка ожидани�
 
     tick(h, 25) // 2.5с — корректор поднимает выезжающую на посадку (раннего уезда нет: стороны дороги заняты)
     expect(exit.state).toBe('waiting_after')
-    // [№51] посадка — на полосу выезда min(F - 56, кромка дороги + корпус):
-    // в харнессе дороги нет, полоса = гарантийный коридор F - 56
-    expect(Math.abs(centerOf(exit).y - (F - CAR.height / 2 - CAR_EXIT_PULL_PAST))).toBeLessThanOrEqual(3)
+    // [№48] против легковой посадка F − 46 (ниже прежней F − 71)
+    expect(Math.abs(centerOf(exit).y - (F - CAR.height / 2 - exitPullPastFor(CAR.height)))).toBeLessThanOrEqual(3)
   })
 })
 

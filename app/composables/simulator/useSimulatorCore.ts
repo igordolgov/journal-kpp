@@ -480,6 +480,11 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
   const handleGateClick = (el: SceneElement) => {
     if (!GATES_LIST.includes(el.category || '')) return false
     if (!el.settings) el.settings = {}
+    // [№52-ЗВУК-КЛИКА] репорт: «добавь звук открытия ворот и калитки (щелчок
+    // кнопки) также и на нажатия мыши по воротам/калитке». Клик по створу на
+    // сцене = нажатие кнопки панели: тот же UI-щелчок (audio.playUI), что
+    // играет onControlClick у кнопок; мотор/замок довключают свои звуки ниже.
+    audio.playUI(0.8)
     const name = (el.name || '').toLowerCase()
     if (!el.settings.gateType) {
       if (name.includes('ворота') || name.includes('шлагбаум')) el.settings.gateType = 'sliding'

@@ -5,13 +5,13 @@
 import { type Ref, onScopeDispose } from 'vue'
 import { useAudioEngine } from '~/composables/useAudioEngine'
 import type { SceneElement, AiAgent } from '~/types/simulator'
-import { DESPAWN_MARGIN } from '~/utils/simulatorConstants'
+// [№52-ГРУЗ-НЕ-ВЫШЕ-ДОРОГИ] CAR_HEIGHT — база для порога «грузовик ли агент»
+import { CAR_HEIGHT, DESPAWN_MARGIN } from '~/utils/simulatorConstants'
 import { dot, cross, normalizeAngle } from '~/utils/simulatorMath'
 // [СХЕМА-ТРАЕКТОРИЙ] единый с спавном пересчёт цели остановки из геометрии ворот
-// [№34-УЕЗД-СРАЗУ] глубина посадки выезда — полоса min(F - 56, кромка фоновой
-// дороги + корпус) (exitLaneBottomFor), ранний уезд по-прежнему проверяет нос
-// встречного (gateFlow.exitPullPastFor); коридор маршрута — CAR_EXIT_PULL_PAST.
-import { exitLaneBottomFor, trafficPointsFor, trafficRoadPaintedBottom } from '~/utils/simulatorTraffic'
+// [№34-УЕЗД-СРАЗУ] глубина посадки выезда — адаптивная (gateFlow.exitPullPastFor),
+// гарантийный коридор маршрута — CAR_EXIT_PULL_PAST в simulatorTraffic.ts
+import { trafficPointsFor } from '~/utils/simulatorTraffic'
 // [П1] темп шага: накопление «паузы анимации» для CSS-фазы ног
 import { walkHoldStep } from '~/utils/simTuning'
 // [№20-ВОРОТА-ИДЕАЛ] общая логика зоны ворот: точка ожидания выезда,
@@ -20,7 +20,7 @@ import { walkHoldStep } from '~/utils/simTuning'
 // [№24-БЕЗ-ОСТАНОВКИ] GATE_AXIS_WINDOW — коридор оси ворот для проверки
 // «у ворот есть другая машина»
 // [№26-РУЧКА] wicketHandlePending — пуш полотна ждёт конца анимации ручки
-import { clampPersonToFence, enterLaneOpponentHeight, exitLaneBusy, exitPendingFor, exitPullPastFor, exitWaitCenterY, GATE_AXIS_WINDOW, limitPersonPushY, roadSideBusyForDeparture, wicketAlignX, wicketHandlePending } from '../../utils/gateFlow'
+import { clampPersonToFence, enterLaneOpponentHeight, exitPendingFor, exitPullPastFor, exitWaitCenterY, GATE_AXIS_WINDOW, limitPersonPushY, roadSideBusyForDeparture, wicketAlignX, wicketHandlePending } from '../../utils/gateFlow'
 // [№27-НАСТРОЙКИ-ЛЮДЕЙ] реестр настроек движения/логики людей (тумблеры +
 // плавные ползунки в Настройки -> Симулятор); читается на каждом тике
 import { tuneBool, tuneNumber } from '../../utils/personTuning'
@@ -41,6 +41,14 @@ export function useSimulatorPhysics(
 ) {
   // ✅ audio теперь внутри setup-контекста
   const audio = useAudioEngine()
+
+  // [№52-ГРУЗ-НЕ-ВЫШЕ-ДОРОГИ] грузовик ли агент: флаг спавна (_isTruck ставится
+  // при создании машины) или рост от 1.15 высоты легковой — сцены могут
+  // переопределять carHeight, у грузовика она × TRUCK_HEIGHT_SCALE (1.3)
+  const truckMinH = (): number =>
+    Math.round((((simOpts as any).carHeight as number | undefined) ?? CAR_HEIGHT) * 1.15)
+  const isTruckAgent = (a: AiAgent): boolean =>
+    (a.element.settings as any)?._isTruck === true || a.element.height >= truckMinH()
   
   // ✅ gateCloseTimers теперь внутри функции, а не на уровне модуля
   const gateCloseTimers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -769,10 +777,6 @@ export function useSimulatorPhysics(
     // [№28-ЖИВАЯ-ПАНЕЛЬ] настройки людей — на каждый тик: ползунки панели
     // в окне симулятора действуют сразу, без перезапуска симуляции
     refreshPersonTuning()
-    // [№51-КОМФОРТНЫЙ-РАЗЪЕЗД] нарисованная кромка фоновой дороги над воротами
-    // (элемент 'traffic_road' — единственный в сцене): полоса выезда машин
-    // не поднимается выше неё. Дороги нет — null, кап не применяется.
-    const roadBottomEdge = trafficRoadPaintedBottom(simElements.value)
     const ACCEL = simOpts.ACCEL ?? 100
     const DECEL = simOpts.DECEL ?? 100
     const REACTION_TIME = simOpts.REACTION_TIME ?? 1.5
@@ -845,13 +849,36 @@ export function useSimulatorPhysics(
       // проход сразу на линии ожидания въезжающих (exitWaitCenterY): прежняя
       // цель «глубокая посадка» (CAR_EXIT_PULL_PAST) заставляла машину
       // проехать вверх и вернуться назад к точке ожидания закрытия —
-      // «сначала проезжает вверх, затем возвращается» (репорт №20). Полоса
-      // занята (встречная стоит/подъезжает к воротам) — цель прежняя:
-      // посадка вверху, чтобы освободить линию въезжающим.
+      // «сначала проезжает вверх, затем возвращается» (репорт №20).
+      // [№51-ПРОЕЗД-БЕЗ-ВЫСОТЫ] репорт: «опять выезжающая машина проезжает
+      // слишком высоко за ворота, когда пропускает въезжающую, хотя по виду
+      // им места хватило бы, даже для двух грузовиков». Причина: при ЗАНЯТОЙ
+      // полосе целью прохода оставалась гарантийная точка F − 71
+      // (agent.exitPoint из trafficPointsFor), а адаптивная глубина №48
+      // (нос встречного + стендофф) применялась только ПОСЛЕ прохода —
+      // машина видимо перелезала выше нужного и спускалась обратно.
+      // Теперь глубина прохода ТАКЖЕ адаптивная: против легковой — F − 56,
+      // против грузовика — F − 71 (как раньше), у пустой линии — F − 6.
       if (agent.type === 'car' && agent.direction === 'exit') {
         const exitGate = simElements.value.find(g => String(g.id) === cfg.carGateId)
-        if (exitGate && !exitLaneBusy(aiAgents.value, agent, exitGate)) {
-          crossTarget = { x: crossTarget.x, y: exitWaitCenterY(exitGate, agent.element.height) }
+        if (exitGate) {
+          // [№48] нос САМОГО ВЫСОКОГО встречного, реально стоящего/претендующего
+          // на линию (корпус или цель в коридоре оси ворот)
+          const oppH = enterLaneOpponentHeight(aiAgents.value, agent, exitGate)
+          if (oppH > 0) {
+            // [№51] проезд ровно настолько, насколько нужно: низ корпуса —
+            // над носом встречной (exitPullPastFor), без захода на F−71 «с запасом»
+            // [№52-ГРУЗ-НЕ-ВЫШЕ-ДОРОГИ] у грузовика глубина — по ВИДИМОЙ
+            // геометрии спрайтов (колёса над крышей встречного), иначе он
+            // крышей вылезает за зону ворот
+            crossTarget = {
+              x: crossTarget.x,
+              y: exitGate.y + exitGate.height - agent.element.height / 2
+                - exitPullPastFor(oppH, isTruckAgent(agent), oppH >= truckMinH(), agent.element.height),
+            }
+          } else {
+            crossTarget = { x: crossTarget.x, y: exitWaitCenterY(exitGate, agent.element.height) }
+          }
         }
       }
       // [№30-БЕЗ-ДУГИ] проход человека — как в жизни, без кривых. Репорт
@@ -1408,7 +1435,8 @@ export function useSimulatorPhysics(
           if (agent.type === 'car' && agent.direction === 'exit' && gate?.settings) {
             const oppH0 = enterLaneOpponentHeight(aiAgents.value, agent, gate)
             if (oppH0 > 0 &&
-                el.y + el.height <= gate.y + gate.height - exitPullPastFor(oppH0) + 2) {
+                el.y + el.height <= gate.y + gate.height
+                  - exitPullPastFor(oppH0, isTruckAgent(agent), oppH0 >= truckMinH(), el.height) + 2) {
               const curCy0 = el.y + el.height / 2
               const origSide0: 'left' | 'right' = agent.afterTarget.x < el.x ? 'left' : 'right'
               const otherSide0: 'left' | 'right' = origSide0 === 'left' ? 'right' : 'left'
@@ -1440,8 +1468,8 @@ export function useSimulatorPhysics(
               agent.type === 'car' && agent.direction === 'exit' && gate) {
             const oppHq = enterLaneOpponentHeight(aiAgents.value, agent, gate)
             if (oppHq > 0) {
-              // [№51] полоса = min(F - 56, кромка дороги + корпус)
-              const spotQ = exitLaneBottomFor(gate.y + gate.height, el.height, roadBottomEdge) - el.height / 2
+              const spotQ = gate.y + gate.height - el.height / 2
+                - exitPullPastFor(oppHq, isTruckAgent(agent), oppHq >= truckMinH(), el.height)
               const curQ = el.y + el.height / 2
               const remainQ = spotQ - curQ
               if (remainQ > 2) {
@@ -1485,14 +1513,11 @@ export function useSimulatorPhysics(
               // exitPoint (маршрутный коридор F − 71) больше не точка
               // ожидания — ждём НА МИНИМАЛЬНО ДОСТАТОЧНОЙ высоте.
               const oppH = enterLaneOpponentHeight(aiAgents.value, agent, gate)
-              // [№51-КОМФОРТНЫЙ-РАЗЪЕЗД] посадка при встречной — на полосу
-              // min(F - 56, кромка дороги + корпус): машина больше не
-              // поднимается выше нарисованной дороги (репорт №51 «слишком
-              // высоко»). Встречный грузовик под ней больше не помещается —
-              // он держится до коридора (окно LANE_WINDOW), разъезд
-              // последовательный, как в жизни у тесных ворот.
+              // [№52-ГРУЗ-НЕ-ВЫШЕ-ДОРОГИ] глубина посадки грузовика — по видимой
+              // геометрии спрайтов (см. gateFlow.exitPullPastFor)
               const spotY = oppH > 0
-                ? exitLaneBottomFor(gate.y + gate.height, el.height, roadBottomEdge) - el.height / 2
+                ? gate.y + gate.height - el.height / 2
+                  - exitPullPastFor(oppH, isTruckAgent(agent), oppH >= truckMinH(), el.height)
                 : lineY
               const curCy = el.y + el.height / 2
               const remain = spotY - curCy
