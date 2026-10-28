@@ -147,6 +147,8 @@ import { useConfig } from '~/composables/useConfig'
 import { useJournal } from '~/composables/useJournal'
 import { useShift } from '~/composables/useShift'
 import { useSceneBuilder } from '~/composables/useSceneBuilder'
+// [№52-ДЕФОЛТНАЯ-СЦЕНА] сцена заказчика, зашитая в сборку
+import { DEFAULT_KPP_SCENE } from '~/utils/defaultSceneData'
 import { useDatabase } from '~/composables/useDatabase'
 import { useOnboarding } from '~/composables/useOnboarding'
 import type { SceneConfig } from '~/types/scene'
@@ -182,7 +184,12 @@ const simContainerRef = ref<HTMLElement | null>(null)
 const windowHeight = ref<number>(800)
 const handleWindowResize = () => { windowHeight.value = window.innerHeight }
 
-// Загрузка последней сохранённой сцены для док-панели симулятора
+// Загрузка последней сохранённой сцены для док-панели симулятора.
+// [№52-ДЕФОЛТНАЯ-СЦЕНА] цепочка источников: IndexedDB 'scenes' (сохранённые)
+// -> journal_kpp_last_scene (рабочая копия редактора) -> сцена заказчика,
+// зашитая в сборку. Раньше при пустом 'scenes' док показывал «Сцена не
+// загружена», хотя сцена была в localStorage (репорт: «можно ли сразу по
+// умолчанию загружать мою сцену?»).
 const loadLatestScene = async () => {
   try {
     const scenes = await listScenes()
@@ -192,10 +199,22 @@ const loadLatestScene = async () => {
       if (lastScene?.id) {
         const loadedConfig = await loadScene(lastScene.id)
         if (loadedConfig) sceneConfig.value = loadedConfig
+        return
       }
-    } else {
-      sceneConfig.value = null
     }
+    // рабочая копия редактора
+    try {
+      const raw = localStorage.getItem('journal_kpp_last_scene')
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        if (parsed && parsed.settings) {
+          sceneConfig.value = parsed
+          return
+        }
+      }
+    } catch { /* битый localStorage — падаем в дефолт */ }
+    // [№52] первый запуск — сразу сцена заказчика
+    sceneConfig.value = JSON.parse(JSON.stringify(DEFAULT_KPP_SCENE))
   } catch (e) {
     console.warn('[Layout] Failed to load last scene', e)
   }

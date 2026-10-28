@@ -289,7 +289,11 @@ const updateLoop = (time: number) => {
     for (let i = 0; i < sorted.length; i++) {
       const car = sorted[i]
       // [ИСПРАВЛЕНО] guard элемента массива
-      if (!car || !car.el) continue
+      // [№51-СТАБИЛЬНОСТЬ] isConnected: Vue успел отвязать узел (сп splice,
+      // ref-колбек ещё не обнулил car.el) — gsap-тикер не пишет в отцеплённый
+      // DOM: гонки «Vue unmount vs gsap tick» больше не доходят до краша
+      // patch (el.__vnode of null) в dev-консоли.
+      if (!car || !car.el || !car.el.isConnected) continue
 
       const leader = i > 0 ? sorted[i - 1] : null
       const distToLeader = leader ? Math.abs(leader.x - car.x) : Infinity

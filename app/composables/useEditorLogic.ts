@@ -7,6 +7,10 @@
 import { ref, computed, watch } from 'vue'
 import { useSceneBuilder } from './useSceneBuilder'
 import { useToast } from './useToast'
+// [№52-ДЕФОЛТНАЯ-СЦЕНА] сцена заказчика, зашитая в сборку: грузится, когда
+// journal_kpp_last_scene пуст (первый запуск). У существующих установок
+// сохранённая сцена имеет приоритет — дефолт их не затирает.
+import { DEFAULT_KPP_SCENE } from '~/utils/defaultSceneData'
 import type { SceneConfig, Panel, Script } from '../types/scene'
 import type { SceneElement } from '~/types/simulator'
 
@@ -135,6 +139,10 @@ export const useEditorLogic = () => {
         if (saved) {
           const parsed = JSON.parse(saved)
           if (parsed && parsed.settings) sceneConfig.value = normalizeScene(parsed)
+        } else {
+          // [№52] первый запуск — сразу сцена заказчика (ворота/калитка/
+          // дорога с трафиком/панели), а не пустой холст
+          sceneConfig.value = normalizeScene(JSON.parse(JSON.stringify(DEFAULT_KPP_SCENE)))
         }
         const lastScript = localStorage.getItem(STORAGE_KEY_SCRIPT)
         if (lastScript) selectedScriptId.value = lastScript
