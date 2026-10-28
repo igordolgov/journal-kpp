@@ -1,6 +1,8 @@
 <!-- app/components/editor/TrafficRoad.vue -->
 <template lang="pug">
-.traffic-road.relative.overflow-hidden.w-full.h-full(style="background-color: #4b5563;")
+.traffic-road.relative.overflow-hidden.w-full.h-full(
+  :style="{ backgroundColor: '#4b5563', minHeight: TRAFFIC_ROAD_MIN_H + 'px' }"
+)
   .absolute.inset-0.pointer-events-none(aria-hidden="true")
     .absolute.top-0.left-0.right-0.h-1.bg-white.opacity-10
     .absolute.bottom-0.left-0.right-0.h-1.bg-white.opacity-10
@@ -82,6 +84,16 @@ const TRUCK_H = Math.round(CAR_H * TRUCK_HEIGHT_SCALE)
 const TRUCK_SHARE = 0.1
 // край экрана с запасом под самый крупный транспорт (спавн/деспавн за кадром)
 const SPAWN_MARGIN = TRUCK_W
+
+// [№49-ШИРЕ-ДОРОГА] минимальная высота ПОЛОТНА фоновой дороги: две полосы по
+// 80px — грузовик 120x65 (те же размеры, что в симуляторе) помещается с
+// полем, «расширь фоновую дорогу» (репорт №48). Элемент в сцене может быть
+// ниже (старые сцены 120/132) — полотно дорисовывается до MIN (min-height
+// корня), грузовик больше не режется краем элемента.
+const TRAFFIC_ROAD_MIN_H = 160
+// [№49-ШИРЕ-ДОРОГА] подъём нижнего края полосы движения: колёса не скребут
+// нижнюю кромку асфальта (у грузовика зазор был всего 0.5px)
+const BOTTOM_LANE_LIFT = 4
 
 const MIN_GAP = 50
 const DETECTION_RADIUS = 300
@@ -187,8 +199,13 @@ const createCar = (lane: Lane, onScreen: boolean): Car | undefined => {
   const w = isTruck ? TRUCK_W : CAR_W
   const h = isTruck ? TRUCK_H : CAR_H
 
-  const laneH = props.height / 2
-  const y = lane === 'top' ? laneH / 2 - h / 2 : laneH + laneH / 2 - h / 2
+  // [№49-ШИРЕ-ДОРОГА] геометрия полос — от фактической высоты полотна:
+  // элемент ниже MIN дорисовывается (см. TRAFFIC_ROAD_MIN_H), выше — полосы
+  // масштабируются по половинам. Нижний край полосы приподнят на
+  // BOTTOM_LANE_LIFT (репорт №48 «приподними нижний край полосы»).  
+  const ROAD_H = Math.max(props.height || 0, TRAFFIC_ROAD_MIN_H)
+  const laneH = ROAD_H / 2
+  const y = lane === 'top' ? laneH / 2 - h / 2 : laneH + laneH / 2 - h / 2 - BOTTOM_LANE_LIFT
 
   let x: number
   if (lane === 'top') {
