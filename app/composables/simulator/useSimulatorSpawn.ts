@@ -17,7 +17,8 @@ import {
 // [СХЕМА-ТРАЕКТОРИЙ] единый вывод точек спавна/остановки/прохода/ухода из геометрии ворот
 import { trafficPointsFor, FOOT_PAD_PERSON, type TrafficPoints } from '~/utils/simulatorTraffic'
 // [№31-ГРУЗОВИКИ] getTruckSvg — отдельный спрайт грузового автомобиля
-import { getCarSvg, getTruckSvg, generateRealPersonSvg } from '~/utils/simulatorSvg'
+// [№41-РАКУРСЫ] *Front/*Rear — виды спереди/сзади для имитации 3D
+import { getCarSvg, getTruckSvg, getCarSvgFront, getCarSvgRear, getTruckSvgFront, getTruckSvgRear, generateRealPersonSvg } from '~/utils/simulatorSvg'
 // [П7] индивидуальный темп людей 0.85..1.15 (у группы — общий)
 import { randomPersonPace, initialSpawnDelay } from '~/utils/simTuning'
 import type { SceneElement, Direction, TravelMode, TrafficConfig, AiAgent, PersonInfo } from '~/types/simulator'
@@ -507,10 +508,22 @@ export function useSimulatorSpawn(
       // выход уезжает в выбранную сторону. Дальше флаг ведёт физика.
       settings: {
         _facingLeft: direction === 'enter' ? side === 'right' : side === 'left',
+        // [№41-РАКУРСЫ] начальный вид: въезжающая едет по дороге (боковой
+        // профиль), выезжающая сразу курсирует вверх экрана на зрителя —
+        // вид спереди; первый тик физики подтвердит/поправит флаг.
+        _view: direction === 'exit' ? 'front' : 'side',
         // [№31-ГРУЗОВИКИ] отладочная метка типа кузова
         _isTruck: isTruck,
       },
-      asset: { type: 'car', plate, color, svg: isTruck ? getTruckSvg(color) : getCarSvg(color) }
+      // [№41-РАКУРСЫ] все три ракурса генерируются сразу (цвет тот же):
+      // paint-мост переключает видимый контейнер по settings._view без
+      // ререндера и без пересоздания SVG в момент смены курса.
+      asset: {
+        type: 'car', plate, color,
+        svg: isTruck ? getTruckSvg(color) : getCarSvg(color),
+        svgFront: isTruck ? getTruckSvgFront(color) : getCarSvgFront(color),
+        svgRear: isTruck ? getTruckSvgRear(color) : getCarSvgRear(color),
+      }
     }
 
     simElements.value.push(carElement)

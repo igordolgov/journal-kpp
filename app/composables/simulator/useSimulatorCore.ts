@@ -239,8 +239,13 @@ export function useSimulatorCore(simElements: Ref<SceneElement[]>) {
     }
     if (moving) base.willChange = 'transform'
     if (el.category === 'car') {
-      const facingLeft = (el.settings as any)?._facingLeft ?? el.direction === 'enter'
-      base.transform = `${base.transform} scaleX(${facingLeft ? -1 : 1})`
+      // [№41-РАКУРСЫ] зеркало только у бокового профиля (семантика как в
+      // agentTransform из simulatorPaint): виды спереди/сзади симметричны.
+      const s = el.settings as any
+      if ((s?._view ?? 'side') === 'side') {
+        const facingLeft = s?._facingLeft ?? el.direction === 'enter'
+        base.transform = `${base.transform} scaleX(${facingLeft ? -1 : 1})`
+      }
       return base
     }
     return base

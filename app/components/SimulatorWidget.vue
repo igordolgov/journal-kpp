@@ -228,7 +228,12 @@
             //- неотличимо от входящих. Inline-стиль не зависит от CSS-скоупа.
             .person-svg-container(v-html="el.asset.svg || ' '")
           .w-full.h-full.relative(v-else-if="el.asset?.type === 'car'")
-            .car-svg-container(v-html="el.asset.svg || ' '")
+            //- [№41-РАКУРСЫ] три вида машины: бок профиль виден по умолчанию,
+            //- спереди/сзади скрыты CSS и включаются paint-мостом по settings._view
+            //- (мгновенно, без ререндера — как зеркало/пауза ног).
+            .car-svg-container.car-view-side(v-html="el.asset.svg || ' '")
+            .car-svg-container.car-view-front(v-if="el.asset.svgFront" v-html="el.asset.svgFront || ' '")
+            .car-svg-container.car-view-rear(v-if="el.asset.svgRear" v-html="el.asset.svgRear || ' '")
           .gate-wrapper.w-full.h-full(
             v-else-if="el.asset?.type === 'svg'"
             :data-gate-id="el.id"
@@ -948,15 +953,29 @@ const gearStyle = (el: any): Record<string, string | number> => {
 // запись стилей из gameLoop, минуя ререндер Vue. Шаблон регистрирует узлы (:ref),
 // Vue перерисовывает только структурные события (спавн/деспавн/клики/настройки).
 // ---------------------------------------------------------------------------
-const agentNodes = new Map<string, { node: HTMLElement | null; avatar: HTMLElement | null }>()
+const agentNodes = new Map<string, {
+  node: HTMLElement | null
+  avatar: HTMLElement | null
+  // [№41-РАКУРСЫ] контейнеры видов машины (null у людей)
+  carViews?: { side: HTMLElement | null; front: HTMLElement | null; rear: HTMLElement | null } | null
+}>()
 const labelNodes = new Map<string, HTMLElement | null>()
 const gateNodes = new Map<string, HTMLElement | null>()
 const lineNodes = new Map<string, SVGLineElement | null>()
 
 const setAgentNode = (el: any, n: any) => {
   const id = String(el.id)
-  const rec = agentNodes.get(id) ?? { node: null, avatar: null }
+  const rec = agentNodes.get(id) ?? { node: null, avatar: null, carViews: null }
   rec.node = (n as HTMLElement) || null
+  // [№41-РАКУРСЫ] контейнеры видов машины для paint-моста:
+  // ищем ОДИН раз на монтировании, а не в покадровом цикле.
+  rec.carViews = el.asset?.type === 'car' && n
+    ? {
+        side: (n.querySelector('.car-view-side') as HTMLElement | null),
+        front: (n.querySelector('.car-view-front') as HTMLElement | null),
+        rear: (n.querySelector('.car-view-rear') as HTMLElement | null),
+      }
+    : null
   agentNodes.set(id, rec)
 }
 const setAvatarNode = (el: any, n: any) => {
@@ -1294,6 +1313,13 @@ onUnmounted(() => {
   display: block;
   width: 100%;
   height: auto;
+}
+
+/* [№41-РАКУРСЫ] вертикальные ракурсы машины скрыты до первого paint:
+   paint-мост пишет display block/none напрямую по settings._view. */
+.car-view-front,
+.car-view-rear {
+  display: none;
 }
 
 .person-avatar.is-paused :deep(.anim-arm-l),

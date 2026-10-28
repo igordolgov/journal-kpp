@@ -37,6 +37,75 @@ export const getTruckSvg = (color: string): string => `
   </svg>
 `
 
+// [№41-РАКУРСЫ] Вид спереди (машина едет НА зрителя — выезд из базы вверх
+// экрана). Тот же viewBox 120x60, кузов сужен (след реальной ширины авто),
+// центрирован: контейнер и размер элемента не меняются — paint-мост только
+// переключает видимые контейнеры.
+export const getCarSvgFront = (color: string): string => `
+  <svg viewBox="0 0 120 60" xmlns="http://www.w3.org/2000/svg">
+    <rect x="37" y="50" width="11" height="9" rx="2" fill="#1f2937"/>
+    <rect x="72" y="50" width="11" height="9" rx="2" fill="#1f2937"/>
+    <rect x="38" y="4" width="44" height="9" rx="3" fill="${color}"/>
+    <rect x="39" y="12" width="42" height="12" rx="2" fill="#87CEEB" stroke="${color}" stroke-width="1.5"/>
+    <rect x="35" y="24" width="50" height="26" rx="5" fill="${color}"/>
+    <rect x="35" y="26" width="50" height="4" rx="2" fill="#ffffff" opacity="0.18"/>
+    <rect x="38" y="33" width="9" height="5" rx="1.5" fill="#fbbf24"/>
+    <rect x="73" y="33" width="9" height="5" rx="1.5" fill="#fbbf24"/>
+    <rect x="35" y="44" width="50" height="7" rx="2" fill="#374151"/>
+    <rect x="53" y="45" width="14" height="5" rx="1" fill="#e5e7eb"/>
+  </svg>
+`
+
+// [№41-РАКУРСЫ] Вид сзади (машина уходит ОТ зрителя — въезд за территорию
+// вниз экрана). Стоп-сигналы красные, багажник, номерной знак.
+export const getCarSvgRear = (color: string): string => `
+  <svg viewBox="0 0 120 60" xmlns="http://www.w3.org/2000/svg">
+    <rect x="37" y="50" width="11" height="9" rx="2" fill="#1f2937"/>
+    <rect x="72" y="50" width="11" height="9" rx="2" fill="#1f2937"/>
+    <rect x="38" y="4" width="44" height="9" rx="3" fill="${color}"/>
+    <rect x="40" y="12" width="40" height="10" rx="2" fill="#87CEEB" opacity="0.8"/>
+    <rect x="35" y="22" width="50" height="28" rx="5" fill="${color}"/>
+    <rect x="35" y="24" width="50" height="3" rx="1.5" fill="#ffffff" opacity="0.14"/>
+    <rect x="38" y="31" width="9" height="5" rx="1.5" fill="#ef4444"/>
+    <rect x="73" y="31" width="9" height="5" rx="1.5" fill="#ef4444"/>
+    <rect x="35" y="44" width="50" height="7" rx="2" fill="#374151"/>
+    <rect x="53" y="45" width="14" height="5" rx="1" fill="#e5e7eb"/>
+  </svg>
+`
+
+// [№41-РАКУРСЫ] Грузовик спереди: кабина с лобовым стеклом и фарами,
+// над ней — торец цветного кузова. viewBox 120x65 — как у бокового.
+export const getTruckSvgFront = (color: string): string => `
+  <svg viewBox="0 0 120 65" xmlns="http://www.w3.org/2000/svg">
+    <rect x="36" y="54" width="12" height="9" rx="2" fill="#1f2937"/>
+    <rect x="72" y="54" width="12" height="9" rx="2" fill="#1f2937"/>
+    <rect x="35" y="3" width="50" height="27" rx="2" fill="${color}" stroke="#111827" stroke-width="1.5"/>
+    <rect x="35" y="3" width="50" height="6" rx="2" fill="#ffffff" opacity="0.18"/>
+    <rect x="59" y="7" width="2" height="21" fill="#ffffff" opacity="0.12"/>
+    <rect x="33" y="28" width="54" height="24" rx="3" fill="#374151" stroke="#111827" stroke-width="1.5"/>
+    <rect x="36" y="31" width="48" height="10" rx="2" fill="#87CEEB"/>
+    <rect x="35" y="44" width="8" height="5" rx="1.5" fill="#fbbf24"/>
+    <rect x="77" y="44" width="8" height="5" rx="1.5" fill="#fbbf24"/>
+    <rect x="33" y="50" width="54" height="5" rx="2" fill="#1f2937"/>
+  </svg>
+`
+
+// [№41-РАКУРСЫ] Грузовик сзади: торец кузова со швом грузовых дверей,
+// красные габариты, бампер.
+export const getTruckSvgRear = (color: string): string => `
+  <svg viewBox="0 0 120 65" xmlns="http://www.w3.org/2000/svg">
+    <rect x="36" y="54" width="12" height="9" rx="2" fill="#1f2937"/>
+    <rect x="72" y="54" width="12" height="9" rx="2" fill="#1f2937"/>
+    <rect x="35" y="3" width="50" height="48" rx="2" fill="${color}" stroke="#111827" stroke-width="1.5"/>
+    <rect x="59" y="3" width="2" height="48" fill="#ffffff" opacity="0.25"/>
+    <rect x="37" y="20" width="46" height="2" fill="#ffffff" opacity="0.15"/>
+    <rect x="37" y="34" width="46" height="2" fill="#ffffff" opacity="0.15"/>
+    <rect x="36" y="40" width="8" height="6" rx="1.5" fill="#ef4444"/>
+    <rect x="76" y="40" width="8" height="6" rx="1.5" fill="#ef4444"/>
+    <rect x="33" y="51" width="54" height="6" rx="2" fill="#4b5563"/>
+  </svg>
+`
+
 export const getRandomCarColor = (): string => {
   // [ИСПРАВЛЕНО] noUncheckedIndexedAccess: fallback на случай пустого справочника
   return CAR_COLORS[Math.floor(Math.random() * CAR_COLORS.length)] ?? '#808080'

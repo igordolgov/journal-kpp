@@ -41,16 +41,28 @@ export const paintCoord = (el: RawEl, axis: 'x' | 'y', alpha: number): number =>
 export const isAgentPaused = (el: RawEl): boolean =>
   el.isPaused ?? ((el.velocity || 0) < 0.1)
 
+// Ракурс машины (№41-РАКУРСЫ): 'side' — профиль по умолчанию; физика ставит
+// 'front' (вертикальный курс вверх — едет на зрителя) или 'rear' (вниз —
+// от зрителя). Старые ассеты без флага читаются как 'side' — поведение прежнее.
+export type CarView = 'side' | 'front' | 'rear'
+export const carViewOf = (el: RawEl): CarView => {
+  const v = el.settings?._view
+  return v === 'front' || v === 'rear' ? v : 'side'
+}
+
 // transform агента: семантика идентична getElementStyle в useSimulatorCore
 // (translate3d + зеркало машины по _facingLeft/направлению).
 // [№31-БЕЗ-ПОВОРОТА] кнопка «Поворот спрайтов» удалена: агенты никогда не
 // вращаются по курсу (el.rotation остаётся только внутренней математикой
 // расхождения в физике — на отображение она не влияет).
+// [№41-РАКУРСЫ] зеркало ТОЛЬКО у бокового профиля: виды спереди/сзади
+// симметричны, и отражённый номер/фары выглядели бы ошибкой.
 // [№15] alpha — доля физического шага для интерполяции (см. paintCoord);
 // по умолчанию 1 (текущая позиция) — прежние вызовы/тесты не меняются.
 export const agentTransform = (el: RawEl, alpha = 1): string => {
   const t = `translate3d(${paintCoord(el, 'x', alpha)}px, ${paintCoord(el, 'y', alpha)}px, 0)`
   if (el.category === 'car') {
+    if (carViewOf(el) !== 'side') return t
     const facingLeft = el.settings?._facingLeft ?? el.direction === 'enter'
     return `${t} scaleX(${facingLeft ? -1 : 1})`
   }
@@ -70,6 +82,9 @@ export const gateTransform = (s: RawEl | undefined | null): string =>
 export interface AgentPaintTargets {
   node: HTMLElement | null
   avatar: HTMLElement | null
+  // [№41-РАКУРСЫ] три контейнера ракурсов машины (null у людей/старых машин):
+  // paint переключает их display по settings._view — без ререндера Vue.
+  carViews?: { side: HTMLElement | null; front: HTMLElement | null; rear: HTMLElement | null } | null
 }
 
 // [№16-МЕНЬШЕ-ЗАПИСЕЙ] Кэш последних записанных значений на DOM-узел.
@@ -118,6 +133,21 @@ export const paintAgent = (t: AgentPaintTargets, el: RawEl, alpha = 1): void => 
     // бейзлайна): собственные слои на ПОЛНОМ экране агентов дороже, чем
     // перерисовка (в софт-растеризаторе и при дробном масштабе). Возвращено
     // к прямому рендеру в слой сцены.
+  }
+  // [№41-РАКУРСЫ] мгновенная смена вида машины: видим только контейнер
+  // активного ракурса (display block/none, записи через кэш writeOnce —
+  // стоящая машина не генерирует записей). CSS по умолчанию прячет
+  // front/rear, поэтому до первого paint виден боковой профиль.
+  if (t.carViews) {
+    const view = carViewOf(el)
+    const views: Array<['side' | 'front' | 'rear', HTMLElement | null]> = [
+      ['side', t.carViews.side],
+      ['front', t.carViews.front],
+      ['rear', t.carViews.rear],
+    ]
+    for (const [key, node] of views) {
+      if (node) writeOnce(node, node, 'display', view === key ? 'block' : 'none')
+    }
   }
   if (t.avatar) {
     const paused = isAgentPaused(el)
