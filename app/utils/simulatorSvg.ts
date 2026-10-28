@@ -57,39 +57,41 @@ export const getTruckSvg = (color: string): string => `
 
 // [№41-РАКУРСЫ] Вид спереди (машина едет НА зрителя — выезд из базы вверх
 // экрана). [№42-ПРОПОРЦИИ] отметки высот = канон профиля (крыша y19, грунт
-// y58); ширина кузова 48 — след реальной ширины авто; добавлены зеркала
-// и решётка радиатора.
+// y58). [№43-ФАС] ширина по жизни: кузов 38 (1.8 м при масштабе профиля
+// 21 ед/м), бампер 42, зеркала выступают; крыша — купол (скруглённые плечи
+// r≈5 + дуга), стекло повторяет купол.
 export const getCarSvgFront = (color: string): string => `
   <svg viewBox="0 0 120 60" xmlns="http://www.w3.org/2000/svg">
-    <rect x="39" y="50" width="10" height="8" rx="2" fill="#1f2937"/>
-    <rect x="71" y="50" width="10" height="8" rx="2" fill="#1f2937"/>
-    <rect x="36" y="33" width="48" height="15" rx="4" fill="${color}"/>
-    <rect x="40" y="19" width="40" height="7" rx="2.5" fill="${color}"/>
-    <rect x="39" y="25" width="42" height="8" rx="2" fill="#87CEEB" stroke="${color}" stroke-width="1"/>
-    <rect x="31" y="27" width="5" height="3.5" rx="1" fill="${color}"/>
-    <rect x="84" y="27" width="5" height="3.5" rx="1" fill="${color}"/>
-    <rect x="50" y="37" width="20" height="5" rx="1.5" fill="rgba(0,0,0,0.28)"/>
-    <rect x="39" y="37" width="9" height="5" rx="1.5" fill="#fbbf24"/>
-    <rect x="72" y="37" width="9" height="5" rx="1.5" fill="#fbbf24"/>
-    <rect x="34" y="46" width="52" height="6" rx="2" fill="#374151"/>
-    <rect x="51" y="46.5" width="18" height="5" rx="1" fill="#e5e7eb"/>
+    <rect x="43" y="50" width="8" height="8" rx="2" fill="#1f2937"/>
+    <rect x="69" y="50" width="8" height="8" rx="2" fill="#1f2937"/>
+    <rect x="41" y="33" width="38" height="15" rx="3.5" fill="${color}"/>
+    <path d="M41.5,33 L41.5,24 Q41.5,18.8 46.5,18.6 Q60,17.2 73.5,18.6 Q78.5,18.8 78.5,24 L78.5,33 Z" fill="${color}"/>
+    <path d="M43.5,32.5 L43.5,25.5 Q43.5,22.5 47,22.3 Q60,21.3 73,22.3 Q76.5,22.5 76.5,25.5 L76.5,32.5 Z" fill="#87CEEB"/>
+    <rect x="36.5" y="27" width="5" height="3.5" rx="1" fill="${color}"/>
+    <rect x="78.5" y="27" width="5" height="3.5" rx="1" fill="${color}"/>
+    <rect x="42.5" y="37" width="7.5" height="5" rx="1.5" fill="#fbbf24"/>
+    <rect x="70" y="37" width="7.5" height="5" rx="1.5" fill="#fbbf24"/>
+    <rect x="52" y="37" width="16" height="5" rx="1.5" fill="rgba(0,0,0,0.28)"/>
+    <rect x="39" y="46" width="42" height="6" rx="2" fill="#374151"/>
+    <rect x="52" y="46.5" width="16" height="5" rx="1" fill="#e5e7eb"/>
   </svg>
 `
 
 // [№41-РАКУРСЫ] Вид сзади (машина уходит ОТ зрителя — въезд за территорию
-// вниз экрана). [№42-ПРОПОРЦИИ] геометрия корпуса идентична виду спереди,
-// отличия только в деталях: тонированное заднее стекло, красные стоп-сигналы.
+// вниз экрана). [№42-ПРОПОРЦИИ] геометрия корпуса идентична виду спереди.
+// [№43-ФАС] тот же суженный корпус (кузов 38) и купольная крыша; отличия
+// только в деталях: тонированное заднее стекло, красные стоп-сигналы.
 export const getCarSvgRear = (color: string): string => `
   <svg viewBox="0 0 120 60" xmlns="http://www.w3.org/2000/svg">
-    <rect x="39" y="50" width="10" height="8" rx="2" fill="#1f2937"/>
-    <rect x="71" y="50" width="10" height="8" rx="2" fill="#1f2937"/>
-    <rect x="36" y="33" width="48" height="15" rx="4" fill="${color}"/>
-    <rect x="40" y="19" width="40" height="7" rx="2.5" fill="${color}"/>
-    <rect x="39" y="25" width="42" height="8" rx="2" fill="#87CEEB" opacity="0.75"/>
-    <rect x="39" y="36" width="9" height="5" rx="1.5" fill="#ef4444"/>
-    <rect x="72" y="36" width="9" height="5" rx="1.5" fill="#ef4444"/>
-    <rect x="34" y="46" width="52" height="6" rx="2" fill="#374151"/>
-    <rect x="51" y="46.5" width="18" height="5" rx="1" fill="#e5e7eb"/>
+    <rect x="43" y="50" width="8" height="8" rx="2" fill="#1f2937"/>
+    <rect x="69" y="50" width="8" height="8" rx="2" fill="#1f2937"/>
+    <rect x="41" y="33" width="38" height="15" rx="3.5" fill="${color}"/>
+    <path d="M41.5,33 L41.5,24 Q41.5,18.8 46.5,18.6 Q60,17.2 73.5,18.6 Q78.5,18.8 78.5,24 L78.5,33 Z" fill="${color}"/>
+    <path d="M43.5,32.5 L43.5,25.5 Q43.5,22.5 47,22.3 Q60,21.3 73,22.3 Q76.5,22.5 76.5,25.5 L76.5,32.5 Z" fill="#87CEEB" opacity="0.75"/>
+    <rect x="42.5" y="36" width="7.5" height="5" rx="1.5" fill="#ef4444"/>
+    <rect x="70" y="36" width="7.5" height="5" rx="1.5" fill="#ef4444"/>
+    <rect x="39" y="46" width="42" height="6" rx="2" fill="#374151"/>
+    <rect x="52" y="46.5" width="16" height="5" rx="1" fill="#e5e7eb"/>
   </svg>
 `
 
