@@ -336,7 +336,9 @@ export const LIBRARY_GROUPS: Array<{
         type: 'traffic_road',
         category: 'infrastructure',
         width: 400,
-        height: 120,
+        // [№46-КРУПНЕЕ] 120 -> 132: полосы по 66px — грузовик 120x65
+        // (те же размеры, что в основном симуляторе) помещается в полосу.
+        height: 132,
         preview: `<svg viewBox="0 0 100 30" xmlns="http://www.w3.org/2000/svg">
                     <rect width="100" height="30" fill="#4b5563"/>
                     <line x1="0" y1="15" x2="100" y2="15" stroke="#fbbf24" stroke-width="1" stroke-dasharray="8,6"/>

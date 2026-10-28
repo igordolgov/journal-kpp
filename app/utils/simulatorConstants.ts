@@ -13,7 +13,10 @@ export const DESPAWN_MARGIN = 200
 export const USE_MANUAL_COORDS = true
 export const MANUAL_Y_PERSON = 170
 export const MANUAL_X_PERSON = 795
-export const MANUAL_Y_CAR = 180
+// [№46-КРУПНЕЕ] 180 -> 175: fixedYCar — ЦЕНТР машины; визуальный низ
+// (бампер) должен остаться на прежней линии дороги F = 200
+// (180 + 40/2 = 200 -> 175 + 50/2 = 200).
+export const MANUAL_Y_CAR = 175
 export const MANUAL_X_CAR = 635
 export const MANUAL_PERSON_GATE_ID = 'el_ge71x68vo'
 export const MANUAL_CAR_GATE_ID = 'el_qcm3kodjy'
@@ -24,8 +27,14 @@ export const GATES_LIST = ['gate', 'barrier']
 // Значения по умолчанию для размеров (используются, если не переданы в simOpts)
 export const PERSON_WIDTH = 40
 export const PERSON_HEIGHT = 55
-export const CAR_WIDTH = 80
-export const CAR_HEIGHT = 40
+// [№46-КРУПНЕЕ] машины увеличены на 25% (80x40 -> 100x50), пропорция
+// профиля 2:1 сохранена. Верхняя граница — инвариант разъезда: полоса
+// выезда CAR_EXIT_PULL_PAST = высота ГРУЗОВИКА + зазор 6px (см.
+// simulatorTraffic.ts), при 100x50 грузовик 120x65 помещается на двух
+// полосах без наложений. Фоновая дорога (TrafficRoad) берёт те же
+// константы — машины на ней тех же размеров, что и в основном симуляторе.
+export const CAR_WIDTH = 100
+export const CAR_HEIGHT = 50
 
 // Палитра цветов для машин (только если цвет не задан в БД)
 export const CAR_COLORS = [
@@ -87,8 +96,9 @@ export const stableVehicleColor = (plate: unknown): string => {
 }
 
 // [№31-ГРУЗОВИКИ] грузовые автомобили крупнее легковых (тип 'Грузовой' в БД)
-export const TRUCK_WIDTH_SCALE = 1.2   // 80 -> 96px
-export const TRUCK_HEIGHT_SCALE = 1.3  // 40 -> 52px
+// [№46-КРУПНЕЕ] от 100x50 -> 120x65 (те же коэффициенты)
+export const TRUCK_WIDTH_SCALE = 1.2   // 100 -> 120px
+export const TRUCK_HEIGHT_SCALE = 1.3  // 50 -> 65px
 
 // [№33-ДЕТИ] дети видны глазами: спрайт ребёнка (ageGroup 'child' в БД)
 // рисуется 72% взрослого роста. Раньше ageGroup влиял только на пару черт

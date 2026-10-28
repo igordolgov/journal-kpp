@@ -70,13 +70,13 @@ describe('№31: цвета машин из БД', () => {
 })
 
 describe('№31: грузовики', () => {
-  it('масштабы дают грузовик крупнее легковой (80x40)', () => {
-    const w = Math.round(80 * TRUCK_WIDTH_SCALE)
-    const h = Math.round(40 * TRUCK_HEIGHT_SCALE)
-    expect(w).toBeGreaterThan(80)
-    expect(h).toBeGreaterThan(40)
-    expect(w).toBe(96)
-    expect(h).toBe(52)
+  it('масштабы дают грузовик крупнее легковой ([№46] 100x50)', () => {
+    const w = Math.round(100 * TRUCK_WIDTH_SCALE)
+    const h = Math.round(50 * TRUCK_HEIGHT_SCALE)
+    expect(w).toBeGreaterThan(100)
+    expect(h).toBeGreaterThan(50)
+    expect(w).toBe(120)
+    expect(h).toBe(65)
   })
 
   it('getTruckSvg: viewBox и подстановка цвета; доля и марки объявлены', () => {

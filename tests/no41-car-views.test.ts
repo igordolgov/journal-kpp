@@ -1,8 +1,12 @@
 // tests/no41-car-views.test.ts
 // [№41-РАКУРСЫ] имитация 3D: машина меняет вид по курсу — горизонтальный
-// курс = боковой профиль (с зеркалом), вертикальный вверх (на зрителя) =
-// вид спереди, вертикальный вниз (от зрителя) = вид сзади. Смена мгновенная,
-// без поворота (№31-БЕЗ-ПОВОРОТА): paint-мост переключает display контейнеров.
+// курс = боковой профиль (с зеркалом), вертикальный курс — мгновенная смена
+// вида. Смена мгновенная, без поворота (№31-БЕЗ-ПОВОРОТА): paint-мост
+// переключает display контейнеров.
+// [№46-ФИКС-РАКУРСОВ] сцена смотрится с улицы (улица сверху, база внизу):
+// движение ВНИЗ экрана — НА зрителя (въезд вглубь базы) = вид СПЕРЕДИ,
+// движение ВВЕРХ — ОТ зрителя (выезд на дорогу) = вид СЗАДИ. До №46 виды
+// были перепутаны местами.
 
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { ref } from 'vue'
@@ -35,7 +39,7 @@ const buildPhysics = () => {
 const mkCar = (id: string, cx: number, cy: number, speed: number, direction = 'enter') => ({
   id,
   element: {
-    id, x: cx - 40, y: cy - 20, width: 80, height: 40,
+    id, x: cx - 50, y: cy - 25, width: 100, height: 50,
     rotation: 0, velocity: 0, category: 'car', type: 'actor', direction,
     settings: { _facingLeft: true, _view: 'side' },
   },
@@ -87,7 +91,7 @@ describe('[№41-РАКУРСЫ] SVG-варианты машин', () => {
 describe('[№41-РАКУРСЫ] физика: смена вида по курсу', () => {
   afterEach(() => vi.restoreAllMocks())
 
-  it('въезд: горизонтальный курс — side, после поворота вниз — rear', () => {
+  it('въезд: горизонтальный курс — side, после поворота вниз — front (на зрителя)', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     const h = buildPhysics()
     // машина уже у точки поворота (ворота): подъезд почти завершён
@@ -96,25 +100,27 @@ describe('[№41-РАКУРСЫ] физика: смена вида по курс
     h.aiAgents.value = [car]
     tickN(h, 3)
     expect((car.element.settings as any)._view).toBe('side')
-    // поворот: цель строго вниз (проезд через ворота за территорию) —
-    // как в жизни: у самых ворот вертикаль начинает доминировать
+    // поворот: цель строго вниз (проезд через ворота вглубь базы) —
+    // как в жизни: у самых ворот вертикаль начинает доминировать.
+    // [№46] вниз = НА зрителя = вид спереди (был перепутан на «сзади»)
     car.target = { x: 620, y: 520, width: 0, height: 0 }
     tickN(h, 2)
-    expect((car.element.settings as any)._view).toBe('rear')
+    expect((car.element.settings as any)._view).toBe('front')
     // профильный курс не потерян: снова горизонталь — снова side
     car.target = { x: 900, y: 520, width: 0, height: 0 }
     tickN(h, 2)
     expect((car.element.settings as any)._view).toBe('side')
   })
 
-  it('выезд: вертикальный курс вверх — front, после поворота вбок — side', () => {
+  it('выезд: вертикальный курс вверх — rear (от зрителя), после поворота вбок — side', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     const h = buildPhysics()
     const car = mkCar('car-x', 620, 560, 80, 'exit') as any
     car.target = { x: 620, y: 340, width: 0, height: 0 }
     h.aiAgents.value = [car]
     tickN(h, 3)
-    expect((car.element.settings as any)._view).toBe('front')
+    // [№46] вверх = ОТ зрителя = вид сзади (был перепутан на «спереди»)
+    expect((car.element.settings as any)._view).toBe('rear')
     car.target = { x: 940, y: 340, width: 0, height: 0 }
     tickN(h, 2)
     expect((car.element.settings as any)._view).toBe('side')
@@ -132,7 +138,7 @@ describe('[№41-РАКУРСЫ] физика: смена вида по курс
     tickN(h, 2)
     // вертикальный участок НЕ перезаписывает горизонтальную ориентацию
     expect((car.element.settings as any)._facingLeft).toBe(true)
-    expect((car.element.settings as any)._view).toBe('rear')
+    expect((car.element.settings as any)._view).toBe('front')
   })
 })
 

@@ -24,7 +24,10 @@ import { useAudioEngine } from '~/composables/useAudioEngine'
 // основного симулятора (simulatorSvg): легковой профиль и грузовик с будкой,
 // те же пропорции и палитра. Локальный упрощённый генератор удалён.
 import { getCarSvg, getTruckSvg } from '~/utils/simulatorSvg'
-import { CAR_COLORS, TRUCK_WIDTH_SCALE, TRUCK_HEIGHT_SCALE } from '~/utils/simulatorConstants'
+// [№46-КРУПНЕЕ] размеры машин фоновой дороги = ТЕ ЖЕ константы, что в
+// основном симуляторе (CAR_WIDTH/CAR_HEIGHT): 100x50, грузовик 120x65 —
+// «такие же по размеру на фоновой дороге» (репорт №46).
+import { CAR_COLORS, CAR_WIDTH, CAR_HEIGHT, TRUCK_WIDTH_SCALE, TRUCK_HEIGHT_SCALE } from '~/utils/simulatorConstants'
 
 const audio = useAudioEngine()
 
@@ -67,12 +70,12 @@ type Lane = 'top' | 'bottom'
 // Константы
 // ---------------------------------------------------------------------------
 
-const CAR_W = 80
-const CAR_H = 40
+const CAR_W = CAR_WIDTH
+const CAR_H = CAR_HEIGHT
 
 // [№44-ФОНОВЫЙ-ТРАФИК] грузовик крупнее легковой ровно как в основном
-// симуляторе: TRUCK_WIDTH_SCALE/TRUCK_HEIGHT_SCALE от 80x40 -> 96x52
-// (viewBox 120x65 спрайта совпадает по пропорции с 96x52).
+// симуляторе: TRUCK_WIDTH_SCALE/TRUCK_HEIGHT_SCALE.
+// [№46-КРУПНЕЕ] 100x50 -> 120x65 (viewBox грузовика тоже 120x65).
 const TRUCK_W = Math.round(CAR_W * TRUCK_WIDTH_SCALE)
 const TRUCK_H = Math.round(CAR_H * TRUCK_HEIGHT_SCALE)
 // доля грузовиков в потоке — как у машин в БД (TRUCK_TYPE_SHARE = 0.1)
@@ -93,7 +96,7 @@ const EMIT_INTERVAL = 0.25
 // Стиль машины
 // ---------------------------------------------------------------------------
 
-// [№44-ФОНОВЫЙ-ТРАФИК] размер — по машине: у грузовика свой w/h (96x52)
+// [№44-ФОНОВЫЙ-ТРАФИК] размер — по машине: у грузовика свой w/h (120x65)
 const carStyle = (car: Car): Record<string, string> => ({
   width: car.w + 'px',
   height: car.h + 'px',

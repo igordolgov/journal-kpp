@@ -7,6 +7,8 @@ import { useState, computed } from '#imports'
 import { useDatabase } from './useDatabase'
 // [№27-НАСТРОЙКИ-ЛЮДЕЙ] дефолты реестра движения/логики людей
 import { defaultPersonTuning } from '../utils/personTuning'
+// [№46-КРУПНЕЕ] дефолты размеров машин — из единого источника
+import { CAR_WIDTH, CAR_HEIGHT } from '../utils/simulatorConstants'
 
 // --- Интерфейсы ---
 
@@ -199,8 +201,9 @@ const defaultConfig: IConfig = {
     personHeight: 55,
     locationWeightInside: 2.0,
     carSpeed: 100,
-    carWidth: 80,
-    carHeight: 40,
+    // [№46-КРУПНЕЕ] 80x40 -> 100x50 (константы симулятора — единый источник)
+    carWidth: CAR_WIDTH,
+    carHeight: CAR_HEIGHT,
     gateCloseDelay: 10,
     wicketCloseDelay: 0,
     autoOpenGates: false,
